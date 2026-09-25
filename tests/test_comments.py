@@ -33,6 +33,38 @@ def test_nested_brackets_in_the_note():
     assert folded[2] != "[" and comments.get(folded[2]).text == "see [1] and [2]"
 
 
+def test_comments_without_text_are_left_out():
+    comments = Comments()
+    empty = '[]{.comment-start id="4" author="A" date="2026-09-23T10:00:00Z"}'
+    blank = '[  ]{.comment-start id="5" author="B"}'
+    folded = fold_comments(f"One{empty} two{blank} three{NOTE}.", comments)
+    assert len(comments) == 1  # only the comment with text
+    assert PLACEHOLDER.sub("", folded) == "One two three."
+    # kept on request: a marker each, "(no text)" where the text would be
+    comments = Comments()
+    folded = fold_comments(f"One{empty} two{blank} three{NOTE}.", comments, keep_empty=True)
+    assert len(comments) == 3  # the two empty ones (by A and by B) and the note
+    html = str(show_comments(folded, comments))
+    assert 'aria-label="comment by A, 2026-09-23 10:00: (no text)"' in html
+
+
+def test_empty_comments_switch(builder, tmp_path, capsys):
+    from sidediff.cli import main
+
+    empty = '[]{.comment-start id="4" author="Anna" date="2026-09-23T10:00:00Z"}'
+    builder.write("p.md", "Text.\n")
+    base = builder.commit("first")
+    builder.write("p.md", f"Text.{empty}\n")
+    target = builder.commit("second")
+    assert compare(builder.path, base, target).comments == []
+    c = compare(builder.path, base, target, empty_comments=True)
+    assert [(e.author, e.text, e.status) for e in c.comments] == [("Anna", "", "new")]
+    assert ">(no text)</a>" in render(c)
+    out = tmp_path / "r.html"
+    assert main([str(builder.path), base, target, "--empty-comments", "-o", str(out)]) == 0
+    assert ">(no text)</a>" in out.read_text(encoding="utf-8")
+
+
 def test_other_spans_and_links_untouched():
     text = "[link](http://x) and [word]{.smallcaps} and \\[not\\]{.comment-start}"
     assert fold_comments(text, Comments()) == text

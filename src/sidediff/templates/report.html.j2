@@ -237,7 +237,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   {% macro comment_list(items) %}
   <ul>
   {% for e in items %}
-    <li><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}">{{ e.text }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
+    <li><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
   {% endfor %}
   </ul>
   {% endmacro %}

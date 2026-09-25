@@ -72,6 +72,7 @@ sidediff --files OLD NEW [options]
 | `--max-hidden N`           | unchanged lines embedded per gap for the page to reveal (default 500); longer gaps are left out, to keep the page light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
 | `--no-fold-comments`       | compare the comment markup of Markdown and Word documents as text; by default each comment is shown as a 💬 marker (🆕 when added since the base), with the author, the comment and its date on hover, and listed in a panel |
+| `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
 | `--docx-changes accept\|reject\|all` | the tracked changes of Word documents: accept them (default), reject them, or show them as markup |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
 | `--by-sentence`            | compare the prose of Markdown files and Word documents sentence by sentence instead of paragraph by paragraph: a sentence moved between paragraphs is recognised, and each sentence is labelled with its line and its place in it (`12.3`) |

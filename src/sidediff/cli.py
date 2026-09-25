@@ -123,6 +123,11 @@ def main(argv: list[str] | None = None) -> int:
         "(default: on; --no-fold-comments compares the comment markup as text)",
     )
     ap.add_argument(
+        "--empty-comments",
+        action="store_true",
+        help="show the comments that have no text too (left out by default)",
+    )
+    ap.add_argument(
         "--docx-changes",
         choices=DOCX_CHANGES,
         default="accept",
@@ -177,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         md_filter=args.md_filter,
         ignore_whitespace=args.ignore_whitespace,
         fold_comments_md=args.fold_comments,
+        empty_comments=args.empty_comments,
         max_hidden=args.max_hidden,
         docx_changes=args.docx_changes,
         move_similarity=args.move_similarity,

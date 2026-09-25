@@ -885,6 +885,7 @@ def build_files(
     md_filter: str | None,
     ignore_whitespace: bool,
     fold: bool,
+    empty_comments: bool = False,
     max_hidden: int | None,
     docx_changes: str,
     move_similarity: float = MOVE_SIMILARITY,
@@ -930,8 +931,8 @@ def build_files(
         new_text = new_bytes.decode("utf-8", errors="replace")
         # Folded before filtering, so a filter cannot cut a comment in two.
         if fold and fd.markdown:
-            old_text = fold_comments(old_text, comments)
-            new_text = fold_comments(new_text, comments)
+            old_text = fold_comments(old_text, comments, empty_comments)
+            new_text = fold_comments(new_text, comments, empty_comments)
         if md_filter and fd.markdown:
             if old_text:
                 old_text = run_filter(md_filter, old_text, fd.path)
@@ -1053,6 +1054,7 @@ def compare(
     untracked: bool = False,
     ignore_whitespace: bool = False,
     fold_comments_md: bool = True,
+    empty_comments: bool = False,
     max_hidden: int | None = MAX_HIDDEN,
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
@@ -1072,7 +1074,8 @@ def compare(
     fold_comments_md (on by default) shows each pandoc comment span of a
     Markdown file, [note]{.comment-start ...}, as a marker whose tooltip is
     the comment, and lists the comments in a panel; off, the comment markup
-    is compared as text. max_hidden caps the unchanged lines
+    is compared as text. Comments without text are left out, unless
+    empty_comments. max_hidden caps the unchanged lines
     embedded per gap. docx_changes settles the tracked changes of Word
     documents: "accept", "reject" or "all" (kept as markup).
     move_similarity is how alike, from 0 to 1, an edited line must be to
@@ -1123,6 +1126,7 @@ def compare(
         md_filter=md_filter,
         ignore_whitespace=ignore_whitespace,
         fold=fold_comments_md,
+        empty_comments=empty_comments,
         max_hidden=max_hidden,
         docx_changes=docx_changes,
         move_similarity=move_similarity,
@@ -1175,6 +1179,7 @@ def compare_paths(
     *,
     ignore_whitespace: bool = False,
     fold_comments_md: bool = True,
+    empty_comments: bool = False,
     max_hidden: int | None = MAX_HIDDEN,
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
@@ -1228,6 +1233,7 @@ def compare_paths(
         md_filter=md_filter,
         ignore_whitespace=ignore_whitespace,
         fold=fold_comments_md,
+        empty_comments=empty_comments,
         max_hidden=max_hidden,
         docx_changes=docx_changes,
         move_similarity=move_similarity,

@@ -37,7 +37,7 @@ class Comment:
         """The comment in one line, for screen readers."""
         who = f"comment by {self.author}" if self.author else "comment"
         when = f", {self.date}" if self.date else ""
-        return f"{who}{when}: {self.text}"
+        return f"{who}{when}: {self.text or '(no text)'}"
 
 
 @dataclass
@@ -127,8 +127,11 @@ def match_attrs(s: str, i: int) -> int:
     return -1
 
 
-def fold_comments(text: str, comments: Comments) -> str:
-    """Replace the pandoc comment spans of a Markdown text with placeholders."""
+def fold_comments(text: str, comments: Comments, keep_empty: bool = False) -> str:
+    """Replace the pandoc comment spans of a Markdown text with placeholders.
+
+    A comment without text is left out, unless keep_empty.
+    """
     out = []
     i = 0
     while i < len(text):
@@ -151,6 +154,10 @@ def fold_comments(text: str, comments: Comments) -> str:
                     date = DATE.search(attrs)
                     # Markdown escapes (\[ \* \_ ...) are not part of the comment
                     note = ESCAPE.sub(r"\1", " ".join(text[i + 1 : close].split()))
+                    if not note and not keep_empty:
+                        # a comment with no text says nothing: left out
+                        i = end + 1
+                        continue
                     mark = comments.placeholder(
                         author[1] if author else "",
                         note,

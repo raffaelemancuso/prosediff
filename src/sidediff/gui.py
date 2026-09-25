@@ -73,6 +73,7 @@ class Settings:
     old: str = ""
     new: str = ""
     fold_comments: bool = True
+    empty_comments: bool = False
     docx_changes: str = "accept"
     align: str = "justify"
     context: int = 3
@@ -196,6 +197,7 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         context=None if s.full else s.context,
         ignore_whitespace=s.ignore_whitespace,
         fold_comments_md=s.fold_comments,
+        empty_comments=s.empty_comments,
         docx_changes=s.docx_changes,
         move_similarity=s.move_similarity,
         by_sentence=s.by_sentence,
@@ -345,6 +347,10 @@ class App:
         ttk.Checkbutton(opts, text="Compare sentence by sentence", variable=self.by_sentence).grid(
             row=4, column=0, columnspan=2, sticky="w", **pad
         )
+        self.empty_comments = tk.BooleanVar(value=self.s.empty_comments)
+        ttk.Checkbutton(opts, text="Show comments without text", variable=self.empty_comments).grid(
+            row=5, column=0, columnspan=2, sticky="w", **pad
+        )
         language = ttk.Frame(opts)
         language.grid(row=4, column=2, columnspan=2, sticky="w", **pad)
         ttk.Label(language, text="Language").pack(side="left")
@@ -477,6 +483,7 @@ class App:
             old=self.old.get().strip(),
             new=self.new.get().strip(),
             fold_comments=self.fold.get(),
+            empty_comments=self.empty_comments.get(),
             docx_changes=self.docx.get(),
             align=self.align.get(),
             context=context,
