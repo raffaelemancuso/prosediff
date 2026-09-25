@@ -55,16 +55,17 @@ def test_next_and_previous_change(page):
     counter = page.locator(".toolbar .counter")
     assert counter.inner_text() == "2 changes"
     page.keyboard.press("n")
-    assert counter.inner_text() == "change 1 of 2"
+    assert counter.inner_text() == "1 / 2"
+    assert counter.get_attribute("title") == "change 1 of 2"
     page.keyboard.press("n")
-    assert counter.inner_text() == "change 2 of 2"
+    assert counter.inner_text() == "2 / 2"
     assert page.locator("tr.current").count() == 1
     page.keyboard.press("n")  # wraps around
-    assert counter.inner_text() == "change 1 of 2"
+    assert counter.inner_text() == "1 / 2"
     page.keyboard.press("p")
-    assert counter.inner_text() == "change 2 of 2"
+    assert counter.inner_text() == "2 / 2"
     page.click('[data-nav="-1"]')
-    assert counter.inner_text() == "change 1 of 2"
+    assert counter.inner_text() == "1 / 2"
 
 
 def test_show_unchanged_lines(page):
@@ -138,6 +139,18 @@ def test_space_between_paragraphs(page):
         page.keyboard.press("[")
     assert page.locator("tr.replace td.right").first.evaluate(gap) == 0
     assert page.is_disabled('[data-gap="-1"]')
+    # an ARIA spinbutton: focused, the arrow keys, Page Up and End step it
+    spin = page.get_by_role("spinbutton", name="Space between paragraphs")
+    spin.focus()
+    page.keyboard.press("ArrowUp")
+    assert spin.get_attribute("aria-valuenow") == "0.25"
+    assert spin.get_attribute("aria-valuetext") == "0.25 lines"
+    page.keyboard.press("PageUp")
+    assert spin.get_attribute("aria-valuenow") == "1.25"
+    page.keyboard.press("End")
+    assert spin.inner_text() == "3.00" and page.is_disabled('[data-gap="1"]')
+    page.keyboard.press("n")  # the page's own keys still work from it
+    assert page.locator("tr.current").count() == 1
 
 
 def test_colour_blind_palette(page):

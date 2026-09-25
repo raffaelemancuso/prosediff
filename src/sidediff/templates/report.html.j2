@@ -207,7 +207,8 @@ footer { color: var(--muted); font-size: 12px; margin-bottom: 48px; }
   font-size: 16px; font-weight: 700; color: var(--fg); background: var(--panel); }
 .toolbar .stepper button:hover:not(:disabled) { color: var(--link); background: var(--skip); }
 .toolbar .stepper button:disabled { color: var(--border); }
-.stepper output { text-align: center; padding: 1px 4px; font-size: 12px;
+.stepper .gap-value:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.stepper .gap-value { text-align: center; padding: 1px 4px; font-size: 12px;
   font-variant-numeric: tabular-nums; border-block: 1px solid var(--border); }
 /* No help cursor where the tooltip is switched off. */
 body.no-changes-tips [data-tip], body.no-comments-tips .comment { cursor: auto; }
@@ -372,11 +373,13 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
   <button type="button" class="icon" data-toggle="cb" aria-pressed="false" aria-label="Colour-blind colours" title="Colour-blind colours: orange and blue instead of red and green (c)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2.6-5 7-5 7 5 7 5-2.6 5-7 5-7-5-7-5Z"/><circle cx="8" cy="8" r="2.3"/><path d="M8 5.7a2.3 2.3 0 0 1 0 4.6Z" class="fill"/></svg></button>
   <button type="button" class="icon" data-toggle="tint" aria-pressed="false" aria-label="Tint edited lines" title="Tint edited lines: the whole of an edited line, not only its changed words (t)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="5.5" width="14" height="5" rx="1" class="fill soft"/><path d="M3 8h10M3 3h7M3 13h9"/></svg></button>
-  <span class="spacing" role="group" aria-label="Space between paragraphs"><span class="spacing-icon" title="Space between paragraphs"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span>
+  <span class="spacing"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span>
     <span class="stepper">
-      <button type="button" data-gap="1" title="More space between paragraphs (])" aria-label="More space between paragraphs">+</button>
-      <output class="gap-value" title="Space between paragraphs, in lines" aria-live="polite">0.75</output>
-      <button type="button" data-gap="-1" title="Less space between paragraphs ([)" aria-label="Less space between paragraphs">−</button>
+      <button type="button" tabindex="-1" aria-hidden="true" data-gap="1" title="More space between paragraphs (])">+</button>
+      <span class="gap-value" role="spinbutton" tabindex="0" aria-label="Space between paragraphs"
+        aria-valuemin="0" aria-valuemax="3" aria-valuenow="0.75" aria-valuetext="0.75 lines"
+        title="Space between paragraphs, in lines: arrow keys to change, Home for none, End for the most">0.75</span>
+      <button type="button" tabindex="-1" aria-hidden="true" data-gap="-1" title="Less space between paragraphs ([)">−</button>
     </span></span>
   <button type="button" class="icon" role="checkbox" aria-checked="true" data-tips="comments" aria-label="Comment tooltips" title="Comment tooltips: the author, text and date of a comment, on hovering its marker"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4.5 5.5h7M4.5 8.5h5"/></svg></button>
   <button type="button" class="icon" role="checkbox" aria-checked="false" data-tips="changes" aria-label="Change tooltips" title="Change tooltips: what was inserted, deleted or changed, on hovering a change or a changed line"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4 7h3.5M5.75 5.25v3.5M9 7h3"/></svg></button>
@@ -399,7 +402,8 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     document.querySelectorAll("tr.current").forEach(function (r) { r.classList.remove("current"); });
     row.classList.add("current");
     row.scrollIntoView({ block: "center" });
-    counter.textContent = "change " + fmt(current + 1) + " of " + fmt(changes.length);
+    counter.textContent = fmt(current + 1) + " / " + fmt(changes.length);
+    counter.title = "change " + fmt(current + 1) + " of " + fmt(changes.length);
   }
 
   // The views (one column, formatted, colour-blind colours) are classes of
@@ -448,9 +452,27 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     if (less) less.disabled = gapStep === 0;
     if (more) more.disabled = gapStep === GAP_MAX;
     var value = document.querySelector(".gap-value");
-    if (value) value.textContent = (gapStep * GAP_STEP).toFixed(2);
+    if (value) {
+      var lines = (gapStep * GAP_STEP).toFixed(2);
+      value.textContent = lines;
+      value.setAttribute("aria-valuenow", String(gapStep * GAP_STEP));
+      value.setAttribute("aria-valuetext", lines + (lines === "1.00" ? " line" : " lines"));
+    }
     try { localStorage.setItem("sidediff-gap", String(gapStep)); } catch (e) {}
   }
+  // The value is an ARIA spinbutton: the arrow keys step it, Page Up and
+  // Page Down by a line, Home and End to either end.
+  var spin = document.querySelector(".gap-value");
+  if (spin) spin.addEventListener("keydown", function (e) {
+    var steps = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1,
+                  PageUp: 4, PageDown: -4 };
+    if (e.key in steps) setGap(gapStep + steps[e.key]);
+    else if (e.key === "Home") setGap(0);
+    else if (e.key === "End") setGap(GAP_MAX);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
   try {
     var saved = localStorage.getItem("sidediff-gap");
     if (saved !== null && !isNaN(Number(saved))) setGap(Number(saved));
