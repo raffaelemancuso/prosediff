@@ -99,3 +99,15 @@ def test_move_similarity_validated(builder, tmp_path):
     for bad in (0, -0.1, 1.5):
         with pytest.raises(ValueError, match="move similarity"):
             compare_paths(tmp_path / "a.md", tmp_path / "b.md", move_similarity=bad)
+
+
+def test_where_a_moved_line_went_is_printed(tmp_path):
+    """On screen a moved line's tooltip says where it went; on paper, a note
+    under it (hidden on screen by the page's style)."""
+    from prosediff import compare_paths, render
+
+    (tmp_path / "a.md").write_text(f"{EDITED}\na\nb\nc\n")
+    (tmp_path / "b.md").write_text(f"a\nb\nc\n{EDITED.replace('almost', 'nearly')}\n")
+    html = render(compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None))
+    assert '<span class="print-note" aria-hidden="true">moved to line 4</span>' in html
+    assert '<span class="print-note" aria-hidden="true">moved from line 1</span>' in html

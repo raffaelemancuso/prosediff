@@ -33,6 +33,21 @@ body.cb {
     --ins-word: #388bfd66; --add: #58a6ff; --rem: #f0883e;
   }
 }
+/* On paper, the light colours even when the browser is in dark mode: no
+   page printed dark. */
+@media print {
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+    --panel: #f6f8fa; --del-line: #ffebe9; --del-word: #ff818266;
+    --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
+    --add: #1a7f37; --rem: #cf222e; --link: #0969da;
+    --move-line: #fbefff; --move: #8250df; --current: #bf8700;
+  }
+  body.cb {
+    --del-line: #fff1e5; --del-word: #fb8f4499; --ins-line: #ddf4ff;
+    --ins-word: #54aeff88; --add: #0969da; --rem: #bc4c00;
+  }
+}
 * { box-sizing: border-box; }
 body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
   font: 14px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
@@ -229,10 +244,38 @@ body.unified tr.moved-in td.l, body.unified tr.moved-in td.left,
 body.unified tr.delete td.r, body.unified tr.delete td.right,
 body.unified tr.moved-out td.r, body.unified tr.moved-out td.right { display: none; }
 body.unified tr.skip td { grid-column: 1 / -1; }
+/* Shown only on paper: the column headings repeated on every page of a
+   file, and where a moved line went. */
+thead.print, .print-note { display: none; }
+@page { margin: 14mm 12mm; }
 @media print {
   body { padding: 0; font-size: 11px; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .toolbar, .summary button { display: none; }
+  /* No disclosure triangles: nothing to click on paper. */
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  details.file > summary { break-after: avoid; }
+  h1, h2, .comments-panel h2 { break-after: avoid; }
+  /* The repeated headings: which file, which side. */
+  thead.print { display: table-header-group; }
+  thead.print th { text-align: left; font-weight: 600; font-size: 10px; color: var(--muted);
+    padding: 3px 8px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  thead.print .path { font-size: inherit; }
+  body.unified thead.print { display: none; }
+  /* Folded unchanged lines: a quiet separator, not a button. */
+  tr.skip td { background: none; border-top: 1px dashed var(--border);
+    border-bottom: 1px dashed var(--border); padding: 1px 8px; }
+  tr.skip .expand { color: var(--muted); padding: 0; }
+  tr.skip .expand .verb { display: none; }
+  /* A comment's author and text, written out after its marker. */
+  .comment::after { content: " " attr(data-author) ": " attr(data-text);
+    font-family: -apple-system, "Segoe UI", sans-serif; font-style: italic;
+    color: var(--muted); }
+  .comment, .comment.new { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 3px; padding: 0 3px; }
+  .print-note { display: block; font-family: -apple-system, "Segoe UI", sans-serif;
+    font-size: 0.85em; color: var(--move); }
   details.file > summary { position: static; }
   tr { break-inside: avoid; }
   tr.current td, tr.target td { box-shadow: none; }
@@ -333,6 +376,10 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   <table{% if f.markdown %} class="prose"{% endif %}>
     <caption class="sr">Changes in {{ f.path }}: old version on the left, new version on the right</caption>
     <colgroup><col class="no"><col><col class="no"><col></colgroup>
+    <thead class="print" aria-hidden="true"><tr>
+      <th colspan="2"><span class="path">{{ f.old_path or f.path }}</span>{% if c.base.short != (f.old_path or f.path) %} · {{ c.base.short }}{% endif %}</th>
+      <th colspan="2"><span class="path">{{ f.path }}</span>{% if c.target.short != f.path %} · {{ c.target.short }}{% endif %}</th>
+    </tr></thead>
     <tbody>
     {% for r in f.rows %}
     {% if r.kind == "skip" %}
@@ -340,7 +387,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     {% if r.omitted %}
     <tbody><tr class="skip"><td colspan="4"><span class="omitted">⋯ {{ "{:,}".format(r.omitted) }} unchanged lines, left out of the page (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
     {% else %}
-    <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ show {{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
+    <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
     <tbody hidden>
     {% for h in r.hidden %}
     <tr class="equal"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ h.left_label or h.left_no }}</td><td class="code left">{{ h.left }}</td><td class="no r">{{ h.right_label or h.right_no }}</td><td class="code right">{{ h.right }}</td></tr>
@@ -353,9 +400,9 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     {% set sign = signs.get(r.kind, ("", "")) %}
     <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>
       <td class="no l">{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
-      <td class="code left"{% if tip and r.left_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left }}</td>
+      <td class="code left"{% if tip and r.left_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
       <td class="no r">{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
-      <td class="code right"{% if tip and r.right_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right }}</td>
+      <td class="code right"{% if tip and r.right_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
     </tr>
     {% endif %}
     {% endfor %}

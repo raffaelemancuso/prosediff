@@ -247,9 +247,14 @@ the next time (`%APPDATA%\prosediff\gui.json`).
   and the change tooltips (off by default; with both on, a comment inside a
   changed word shows the comment, and with only the change ones on, the change).
   The browser remembers the views, the spacing and the checkboxes.
-- Printing (or saving as PDF from the browser) opens every file, drops the
-  toolbar and buttons, keeps the colours and does not split a line across
-  pages.
+- Printing (or saving as PDF from the browser's Print dialog) opens every
+  file, drops the toolbar and buttons, keeps the colours (the light ones,
+  even from a browser in dark mode) and does not split a line across pages.
+  What the screen shows on hover is written out: each comment's author and
+  text after its marker, and where a moved line went. A file running over
+  several pages repeats its column headings (its name, old and new) at the
+  top of each, and folded unchanged lines print as a quiet "⋯ N unchanged
+  lines".
 
 Changes are also marked without colour, by a sign in the line-number gutter
 (`−` removed, `+` added, `~` changed, `→` `←` moved), and every changed row

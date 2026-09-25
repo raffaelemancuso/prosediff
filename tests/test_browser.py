@@ -51,6 +51,31 @@ def page(browser, page_file):
     context.close()
 
 
+def test_printed_page(browser, page_file):
+    """Printed, even from a browser in dark mode: light colours, the toolbar
+    left out, the comments written out, quiet folds, the column headings of
+    each file repeated on every page."""
+    context = browser.new_context(color_scheme="dark")
+    p = context.new_page()
+    p.goto(page_file.as_uri())
+
+    def style(selector, prop, pseudo="null"):
+        return p.locator(selector).first.evaluate(
+            f"e => getComputedStyle(e, {pseudo}).getPropertyValue('{prop}')"
+        )
+
+    assert style("body", "background-color") != "rgb(255, 255, 255)"
+    assert style("thead.print", "display") == "none"
+    p.emulate_media(media="print")
+    assert style("body", "background-color") == "rgb(255, 255, 255)"
+    assert style(".toolbar", "display") == "none"
+    assert style("thead.print", "display") == "table-header-group"
+    assert style(".expand .verb", "display") == "none"
+    assert "Anna" in style(".comment", "content", "'::after'")
+    assert style("tr.skip td", "background-color") == "rgba(0, 0, 0, 0)"
+    context.close()
+
+
 def test_next_and_previous_change(page):
     counter = page.locator(".toolbar .counter")
     # two edits, and a paragraph that only gained a comment, in between
