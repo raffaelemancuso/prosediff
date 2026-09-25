@@ -104,7 +104,7 @@ def test_compare_two_docx_with_comments_panel(tmp_path):
     assert f.markdown and "converted from Word" in f.note
     assert [(e.status, e.author, e.text) for e in c.comments] == [("new", "Anna", "Why second?")]
     html = render(c)
-    assert "Comments: 1 new, 0 removed, 0 unchanged" in html
+    assert "Comments: 1 new, 0 removed</h2>" in html
     assert f'href="#{c.comments[0].anchor}"' in html and f'id="{c.comments[0].anchor}"' in html
 
 

@@ -886,16 +886,44 @@ def paragraph_numbers(labels: list[str]) -> list[str]:
     return out
 
 
-def alignment_keys(old: list[str], new: list[str]) -> tuple[list[str], list[str]]:
-    """The lines as the alignment compares them: without the markers of the
-    comments both sides have. A comment that only moved (its paragraph was
-    deleted, it went to the next) is then no reason to show a line; a new or
-    removed comment still is."""
+def without_shared_comments(
+    old: list[str],
+    new: list[str],
+    old_labels: list[str] | None,
+    new_labels: list[str] | None,
+) -> tuple[list[str], list[str], list[str] | None, list[str] | None]:
+    """The lines without the comments both sides have, moved or not: only
+    new and removed comments are shown. A comment goes with the spaces
+    around it, leaving one where it stood between two words; a line left
+    empty goes too, with its label."""
     shared = set(placeholders_in("\n".join(old))) & set(placeholders_in("\n".join(new)))
     if not shared:
-        return old, new
-    pattern = re.compile("[" + "".join(sorted(shared)) + "]")
-    return [pattern.sub("", line) for line in old], [pattern.sub("", line) for line in new]
+        return old, new, old_labels, new_labels
+    marks = "".join(sorted(shared))
+    pattern = re.compile(f"[ \\t]*(?:[{marks}][ \\t]*)+")
+
+    def strip(line: str) -> str:
+        def gap(m: re.Match[str]) -> str:
+            at_edge = m.start() == 0 or m.end() == len(line)
+            spaced = any(c in " \t" for c in m.group())
+            before_punct = not at_edge and line[m.end()] in ".,;:!?)]}"
+            return " " if spaced and not at_edge and not before_punct else ""
+
+        return pattern.sub(gap, line)
+
+    def side(lines: list[str], labels: list[str] | None) -> tuple[list[str], list[str] | None]:
+        kept, kept_labels = [], []
+        for i, line in enumerate(lines):
+            stripped = strip(line)
+            if stripped.strip() or not line.strip():
+                kept.append(stripped)
+                if labels is not None:
+                    kept_labels.append(labels[i])
+        return kept, kept_labels if labels is not None else None
+
+    old, old_labels = side(old, old_labels)
+    new, new_labels = side(new, new_labels)
+    return old, new, old_labels, new_labels
 
 
 def _is_docx(path: str | None) -> bool:
@@ -976,6 +1004,10 @@ def build_files(
                 # its paragraphs are numbered instead of its lines.
                 old_labels = paragraph_numbers(old_labels)
                 new_labels = paragraph_numbers(new_labels)
+            if fold:
+                old_lines, new_lines, old_labels, new_labels = without_shared_comments(
+                    old_lines, new_lines, old_labels, new_labels
+                )
             # Footnote numbers set aside: a renumbered footnote is no change.
             old_lines, new_lines, notes[id(fd)] = footnotes.set_aside(
                 old_lines, new_lines, footnote_similarity
@@ -983,7 +1015,7 @@ def build_files(
         labels[id(fd)] = (old_labels, new_labels)
         texts.append((fd, old_lines, new_lines))
 
-    all_ops = git_opcodes([alignment_keys(old, new) for _, old, new in texts], ignore_whitespace)
+    all_ops = git_opcodes([(old, new) for _, old, new in texts], ignore_whitespace)
     for (fd, old, new), ops in zip(texts, all_ops, strict=False):
         fn = notes.get(id(fd))
         token = footnotes.use_for_tooltips(fn)

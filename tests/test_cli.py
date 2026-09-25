@@ -87,14 +87,14 @@ def test_cli_new_options(builder, tmp_path):
 
 
 def test_cli_fold_comments(builder, tmp_path):
-    builder.write("p.md", f"Text {NOTE}\n")
+    builder.write("p.md", "Text\n")
     base = builder.commit("first")
     builder.write("p.md", f"Text changed {NOTE}\n")
     target = builder.commit("second")
     out = tmp_path / "r.html"
     assert main([str(builder.path), base, target, "--fold-comments", "-o", str(out)]) == 0
     html = out.read_text(encoding="utf-8")
-    assert "comment-start" not in html and 'class="comment"' in html
+    assert "comment-start" not in html and 'class="comment new"' in html
 
 
 def test_cli_files(tmp_path, capsys):

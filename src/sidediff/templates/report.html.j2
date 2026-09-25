@@ -97,8 +97,7 @@ td { vertical-align: top; padding: 0 8px; }
    set with the Spacing buttons. */
 :root { --para-gap: 0.75em; }
 table.prose td.code, table.prose td.no { padding-bottom: var(--para-gap); }
-.spacing { display: inline-flex; align-items: center; gap: 2px; }
-.spacing button { min-width: 1.8em; }
+.spacing { display: inline-flex; align-items: center; gap: 6px; }
 td.no { color: var(--muted); text-align: right; user-select: none;
   border-right: 1px solid var(--border); white-space: nowrap; }
 /* +, − and ~ in the gutter: the kind of change without relying on colour. */
@@ -114,13 +113,19 @@ td.code.left { border-right: 1px solid var(--border); }
 /* Wholly removed and added lines are tinted; an edited line is not, only its
    changed words are (its gutter keeps the tint and the ~ sign), so the
    unchanged text of an edited paragraph does not look changed. */
-tr.delete td.left { background: var(--del-line); }
-tr.insert td.right { background: var(--ins-line); }
+/* A cell's tint is --tint, painted above the space between paragraphs so
+   that the space stays blank and paragraphs stay apart. */
+td { --tint: transparent; --tint-gap: 0px;
+  background: linear-gradient(var(--tint), var(--tint)) no-repeat top left /
+    100% calc(100% - var(--tint-gap)); }
+table.prose td.code, table.prose td.no { --tint-gap: var(--para-gap); }
+tr.delete td.left { --tint: var(--del-line); }
+tr.insert td.right { --tint: var(--ins-line); }
 /* The "Tint edited lines" view tints the whole edited line again. */
-body.tint tr.replace td.left { background: var(--del-line); }
-body.tint tr.replace td.right { background: var(--ins-line); }
-tr.delete td.no.l, tr.replace td.no.l { background: var(--del-line); }
-tr.insert td.no.r, tr.replace td.no.r { background: var(--ins-line); }
+body.tint tr.replace td.left { --tint: var(--del-line); }
+body.tint tr.replace td.right { --tint: var(--ins-line); }
+tr.delete td.no.l, tr.replace td.no.l { --tint: var(--del-line); }
+tr.insert td.no.r, tr.replace td.no.r { --tint: var(--ins-line); }
 del { background: var(--del-word); text-decoration: none; border-radius: 2px; }
 ins { background: var(--ins-word); text-decoration: none; border-radius: 2px; }
 /* A word changed into a similar one: light background, changed letters strong. */
@@ -131,7 +136,7 @@ ins.partial mark { background: var(--ins-word); color: inherit; }
 /* Every change carries a plain-English description as its tooltip. */
 del[title], ins[title], td.code[title], [data-tip], .comment { cursor: help; }
 tr.moved-out td.left, tr.moved-in td.right,
-tr.moved-out td.no.l, tr.moved-in td.no.r { background: var(--move-line); }
+tr.moved-out td.no.l, tr.moved-in td.no.r { --tint: var(--move-line); }
 tr.moved-out td.no.l, tr.moved-in td.no.r { color: var(--move); font-weight: 600; }
 .comment { font-size: 0.85em; background: var(--panel); border-radius: 3px;
   padding: 0 2px; }
@@ -175,9 +180,29 @@ footer { color: var(--muted); font-size: 12px; margin-bottom: 48px; }
 .toolbar button { font: inherit; color: var(--link); background: none; border: 0;
   padding: 0 4px; cursor: pointer; }
 .toolbar button[aria-pressed="true"] { font-weight: 700; }
+/* Icon buttons: the view switches, drawn in the text colour; a pressed one
+   sits on a tinted square. */
+.toolbar button.icon { display: inline-flex; padding: 4px; border-radius: 5px; }
+.toolbar button.icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.toolbar button.icon svg .fill { fill: currentColor; stroke: none; }
+.toolbar button.icon svg .soft { opacity: 0.3; }
+.toolbar button.icon:hover { background: var(--skip); }
+.toolbar button.icon[aria-pressed="true"] { background: var(--skip);
+  box-shadow: inset 0 0 0 1px var(--link); }
 .toolbar button:disabled { color: var(--muted); cursor: default; }
 .toolbar .counter { color: var(--muted); min-width: 7em; text-align: center; }
 .toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+/* The spacing stepper: + above the value, − below, in one bordered column. */
+.stepper { display: inline-flex; flex-direction: column; min-width: 3.2em;
+  border: 1px solid var(--border); border-radius: 5px; overflow: hidden;
+  background: var(--bg); }
+.toolbar .stepper button { padding: 0; height: 18px; line-height: 1;
+  font-size: 16px; font-weight: 700; color: var(--fg); background: var(--panel); }
+.toolbar .stepper button:hover:not(:disabled) { color: var(--link); background: var(--skip); }
+.toolbar .stepper button:disabled { color: var(--border); }
+.stepper output { text-align: center; padding: 1px 4px; font-size: 12px;
+  font-variant-numeric: tabular-nums; border-block: 1px solid var(--border); }
 /* No help cursor where the tooltip is switched off. */
 body.no-changes-tips [data-tip], body.no-comments-tips .comment { cursor: auto; }
 /* Single column: each row shows the old line above the new one; unchanged
@@ -234,9 +259,9 @@ body.unified tr.skip td { grid-column: 1 / -1; }
 {% endif %}
 
 {% if c.comments %}
-{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}{% set same_c = c.comments_with("unchanged") %}
+{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
 <section class="comments-panel" aria-labelledby="comments-title">
-  <h2 id="comments-title">Comments: {{ "{:,}".format(new_c | length) }} new, {{ "{:,}".format(gone_c | length) }} removed, {{ "{:,}".format(same_c | length) }} unchanged</h2>
+  <h2 id="comments-title">Comments: {{ "{:,}".format(new_c | length) }} new, {{ "{:,}".format(gone_c | length) }} removed</h2>
   {% macro comment_list(items) %}
   <ul>
   {% for e in items %}
@@ -245,9 +270,6 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   </ul>
   {% endmacro %}
   {{ comment_list(new_c + gone_c) }}
-  {% if same_c %}
-  <details><summary>{{ "{:,}".format(same_c | length) }} unchanged comment{{ "" if same_c | length == 1 else "s" }}</summary>{{ comment_list(same_c) }}</details>
-  {% endif %}
 </section>
 {% endif %}
 
@@ -340,15 +362,18 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
   <span class="counter" aria-live="polite">{{ "{:,}".format(c.change_count) }} change{{ "" if c.change_count == 1 else "s" }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
-  <button type="button" data-toggle="unified" aria-pressed="false" title="One column: old line above new line (u)">One column</button>
-  <button type="button" data-toggle="formatted" aria-pressed="false" title="Show Markdown formatted instead of raw (f)">Formatted</button>
-  <button type="button" data-toggle="cb" aria-pressed="false" title="Orange and blue instead of red and green (c)">Colour-blind colours</button>
-  <button type="button" data-toggle="tint" aria-pressed="false" title="Tint the whole of an edited line, not only its changed words (t)">Tint edited lines</button>
-  <span class="spacing" role="group" aria-label="Space between paragraphs"><span class="role">Spacing</span>
-    <button type="button" data-gap="-1" title="Less space between paragraphs ([)" aria-label="Less space between paragraphs">−</button>
-    <button type="button" data-gap="1" title="More space between paragraphs (])" aria-label="More space between paragraphs">+</button></span>
+  <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
+  <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
+  <button type="button" class="icon" data-toggle="cb" aria-pressed="false" aria-label="Colour-blind colours" title="Colour-blind colours: orange and blue instead of red and green (c)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2.6-5 7-5 7 5 7 5-2.6 5-7 5-7-5-7-5Z"/><circle cx="8" cy="8" r="2.3"/><path d="M8 5.7a2.3 2.3 0 0 1 0 4.6Z" class="fill"/></svg></button>
+  <button type="button" class="icon" data-toggle="tint" aria-pressed="false" aria-label="Tint edited lines" title="Tint edited lines: the whole of an edited line, not only its changed words (t)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="5.5" width="14" height="5" rx="1" class="fill soft"/><path d="M3 8h10M3 3h7M3 13h9"/></svg></button>
+  <span class="spacing" role="group" aria-label="Space between paragraphs"><span>Spacing</span>
+    <span class="stepper">
+      <button type="button" data-gap="1" title="More space between paragraphs (])" aria-label="More space between paragraphs">+</button>
+      <output class="gap-value" title="Space between paragraphs, in lines" aria-live="polite">0.75</output>
+      <button type="button" data-gap="-1" title="Less space between paragraphs ([)" aria-label="Less space between paragraphs">−</button>
+    </span></span>
   <label title="The author, text and date of a comment, on hovering its marker"><input type="checkbox" data-tips="comments" checked> Comment tooltips</label>
-  <label title="What was inserted, deleted or changed, on hovering a change or a changed line"><input type="checkbox" data-tips="changes" checked> Change tooltips</label>
+  <label title="What was inserted, deleted or changed, on hovering a change or a changed line"><input type="checkbox" data-tips="changes"> Change tooltips</label>
 </div>
 <script>
 (function () {
@@ -416,6 +441,8 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     var less = document.querySelector('[data-gap="-1"]'), more = document.querySelector('[data-gap="1"]');
     if (less) less.disabled = gapStep === 0;
     if (more) more.disabled = gapStep === GAP_MAX;
+    var value = document.querySelector(".gap-value");
+    if (value) value.textContent = (gapStep * GAP_STEP).toFixed(2);
     try { localStorage.setItem("sidediff-gap", String(gapStep)); } catch (e) {}
   }
   try {
@@ -507,6 +534,8 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   // Each kind of tooltip can be switched off in the toolbar; the choice is
   // remembered like the views. With one kind off, the other still shows:
   // a comment inside a changed word then shows the change.
+  // Comment tooltips are on by default, change tooltips off.
+  var TIPS_DEFAULT = { comments: true, changes: false };
   var tipsOn = { comments: true, changes: true };
   function tipSelector() {
     return [tipsOn.comments && ".comment", tipsOn.changes && "[data-tip]"]
@@ -521,7 +550,15 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     hideTip();
   }
   ["comments", "changes"].forEach(function (kind) {
-    try { if (localStorage.getItem("sidediff-tips-" + kind) === "0") setTips(kind, false); } catch (e) {}
+    var on = TIPS_DEFAULT[kind];
+    try {
+      var saved = localStorage.getItem("sidediff-tips-" + kind);
+      if (saved !== null) on = saved === "1";
+    } catch (e) {}
+    tipsOn[kind] = on;
+    document.body.classList.toggle("no-" + kind + "-tips", !on);
+    var box = document.querySelector('[data-tips="' + kind + '"]');
+    if (box) box.checked = on;
   });
   document.addEventListener("change", function (e) {
     var box = e.target.closest("[data-tips]");

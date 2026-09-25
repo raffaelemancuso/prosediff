@@ -84,18 +84,30 @@ def test_plain_and_show_comments():
     assert 'aria-label="new comment by Anna' in new
 
 
-def test_a_comment_moving_is_not_a_changed_word(builder):
-    """A comment whose paragraph was deleted lands on the next one: it is
-    not highlighted as added text, and not described as a change."""
+def test_a_comment_on_both_sides_is_not_shown(builder):
+    """A comment whose paragraph was deleted lands on the next one: a
+    comment both sides have is left out, moved or not."""
     builder.write("p.md", f"First paragraph here.{NOTE}\n\nSecond paragraph here.\n")
     base = builder.commit("first")
     builder.write("p.md", f"{NOTE}Second paragraph here, edited.\n")
     target = builder.commit("second")
-    (f,) = compare(builder.path, base, target).files
+    c = compare(builder.path, base, target)
+    (f,) = c.files
     row = next(r for r in f.rows if r.right_no is not None and "Second" in str(r.right))
     assert row.changes == ['added ", edited"']
-    assert '<span class="comment"' in str(row.right)
-    assert "<ins" not in str(row.right).split("Second")[0]  # the marker is not highlighted
+    assert "comment" not in str(row.right)
+    assert not any("comment" in str(r.left) for r in f.rows)
+    assert c.comments == []
+
+
+def test_a_shared_comment_leaves_one_space():
+    from sidediff.diff import without_shared_comments
+
+    comments = Comments()
+    old = [fold_comments(s, comments) for s in [f"a {NOTE}b", f"c {NOTE}.", f"{NOTE} d", NOTE]]
+    new = [fold_comments(f"x{NOTE}", comments)]
+    lines, _, labels, _ = without_shared_comments(old, new, ["1", "2", "3", "4"], ["1"])
+    assert lines == ["a b", "c.", "d"] and labels == ["1", "2", "3"]
 
 
 def test_a_paragraph_a_comment_only_moved_into_is_not_shown(builder):
@@ -147,8 +159,7 @@ def test_compare_fold_comments(builder, tmp_path):
     assert row.changes == ['added "new"']  # the renumbered comment is no change
     html = render(c)
     assert "comment-start" not in html
-    assert html.count(MARKER) == 2
-    assert 'class="comment new"' not in html  # the comment was already there
+    assert MARKER not in html  # the comment was already there: not shown
     # folding is the default; without it the markup is compared as text
     assert "comment-start" not in render(compare(builder.path, base, target))
     c = compare(builder.path, base, target, fold_comments_md=False)
@@ -181,19 +192,19 @@ def test_comments_panel_statuses_and_links(builder):
     target = builder.commit("second")
     c = compare(builder.path, base, target, fold_comments_md=True)
     status = {e.text: e.status for e in c.comments}
-    assert status == {"Too long.": "unchanged", "Old remark.": "removed", "New remark.": "new"}
+    # the comment both sides have is left out
+    assert status == {"Old remark.": "removed", "New remark.": "new"}
     by_text = {e.text: e for e in c.comments}
     assert by_text["New remark."].line == 22
     assert by_text["Old remark."].line == 21
-    # the unchanged comment sits among hidden lines: its row still has an id
     html = render(c)
-    anchor = by_text["Too long."].anchor
-    assert anchor != c.files[0].anchor and f'id="{anchor}"' in html
-    assert "1 unchanged comment" in html
+    assert "Comments: 1 new, 1 removed</h2>" in html and "Too long." not in html
+    for e in c.comments:
+        assert f'id="{e.anchor}"' in html
     # the new comment has its own icon, in the text and in the panel
     assert html.count('class="comment new"') == 1
     assert by_text["New remark."].icon == NEW_COMMENT_MARK
-    assert by_text["Too long."].icon == COMMENT_MARK
+    assert by_text["Old remark."].icon == COMMENT_MARK
 
 
 def test_no_panel_without_folding(builder):

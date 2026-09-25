@@ -30,8 +30,9 @@ sidediff sits between the two:
   draft_returned.docx` shows what a co-author changed, whatever they tracked
   or did not. Their tracked changes are accepted (or rejected) exactly as
   Word would, spaces included, and **their comments are kept**: each shown
-  where it sits, with its author and date, new comments marked 🆕 and listed
-  in a panel of new, removed and unchanged comments. The same works on the
+  where it sits, with its author and date, new comments marked 🆕, and all
+  listed in a panel. Only new and removed comments are shown: those already
+  in the old version are left out, even where they moved. The same works on the
   Markdown that `pandoc` makes of a Word file, and on Word files in git.
 - **It is made for prose**: long lines wrap, changes are highlighted word by
   word and down to the letter within a word, each change is described in
@@ -71,7 +72,7 @@ sidediff --files OLD NEW [options]
 | `--full`                   | show every line of each changed file                          |
 | `--max-hidden N`           | unchanged lines embedded per gap for the page to reveal (default 500); longer gaps are left out, to keep the page light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
-| `--no-fold-comments`       | compare the comment markup of Markdown and Word documents as text; by default each comment is shown as a 💬 marker (🆕 when added since the base), with the author, the comment and its date on hover, and listed in a panel |
+| `--no-fold-comments`       | compare the comment markup of Markdown and Word documents as text; by default each comment added or removed since the base is shown as a 💬 marker (🆕 when added), with the author, the comment and its date on hover, and listed in a panel, while the comments both sides have are left out |
 | `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
 | `--docx-changes accept\|reject\|all` | the tracked changes of Word documents: accept them (default), reject them, or show them as markup |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
@@ -163,16 +164,19 @@ the next time (`%APPDATA%\sidediff\gui.json`).
 - Changed images (PNG, JPEG, GIF, WebP, BMP, up to 5 MB) old and new side by
   side; other binary files are listed but not shown.
 - A toolbar: the number of changes, with `n` and `p` (or its arrows) to jump
-  to the next and previous change; `u` for one column instead of two (each
+  to the next and previous change; four icon buttons, each named in its
+  tooltip: `u` for one column instead of two (each
   changed line shows its old version above its new one); `f` for Markdown
   formatted instead of raw (the syntax hidden, emphasis, headings, links and
   citations styled, prose in a proportional font); `c` for colour-blind
   colours (orange and blue instead of red and green); `t` to tint the whole
   of an edited line, as most diff tools do (by default only its changed
-  words are coloured, and its gutter); − and + (or `[` and `]`) for less or
-  more space between the paragraphs of Markdown and Word documents; and two
-  checkboxes to switch off the comment tooltips or the change tooltips (with
-  the comment ones off, a comment inside a changed word shows the change).
+  words are coloured, and its gutter; the tint stops short of the space
+  between paragraphs); a Spacing stepper, + above the value and − below (or
+  `]` and `[`), for more or less space between the paragraphs of Markdown and
+  Word documents; and two checkboxes for the comment tooltips (on by default)
+  and the change tooltips (off by default; with both on, a comment inside a
+  changed word shows the comment, and with only the change ones on, the change).
   The browser remembers the views, the spacing and the checkboxes.
 - Printing (or saving as PDF from the browser) opens every file, drops the
   toolbar and buttons, keeps the colours and does not split a line across
@@ -228,9 +232,11 @@ one character of the Unicode private use area standing for its author and
 text: a comment is then compared like a word, the same comment matches on
 both sides even when its `id` was renumbered by a new conversion, and a
 filter cannot cut it in two. The characters become markers when the page is
-built. The comments present on both sides are left out when the lines are
-lined up, so a paragraph that only gained a comment moved over from its
-neighbour is not shown as changed; one with a new or removed comment is.
+built. The comments present on both sides are then taken out of the text,
+with the spaces around them (one is left where a comment stood between two
+words), before the lines are lined up: they are never shown, and a
+paragraph that only gained a comment moved over from its neighbour is not a
+change. A paragraph with a new or removed comment is shown.
 
 The formatted view recognises the common inline Markdown (headings, block
 quotes, code, strong, emphasis, links, images, citations, pandoc spans with

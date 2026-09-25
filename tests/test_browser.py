@@ -27,12 +27,12 @@ def browser():
 @pytest.fixture
 def page_file(builder, tmp_path):
     """A page with two changes far apart in a Markdown file (so unchanged
-    lines are folded between them), bold text, and a comment that sits
-    among the folded lines."""
+    lines are folded between them), bold text, and a new comment between
+    them."""
     lines = [f"Line {i} of the text." for i in range(40)]
-    lines[20] += NOTE
     builder.write("doc.md", "\n".join(lines) + "\n")
     base = builder.commit("first")
+    lines[20] += NOTE  # a new comment, on a line whose text did not change
     lines[1] = "Line 1 with **bold** words."
     lines[38] = "Line 38 changed."
     builder.write("doc.md", "\n".join(lines) + "\n")
@@ -72,8 +72,9 @@ def test_next_and_previous_change(page):
 def test_show_unchanged_lines(page):
     hidden = page.locator("tbody[hidden]").first
     assert not hidden.is_visible()
+    folds = page.locator("tbody[hidden]").count()
     page.locator(".expand").first.click()
-    assert page.locator("tbody[hidden]").count() == 0
+    assert page.locator("tbody[hidden]").count() == folds - 1
     assert page.get_by_text("Line 10 of the text.").first.is_visible()
 
 
@@ -111,10 +112,12 @@ def test_formatted_view_hides_markdown_syntax(page):
 
 def test_edited_lines_untinted_unless_asked(page):
     cell = page.locator("tr.replace td.right").first
-    background = "e => getComputedStyle(e).backgroundColor"
+    background = "e => getComputedStyle(e).backgroundImage"
     untinted = cell.evaluate(background)
     page.keyboard.press("t")
     assert cell.evaluate(background) != untinted
+    # the tint stops above the space between paragraphs
+    assert "calc" in cell.evaluate("e => getComputedStyle(e).backgroundSize")
     assert page.get_attribute('[data-toggle="tint"]', "aria-pressed") == "true"
     page.reload()
     assert page.locator("tr.replace td.right").first.evaluate(background) != untinted
@@ -127,8 +130,10 @@ def test_space_between_paragraphs(page):
     gap = "e => parseFloat(getComputedStyle(e).paddingBottom)"
     default = cell.evaluate(gap)
     assert default > 0
+    assert page.inner_text(".gap-value") == "0.75"
     page.click('[data-gap="1"]')
     assert cell.evaluate(gap) > default
+    assert page.inner_text(".gap-value") == "1.00"
     page.reload()  # remembered
     assert page.locator("tr.replace td.right").first.evaluate(gap) > default
     for _ in range(20):
@@ -144,9 +149,7 @@ def test_colour_blind_palette(page):
     assert before.strip() != after.strip()
 
 
-def test_comment_link_reveals_hidden_row(page):
-    # the comment is unchanged: listed in the collapsed "unchanged" section
-    page.locator(".comments-panel details summary").click()
+def test_comment_link_goes_to_its_row(page):
     page.locator(".comments-panel a").first.click()
     # the page reacts to the hash change, which the browser fires afterwards
     page.wait_for_selector("tr.target", state="visible", timeout=5_000)
@@ -156,7 +159,6 @@ def test_comment_link_reveals_hidden_row(page):
 
 
 def test_comment_tooltip(page):
-    page.locator(".expand").first.click()  # the comment sits among folded lines
     marker = page.locator(".comment").first
     marker.hover()
     tip = page.locator("#tip")
@@ -193,6 +195,11 @@ def test_one_tooltip_at_a_time(browser, builder, tmp_path):
     tip = page.locator("#tip")
     # no browser tooltip is left in the tables: they would overlap ours
     assert page.locator("table [title]").count() == 0
+    # the change tooltips are off by default: a changed word shows nothing
+    assert not page.is_checked('[data-tips="changes"]')
+    page.locator("ins").nth(3).hover()
+    assert not tip.is_visible()
+    page.check('[data-tips="changes"]')
     page.locator(".comment").first.hover()
     assert tip.locator("b").inner_text() == "Anna" and "Why?" in tip.inner_text()
     assert "changed" not in tip.inner_text()
