@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ c.repo_name }}: {{ c.base.short }}..{{ c.target.short }}</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+  --panel: #f6f8fa; --del-line: #ffebe9; --del-word: #ff818266;
+  --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
+  --add: #1a7f37; --rem: #cf222e; --link: #0969da;
+  --move-line: #fbefff; --move: #8250df; --current: #bf8700;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --border: #30363d;
+    --panel: #161b22; --del-line: #f851491a; --del-word: #f8514966;
+    --ins-line: #2ea04326; --ins-word: #2ea04366; --skip: #388bfd1a;
+    --add: #3fb950; --rem: #f85149; --link: #4493f8;
+    --move-line: #ab7df826; --move: #ab7df8; --current: #d29922;
+  }
+}
+/* Colour-blind palette: orange for removed, blue for added, which stay
+   apart for every common colour-vision deficiency. */
+body.cb {
+  --del-line: #fff1e5; --del-word: #fb8f4499; --ins-line: #ddf4ff;
+  --ins-word: #54aeff88; --add: #0969da; --rem: #bc4c00;
+}
+@media (prefers-color-scheme: dark) {
+  body.cb {
+    --del-line: #db6d2826; --del-word: #db6d2866; --ins-line: #388bfd26;
+    --ins-word: #388bfd66; --add: #58a6ff; --rem: #f0883e;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+  font: 14px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+main { max-width: 1600px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 12px; }
+h2 { font-size: 15px; margin: 0 0 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.revisions { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 12px;
+  margin-bottom: 12px; }
+.role { color: var(--muted); }
+.revisions code { font-weight: 600; }
+.commits, .comments-panel { margin-bottom: 12px; }
+.commits summary, .comments-panel summary { cursor: pointer; color: var(--muted); }
+.commits ol { margin: 6px 0 0; padding-left: 0; list-style: none; }
+.commits li { display: grid; grid-template-columns: 5.5em 9em 1fr; gap: 8px; }
+.commits li code { color: var(--muted); }
+.comments-panel { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.comments-panel ul { list-style: none; margin: 4px 0 8px; padding: 0; }
+.comments-panel li { display: grid; grid-template-columns: 6em 10em 1fr; gap: 8px;
+  padding: 2px 0; }
+.comments-panel .status-new { color: var(--add); font-weight: 600; }
+.comments-panel .status-removed { color: var(--rem); font-weight: 600; }
+.comments-panel .status-unchanged { color: var(--muted); }
+.comments-panel a { color: inherit; }
+.summary { color: var(--muted); margin-bottom: 8px; display: flex; gap: 12px;
+  flex-wrap: wrap; align-items: center; }
+.summary button, .expand { font: inherit; color: var(--link); background: none;
+  border: 0; padding: 0; cursor: pointer; }
+.summary button:hover, .expand:hover { text-decoration: underline; }
+.add { color: var(--add); } .rem { color: var(--rem); }
+nav ul { list-style: none; padding: 0; margin: 0 0 24px;
+  border: 1px solid var(--border); border-radius: 6px; }
+nav li { padding: 4px 12px; border-top: 1px solid var(--border);
+  display: flex; gap: 12px; flex-wrap: wrap; }
+nav li:first-child { border-top: 0; }
+nav a { color: inherit; flex: 1; overflow-wrap: anywhere; }
+nav .change { color: var(--muted); min-width: 7em; }
+details.file { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 24px;
+  overflow: hidden; }
+details.file > summary { background: var(--panel); padding: 8px 12px; cursor: pointer;
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline;
+  position: sticky; top: 0; z-index: 1; }
+details.file[open] > summary { border-bottom: 1px solid var(--border); }
+.path { font-family: ui-monospace, Consolas, monospace; font-weight: 600;
+  overflow-wrap: anywhere; }
+.note { padding: 12px; color: var(--muted); }
+.file-note { color: var(--muted); font-style: italic; }
+.images { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+.images figure { margin: 0; text-align: center; }
+.images img { max-width: 100%; height: auto; background:
+  repeating-conic-gradient(#8883 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.images figcaption { color: var(--muted); font-size: 12px; }
+.images .old img { outline: 3px solid var(--del-word); }
+.images .new img { outline: 3px solid var(--ins-word); }
+table { width: 100%; border-collapse: collapse; table-layout: fixed;
+  font: 12px/1.45 ui-monospace, Consolas, "Liberation Mono", monospace; }
+col.no { width: 5.5em; }
+td { vertical-align: top; padding: 0 8px; }
+td.no { color: var(--muted); text-align: right; user-select: none;
+  border-right: 1px solid var(--border); white-space: nowrap; }
+/* +, − and ~ in the gutter: the kind of change without relying on colour. */
+.sign { display: inline-block; width: 1.1em; text-align: center; font-weight: 700; }
+tr.delete .sign, tr.replace td.l .sign, tr.moved-out .sign { color: var(--rem); }
+tr.insert .sign, tr.replace td.r .sign, tr.moved-in .sign { color: var(--add); }
+tr.moved-out .sign, tr.moved-in .sign { color: var(--move); }
+/* Long lines wrap instead of scrolling sideways, so prose stays readable.
+   Justified, the last line of each wrapped line stays ragged. */
+td.code { white-space: pre-wrap; overflow-wrap: anywhere;
+  text-align: {{ align }}; text-align-last: start; }
+td.code.left { border-right: 1px solid var(--border); }
+/* Wholly removed and added lines are tinted; an edited line is not, only its
+   changed words are (its gutter keeps the tint and the ~ sign), so the
+   unchanged text of an edited paragraph does not look changed. */
+tr.delete td.left { background: var(--del-line); }
+tr.insert td.right { background: var(--ins-line); }
+/* The "Tint edited lines" view tints the whole edited line again. */
+body.tint tr.replace td.left { background: var(--del-line); }
+body.tint tr.replace td.right { background: var(--ins-line); }
+tr.delete td.no.l, tr.replace td.no.l { background: var(--del-line); }
+tr.insert td.no.r, tr.replace td.no.r { background: var(--ins-line); }
+del { background: var(--del-word); text-decoration: none; border-radius: 2px; }
+ins { background: var(--ins-word); text-decoration: none; border-radius: 2px; }
+/* A word changed into a similar one: light background, changed letters strong. */
+del.partial { background: var(--del-line); }
+ins.partial { background: var(--ins-line); }
+del.partial mark { background: var(--del-word); color: inherit; }
+ins.partial mark { background: var(--ins-word); color: inherit; }
+/* Every change carries a plain-English description as its tooltip. */
+del[title], ins[title], td.code[title], [data-tip], .comment { cursor: help; }
+tr.moved-out td.left, tr.moved-in td.right,
+tr.moved-out td.no.l, tr.moved-in td.no.r { background: var(--move-line); }
+tr.moved-out td.no.l, tr.moved-in td.no.r { color: var(--move); font-weight: 600; }
+.comment { font-size: 0.85em; background: var(--panel); border-radius: 3px;
+  padding: 0 2px; }
+/* A new comment's icon says it all: no box around it. */
+.comment.new { background: none; padding: 0; }
+/* The one tooltip of the page, for comments (the author in bold, the
+   comment below, its date in grey) and for changes (one per line). The
+   script places it next to what is hovered or focused, so no file box clips
+   it and two tooltips never overlap. */
+#tip { position: fixed; z-index: 3; max-width: 32em; padding: 6px 10px;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: 0 2px 8px #0003; pointer-events: none;
+  font: 13px/1.4 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  text-align: left; white-space: normal; overflow-wrap: anywhere; }
+#tip b, #tip .line { display: block; }
+#tip .when, #tip .more { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+tr.current td, tr.target td { box-shadow: inset 0 2px 0 var(--current); }
+tr.skip td { background: var(--skip); padding: 2px 8px;
+  font-family: -apple-system, "Segoe UI", sans-serif; }
+tr.skip .omitted { color: var(--muted); }
+/* Formatted view: Markdown syntax hidden, what it marks styled, and prose
+   in a proportional font. */
+body.formatted td.code { font-family: Georgia, "Times New Roman", serif; font-size: 14px; }
+body.formatted .s-syn { display: none; }
+body.formatted .s-em { font-style: italic; }
+body.formatted .s-strong { font-weight: 700; }
+body.formatted .s-code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em;
+  background: var(--panel); }
+body.formatted .s-link { color: var(--link); text-decoration: underline; }
+body.formatted .s-cite { color: var(--move); }
+body.formatted .s-quote { font-style: italic; color: var(--muted); }
+body.formatted .s-h1, body.formatted .s-h2, body.formatted .s-h3,
+body.formatted .s-h4, body.formatted .s-h5, body.formatted .s-h6 { font-weight: 700; }
+body.formatted .s-h1 { font-size: 1.4em; } body.formatted .s-h2 { font-size: 1.25em; }
+body.formatted .s-h3 { font-size: 1.1em; }
+footer { color: var(--muted); font-size: 12px; margin-bottom: 48px; }
+.toolbar { position: fixed; right: 16px; bottom: 16px; z-index: 2; display: flex;
+  gap: 8px; align-items: center; background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+  box-shadow: 0 2px 8px #0003; font-size: 13px; flex-wrap: wrap; }
+.toolbar button { font: inherit; color: var(--link); background: none; border: 0;
+  padding: 0 4px; cursor: pointer; }
+.toolbar button[aria-pressed="true"] { font-weight: 700; }
+.toolbar button:disabled { color: var(--muted); cursor: default; }
+.toolbar .counter { color: var(--muted); min-width: 7em; text-align: center; }
+.toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+/* No help cursor where the tooltip is switched off. */
+body.no-changes-tips [data-tip], body.no-comments-tips .comment { cursor: auto; }
+/* Single column: each row shows the old line above the new one; unchanged
+   and added lines show their new side only, removed lines their old side. */
+body.unified colgroup { display: none; }
+body.unified table, body.unified tbody { display: block; }
+body.unified tbody[hidden] { display: none; }
+body.unified tr { display: grid; grid-template-columns: 5.5em 1fr; }
+body.unified td.code.left { border-right: 0; }
+body.unified tr.equal td.l, body.unified tr.equal td.left,
+body.unified tr.insert td.l, body.unified tr.insert td.left,
+body.unified tr.moved-in td.l, body.unified tr.moved-in td.left,
+body.unified tr.delete td.r, body.unified tr.delete td.right,
+body.unified tr.moved-out td.r, body.unified tr.moved-out td.right { display: none; }
+body.unified tr.skip td { grid-column: 1 / -1; }
+@media print {
+  body { padding: 0; font-size: 11px; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .toolbar, .summary button { display: none; }
+  details.file > summary { position: static; }
+  tr { break-inside: avoid; }
+  tr.current td, tr.target td { box-shadow: none; }
+}
+</style>
+</head>
+<body>
+<main>
+<h1>{{ c.repo_name }}</h1>
+
+{% macro side(r) -%}
+{{ r.subject }}{% if r.author or r.date %} <span class="role">— {{ r.author }}{% if r.author and r.date %}, {% endif %}{{ r.date }}</span>{% endif %}
+{%- endmacro %}
+<div class="revisions">
+  <span class="role">Base (older)</span>
+  <code title="{{ c.base.hexsha }}">{{ c.base.short }}</code>
+  <span>{{ side(c.base) }}</span>
+  <span class="role">Target (newer)</span>
+  <code title="{{ c.target.hexsha }}">{{ c.target.short }}</code>
+  <span>{{ side(c.target) }}</span>
+</div>
+
+{% if c.commits %}
+<details class="commits"{% if c.commits_total <= 10 %} open{% endif %}>
+  <summary>{{ "{:,}".format(c.commits_total) }} commit{{ "" if c.commits_total == 1 else "s" }} in between{% if c.target.short in ("working tree", "index") %}, up to HEAD{% endif %}</summary>
+  <ol>
+  {% for r in c.commits %}
+    <li><code title="{{ r.hexsha }}">{{ r.short }}</code><span class="role">{{ r.date }}</span><span>{{ r.subject }} <span class="role">— {{ r.author }}</span></span></li>
+  {% endfor %}
+  {% if c.commits_total > c.commits | length %}
+    <li><span></span><span></span><span class="role">… and {{ "{:,}".format(c.commits_total - c.commits | length) }} older</span></li>
+  {% endif %}
+  </ol>
+</details>
+{% endif %}
+
+{% if c.comments %}
+{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}{% set same_c = c.comments_with("unchanged") %}
+<section class="comments-panel" aria-labelledby="comments-title">
+  <h2 id="comments-title">Comments: {{ "{:,}".format(new_c | length) }} new, {{ "{:,}".format(gone_c | length) }} removed, {{ "{:,}".format(same_c | length) }} unchanged</h2>
+  {% macro comment_list(items) %}
+  <ul>
+  {% for e in items %}
+    <li><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}">{{ e.text }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
+  {% endfor %}
+  </ul>
+  {% endmacro %}
+  {{ comment_list(new_c + gone_c) }}
+  {% if same_c %}
+  <details><summary>{{ "{:,}".format(same_c | length) }} unchanged comment{{ "" if same_c | length == 1 else "s" }}</summary>{{ comment_list(same_c) }}</details>
+  {% endif %}
+</section>
+{% endif %}
+
+{% macro counts(x) -%}
+<span class="add" title="lines added">+{{ "{:,}".format(x.additions) }}</span>
+<span class="rem" title="lines removed">−{{ "{:,}".format(x.deletions) }}</span>
+<span class="role">lines,</span>
+<span class="add" title="words added">+{{ "{:,}".format(x.words_added) }}</span>
+<span class="rem" title="words removed">−{{ "{:,}".format(x.words_removed) }}</span>
+<span class="role">words{% if x.moved %}, {{ "{:,}".format(x.moved) }} moved line{{ "" if x.moved == 1 else "s" }}{% endif %}</span>
+{%- endmacro %}
+
+{% if not c.files %}
+<p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
+{% else %}
+<div class="summary">
+  <span>{{ "{:,}".format(c.files | length) }} file{{ "" if c.files | length == 1 else "s" }} changed:
+  {{ counts(c) }}{% if paths %}, in {{ paths | join(", ") }}{% endif %}</span>
+  <button type="button" data-files="open">Expand all</button>
+  <button type="button" data-files="close">Collapse all</button>
+</div>
+
+<nav aria-label="Changed files"><ul>
+{% for f in c.files %}
+  <li><span class="change">{{ f.change }}</span><a href="#{{ f.anchor }}">{{ f.path }}</a>
+    {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}</li>
+{% endfor %}
+</ul></nav>
+
+{% set signs = {"delete": ("−", ""), "insert": ("", "+"), "replace": ("~", "~"), "moved-out": ("→", ""), "moved-in": ("", "←")} %}
+{% set spoken = {"delete": "removed line", "insert": "added line", "replace": "changed line", "moved-out": "moved line, from here", "moved-in": "moved line, to here"} %}
+{% for f in c.files %}
+<details class="file" id="{{ f.anchor }}" open>
+  <summary>
+    <span class="path">{% if f.change == "renamed" %}{{ f.old_path }} → {% endif %}{{ f.path }}</span>
+    <span class="role">{{ f.change }}</span>
+    {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}
+    {% if f.note %}<span class="file-note">{{ f.note }}</span>{% endif %}
+  </summary>
+  {% if f.old_image or f.new_image %}
+  <div class="images">
+    <figure class="old">{% if f.old_image %}<img src="{{ f.old_image }}" alt="old version of {{ f.path }}"><figcaption>old</figcaption>{% else %}<figcaption>(none)</figcaption>{% endif %}</figure>
+    <figure class="new">{% if f.new_image %}<img src="{{ f.new_image }}" alt="new version of {{ f.path }}"><figcaption>new</figcaption>{% else %}<figcaption>(none)</figcaption>{% endif %}</figure>
+  </div>
+  {% elif f.binary %}
+  <div class="note">Binary file, not shown.</div>
+  {% elif not f.rows %}
+  <div class="note">Content unchanged{% if f.change == "renamed" %} (renamed only){% endif %}.</div>
+  {% else %}
+  <table>
+    <caption class="sr">Changes in {{ f.path }}: old version on the left, new version on the right</caption>
+    <colgroup><col class="no"><col><col class="no"><col></colgroup>
+    <tbody>
+    {% for r in f.rows %}
+    {% if r.kind == "skip" %}
+    </tbody>
+    {% if r.omitted %}
+    <tbody><tr class="skip"><td colspan="4"><span class="omitted">⋯ {{ "{:,}".format(r.omitted) }} unchanged lines, left out of the page (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
+    {% else %}
+    <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ show {{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
+    <tbody hidden>
+    {% for h in r.hidden %}
+    <tr class="equal"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ h.left_label or h.left_no }}</td><td class="code left">{{ h.left }}</td><td class="no r">{{ h.right_label or h.right_no }}</td><td class="code right">{{ h.right }}</td></tr>
+    {% endfor %}
+    </tbody>
+    {% endif %}
+    <tbody>
+    {% else %}
+    {% set tip = r.changes | join("\n") %}
+    {% set sign = signs.get(r.kind, ("", "")) %}
+    <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>
+      <td class="no l">{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
+      <td class="code left"{% if tip and r.left_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left }}</td>
+      <td class="no r">{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
+      <td class="code right"{% if tip and r.right_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right }}</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</details>
+{% endfor %}
+{% endif %}
+
+<footer>Generated {{ generated }} by sidediff {{ version }}.</footer>
+</main>
+<div id="tip" role="tooltip" hidden></div>
+<div class="toolbar" role="toolbar" aria-label="Changes and views">
+  <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
+  <span class="counter" aria-live="polite">{{ "{:,}".format(c.change_count) }} change{{ "" if c.change_count == 1 else "s" }}</span>
+  <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
+  <button type="button" data-toggle="unified" aria-pressed="false" title="One column: old line above new line (u)">One column</button>
+  <button type="button" data-toggle="formatted" aria-pressed="false" title="Show Markdown formatted instead of raw (f)">Formatted</button>
+  <button type="button" data-toggle="cb" aria-pressed="false" title="Orange and blue instead of red and green (c)">Colour-blind colours</button>
+  <button type="button" data-toggle="tint" aria-pressed="false" title="Tint the whole of an edited line, not only its changed words (t)">Tint edited lines</button>
+  <label title="The author, text and date of a comment, on hovering its marker"><input type="checkbox" data-tips="comments" checked> Comment tooltips</label>
+  <label title="What was inserted, deleted or changed, on hovering a change or a changed line"><input type="checkbox" data-tips="changes" checked> Change tooltips</label>
+</div>
+<script>
+(function () {
+  var changes = Array.prototype.slice.call(document.querySelectorAll("tr.first-change"));
+  var counter = document.querySelector(".toolbar .counter");
+  var current = -1;
+  var fmt = function (n) { return n.toLocaleString("en-US"); };
+  document.querySelectorAll("[data-nav]").forEach(function (b) { b.disabled = !changes.length; });
+
+  // Jump to change k (wrapping around), opening its file if collapsed.
+  function go(k) {
+    if (!changes.length) return;
+    current = (k + changes.length) % changes.length;
+    var row = changes[current];
+    var file = row.closest("details");
+    if (file) file.open = true;
+    document.querySelectorAll("tr.current").forEach(function (r) { r.classList.remove("current"); });
+    row.classList.add("current");
+    row.scrollIntoView({ block: "center" });
+    counter.textContent = "change " + fmt(current + 1) + " of " + fmt(changes.length);
+  }
+
+  // The views (one column, formatted, colour-blind colours) are classes of
+  // the body, remembered where the browser allows.
+  function setView(name, on) {
+    document.body.classList.toggle(name, on);
+    var b = document.querySelector('[data-toggle="' + name + '"]');
+    if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
+    try { localStorage.setItem("sidediff-" + name, on ? "1" : "0"); } catch (e) {}
+  }
+  function toggle(name) { setView(name, !document.body.classList.contains(name)); }
+  ["unified", "formatted", "cb", "tint"].forEach(function (name) {
+    try { if (localStorage.getItem("sidediff-" + name) === "1") setView(name, true); } catch (e) {}
+  });
+
+  // Reveal the run of unchanged lines a fold row stands for.
+  function unfold(fold) {
+    fold.nextElementSibling.hidden = false;
+    fold.remove();
+  }
+
+  document.addEventListener("click", function (e) {
+    var expand = e.target.closest(".expand");
+    if (expand) { unfold(expand.closest("tbody")); return; }
+    var all = e.target.closest("[data-files]");
+    if (all) {
+      var open = all.dataset.files === "open";
+      document.querySelectorAll("details.file").forEach(function (d) { d.open = open; });
+      return;
+    }
+    var nav = e.target.closest("[data-nav]");
+    if (nav) { go(current + Number(nav.dataset.nav)); return; }
+    var view = e.target.closest("[data-toggle]");
+    if (view) toggle(view.dataset.toggle);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
+                 u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
+                 c: function () { toggle("cb"); }, t: function () { toggle("tint"); } };
+    if (keys[e.key]) keys[e.key]();
+  });
+
+  // Following a link (a file, or a row from the comments panel) opens the
+  // file and reveals the row if it sits among hidden unchanged lines.
+  function openTarget() {
+    var t = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!t) return;
+    var body = t.closest("tbody[hidden]");
+    if (body && body.previousElementSibling && body.previousElementSibling.classList.contains("fold")) {
+      unfold(body.previousElementSibling);
+    }
+    var file = t.tagName === "DETAILS" ? t : t.closest("details.file");
+    if (file) file.open = true;
+    if (t.tagName === "TR") {
+      document.querySelectorAll("tr.target").forEach(function (r) { r.classList.remove("target"); });
+      t.classList.add("target");
+      t.scrollIntoView({ block: "center" });
+    }
+  }
+  window.addEventListener("hashchange", openTarget);
+  openTarget();
+
+  // The tooltips. The page is written with the browser's own tooltips
+  // (title) on changed words and lines, which is what a page read without
+  // scripts shows; with the script, they move to data-tip and all tooltips
+  // go through one element, so only one shows at a time: the innermost
+  // under the mouse, a comment before the change it sits in, a changed word
+  // before its line. A comment also lives in its marker's aria-label, for
+  // screen readers.
+  var tip = document.getElementById("tip");
+  var shown = null;
+  var MAX_LINES = 12;
+  document.querySelectorAll("table [title]").forEach(function (el) {
+    el.dataset.tip = el.title;
+    el.removeAttribute("title");
+  });
+  function add(cls, text) {
+    var el = document.createElement(cls === "b" ? "b" : "span");
+    if (cls !== "b") el.className = cls;
+    el.textContent = text;
+    tip.appendChild(el);
+  }
+  function showTip(el) {
+    tip.textContent = "";
+    if (el.classList.contains("comment")) {
+      add("b", el.dataset.author || "Comment");
+      add("line", el.dataset.text);
+      if (el.dataset.date) add("when", el.dataset.date);
+    } else {
+      var lines = el.dataset.tip.split("\n");
+      lines.slice(0, MAX_LINES).forEach(function (l) { add("line", l); });
+      if (lines.length > MAX_LINES) add("more", "… and " + fmt(lines.length - MAX_LINES) + " more");
+    }
+    tip.hidden = false;
+    shown = el;
+    placeTip();
+  }
+  // Below what is hovered, or above it when there is no room below.
+  function placeTip() {
+    if (!shown) return;
+    var r = shown.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    // A line cell is as tall as its wrapped text: anchor to where the mouse
+    // entered it instead of its bottom.
+    var bottom = shown.tagName === "TD" && anchorY ? anchorY + 12 : r.bottom;
+    var top0 = shown.tagName === "TD" && anchorY ? anchorY - 12 : r.top;
+    var left = Math.max(8, Math.min(anchorX || r.left, r.right - 8, window.innerWidth - t.width - 8));
+    var top = bottom + 6 + t.height > window.innerHeight ? top0 - t.height - 6 : bottom + 6;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = Math.max(8, top) + "px";
+  }
+  function hideTip() {
+    tip.hidden = true;
+    shown = null;
+  }
+  // Each kind of tooltip can be switched off in the toolbar; the choice is
+  // remembered like the views. With one kind off, the other still shows:
+  // a comment inside a changed word then shows the change.
+  var tipsOn = { comments: true, changes: true };
+  function tipSelector() {
+    return [tipsOn.comments && ".comment", tipsOn.changes && "[data-tip]"]
+      .filter(Boolean).join(", ");
+  }
+  function setTips(kind, on) {
+    tipsOn[kind] = on;
+    document.body.classList.toggle("no-" + kind + "-tips", !on);
+    var box = document.querySelector('[data-tips="' + kind + '"]');
+    if (box) box.checked = on;
+    try { localStorage.setItem("sidediff-tips-" + kind, on ? "1" : "0"); } catch (e) {}
+    hideTip();
+  }
+  ["comments", "changes"].forEach(function (kind) {
+    try { if (localStorage.getItem("sidediff-tips-" + kind) === "0") setTips(kind, false); } catch (e) {}
+  });
+  document.addEventListener("change", function (e) {
+    var box = e.target.closest("[data-tips]");
+    if (box) setTips(box.dataset.tips, box.checked);
+  });
+
+  var anchorX = 0, anchorY = 0;
+  document.addEventListener("mouseover", function (e) {
+    var selector = tipSelector();
+    var el = selector && e.target.closest(selector);
+    if (el === shown) return;
+    if (!el) { hideTip(); return; }
+    anchorX = e.clientX;
+    anchorY = e.clientY;
+    showTip(el);
+  });
+  document.addEventListener("focusin", function (e) {
+    var m = tipsOn.comments && e.target.closest(".comment");
+    if (m) { anchorX = anchorY = 0; showTip(m); }
+  });
+  document.addEventListener("focusout", hideTip);
+  // Scrolling keeps the tooltip where it belongs.
+  window.addEventListener("scroll", function () { anchorX = anchorY = 0; placeTip(); }, { passive: true });
+
+  // Print every file, collapsed or not.
+  window.addEventListener("beforeprint", function () {
+    document.querySelectorAll("details.file").forEach(function (d) { d.open = true; });
+  });
+})();
+</script>
+</body>
+</html>
