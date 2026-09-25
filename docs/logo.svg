@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 22 212 212" width="256" height="256" role="img" aria-labelledby="title">
+  <title id="title">prosediff</title>
+  <!-- old page, behind, tilted left -->
+  <g transform="rotate(-8 92 132)">
+    <path d="M40 44h78l22 22v122a8 8 0 0 1-8 8H40a8 8 0 0 1-8-8V52a8 8 0 0 1 8-8z" fill="#fdf1f1" stroke="#b42318" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M118 44v22h22" fill="none" stroke="#b42318" stroke-width="6" stroke-linejoin="round"/>
+    <g stroke="#b42318" stroke-width="7" stroke-linecap="round" opacity="0.45">
+      <path d="M52 84h52"/>
+      <path d="M52 108h68"/>
+      <path d="M52 156h60"/>
+    </g>
+    <!-- the removed words, struck through -->
+    <rect x="46" y="122" width="74" height="20" rx="4" fill="#f9c9c5"/>
+    <path d="M52 132h62" stroke="#b42318" stroke-width="7" stroke-linecap="round"/>
+  </g>
+  <!-- new page, in front, tilted right -->
+  <g transform="rotate(6 164 132)">
+    <path d="M116 50h78l22 22v122a8 8 0 0 1-8 8h-92a8 8 0 0 1-8-8V58a8 8 0 0 1 8-8z" fill="#ffffff" stroke="#1f2937" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M194 50v22h22" fill="none" stroke="#1f2937" stroke-width="6" stroke-linejoin="round"/>
+    <g stroke="#1f2937" stroke-width="7" stroke-linecap="round" opacity="0.35">
+      <path d="M128 90h52"/>
+      <path d="M128 114h68"/>
+      <path d="M128 186h40"/>
+    </g>
+    <!-- the added words, highlighted -->
+    <rect x="122" y="128" width="84" height="44" rx="5" fill="#c9f0d6"/>
+    <g stroke="#067647" stroke-width="7" stroke-linecap="round">
+      <path d="M128 140h70"/>
+      <path d="M128 160h48"/>
+    </g>
+  </g>
+</svg>

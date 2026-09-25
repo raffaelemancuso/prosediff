@@ -1,5 +1,7 @@
 # prosediff
 
+<img src="https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/logo.svg" alt="prosediff logo: an old page with a struck-out line behind a new page with added lines highlighted in green" width="128" align="right">
+
 **Side-by-side comparison of prose, not code: Word documents (.docx) first,
 Markdown too.**
 
@@ -118,7 +120,10 @@ Examples:
 `prosediff-gui REPOSITORY` opens it with a git repository filled in (or the
 repository a folder belongs to); `prosediff-gui FILE.docx` first asks, in a
 file dialog, for the file to compare it with, the older of the two going on
-the left; `prosediff-gui OLD NEW` opens it with two Markdown or Word files.
+the left; `prosediff-gui OLD NEW` opens it with two Markdown or Word files,
+or two folders. Any other arguments (a folder outside git, a `.txt` file,
+three files) show an error box listing the arguments received, and the
+program exits once it is dismissed.
 The Files tab has a button to swap the two.
 
 To have it at hand, install it once:
@@ -289,6 +294,7 @@ uv run pytest                            # the tests
 uv run playwright install chromium       # once, for the browser tests
 uv run ruff check && uv run ruff format --check
 uv run --with pillow python docs/make_screenshots.py   # the README screenshots
+uv run --with pillow python docs/make_icon.py          # the window icons, from docs/logo.svg
 ```
 
 The tests build throwaway repositories with GitPython and need `git` on

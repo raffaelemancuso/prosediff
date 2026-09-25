@@ -1,5 +1,6 @@
 """The window: choosing the sides, generating the page, remembering choices."""
 
+import sys
 import tkinter as tk
 
 import pytest
@@ -39,6 +40,19 @@ def test_arguments_prefill_two_files(tmp_path):
     assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(d))
     # the page goes next to the last file, named after both
     assert s.output == str(tmp_path / "v1_vs_v2.html")
+
+
+def test_arguments_prefill_two_folders(tmp_path):
+    a, b = tmp_path / "submitted", tmp_path / "revised"
+    a.mkdir()
+    b.mkdir()
+    s, note = settings_from_args([str(a), str(b)], Settings(mode="git"))
+    assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(b))
+    assert s.output == str(tmp_path / "submitted_vs_revised.html")
+    # a folder and a file do not make a pair
+    (tmp_path / "v1.md").write_text("x")
+    _, note = settings_from_args([str(a), str(tmp_path / "v1.md")], Settings())
+    assert "or two folders" in note
 
 
 @pytest.mark.parametrize(
@@ -213,3 +227,65 @@ def test_swap_files(root):
     app.swap_files()
     s = app.collect()
     assert (s.old, s.new) == ("returned.docx", "sent.docx")
+
+
+def test_invalid_arguments_show_an_error_and_exit(monkeypatch, tmp_path):
+    from prosediff import gui
+
+    shown = []
+
+    class NoWindow:  # a second real Tk is unreliable on Windows (see tk_root)
+        def withdraw(self):
+            pass
+
+        def destroy(self):
+            shown.append("destroyed")
+
+    monkeypatch.setattr(gui.tk, "Tk", NoWindow)
+    monkeypatch.setattr(gui, "own_taskbar_button", lambda: None)
+    monkeypatch.setattr(gui, "set_icon", lambda root: None)
+    monkeypatch.setattr(gui, "load_settings", Settings)
+    monkeypatch.setattr(gui.messagebox, "showerror", lambda title, msg, **kw: shown.append(msg))
+    monkeypatch.setattr(gui, "App", lambda *a: pytest.fail("the window must not open"))
+    with pytest.raises(SystemExit) as exited:
+        gui.main([str(tmp_path / "notes.txt")])
+    assert exited.value.code == 2
+    assert shown[0].startswith("Not a folder, a Markdown or a Word file")
+    assert "Usage: prosediff-gui" in shown[0] and shown[1] == "destroyed"
+    assert f"Received 1 argument:\n1. “{tmp_path / 'notes.txt'}”  (not found)" in shown[0]
+
+
+def test_received_lists_the_arguments(tmp_path):
+    from prosediff.gui import received
+
+    (tmp_path / "a b.docx").write_text("")
+    assert received([str(tmp_path / "a"), str(tmp_path / "a b.docx")]).splitlines() == [
+        "Received 2 arguments:",
+        f"1. “{tmp_path / 'a'}”  (not found)",
+        f"2. “{tmp_path / 'a b.docx'}”",
+    ]
+
+
+def test_the_window_has_the_logo(tk_root):
+    from pathlib import Path
+
+    from prosediff import gui
+
+    here = Path(gui.__file__).parent
+    assert (here / "logo.ico").is_file() and (here / "logo.png").is_file()
+    if sys.platform != "win32":
+        gui.set_icon(tk_root)  # only that the .png loads without an error
+        return
+    # Tk does not report an .ico back: ask Windows for the window's icons
+    import ctypes
+
+    tk_root.update_idletasks()
+    hwnd = ctypes.windll.user32.GetParent(tk_root.winfo_id())
+
+    def icons():
+        send = ctypes.windll.user32.SendMessageW
+        return [send(hwnd, 0x7F, which, 0) for which in (0, 1)]  # WM_GETICON small, big
+
+    tk_feather = icons()
+    gui.set_icon(tk_root)
+    assert all(icons()) and all(a != b for a, b in zip(icons(), tk_feather, strict=True))

@@ -7,6 +7,7 @@ a diff. The comparison runs in a background thread, so the window stays
 responsive; the choices are remembered for the next time.
 """
 
+import ctypes
 import json
 import os
 import queue
@@ -133,8 +134,8 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
     One argument that is a git repository (or a folder inside one) fills in
     the repository, the sides starting from their defaults; one Markdown or
     Word file fills in the files tab, its partner to be chosen when the
-    window opens; two Markdown or Word files fill in the files tab. Anything
-    else is ignored, and the second value says why.
+    window opens; two Markdown or Word files, or two folders, fill in the
+    files tab. Anything else is ignored, and the second value says why.
     """
     s = replace(base)
     if len(args) == 1:
@@ -157,14 +158,15 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
         return s, f"Not a folder, a Markdown or a Word file: {path}"
     if len(args) == 2:
         old, new = Path(args[0]), Path(args[1])
-        if all(p.is_file() and p.suffix.lower() in PREFILLED_FILES for p in (old, new)):
+        both_files = all(p.is_file() and p.suffix.lower() in PREFILLED_FILES for p in (old, new))
+        if both_files or (old.is_dir() and new.is_dir()):
             s.mode = "files"
             s.old, s.new = str(old.resolve()), str(new.resolve())
             s.output = page_beside(old, new)
             return s, ""
-        return s, "Two arguments must be two Markdown or Word files."
+        return s, "Two arguments must be two Markdown or Word files, or two folders."
     if args:
-        return s, "Give one git repository, or two Markdown or Word files."
+        return s, "Give one git repository, two Markdown or Word files, or two folders."
     return s, ""
 
 
@@ -573,13 +575,62 @@ def ask_second_file(root: tk.Tk, first: Path) -> Path | None:
     return Path(chosen) if chosen else None
 
 
+def received(args: list[str]) -> str:
+    """The arguments as the program got them, one per line and quoted, so a
+    path split at a space or quoted twice shows as such; a path that does
+    not exist is marked."""
+    lines = [f"Received {len(args)} argument{'' if len(args) == 1 else 's'}:"]
+    for i, a in enumerate(args, 1):
+        missing = "" if Path(a).exists() else "  (not found)"
+        lines.append(f"{i}. “{a}”{missing}")
+    return "\n".join(lines)
+
+
+def own_taskbar_button() -> None:
+    """On Windows, a taskbar button of prosediff's own, showing its icon,
+    rather than one grouped with every other Python program under Python's.
+    Called before the first window is made."""
+    if sys.platform == "win32":
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("prosediff.gui")
+
+
+def set_icon(root: tk.Tk) -> None:
+    """The prosediff logo on the title bar and the taskbar, and on the
+    dialogs and message boxes too: the .ico, with all its sizes, on Windows,
+    the .png elsewhere."""
+    here = Path(__file__).parent
+    try:
+        if sys.platform == "win32":
+            # the window's own, then the default of the dialogs made later
+            # (with default=, tkinter ignores the first argument)
+            root.iconbitmap(str(here / "logo.ico"))
+            root.iconbitmap(default=str(here / "logo.ico"))
+        else:
+            root.iconphoto(True, tk.PhotoImage(master=root, file=str(here / "logo.png")))
+    except tk.TclError:  # no icon rather than no window
+        pass
+
+
 def main(argv: list[str] | None = None) -> None:
     """prosediff-gui [REPOSITORY | FILE | OLD NEW]: the window, prefilled from
-    the arguments when they are a git repository or Markdown or Word files;
-    for one file, a dialog asks for the file to compare it with."""
+    the arguments when they are a git repository, Markdown or Word files, or
+    two folders; for one file, a dialog asks for the file to compare it with.
+    Arguments that are none of these are reported in an error box, with the
+    arguments received, and the program exits once it is dismissed."""
     args = sys.argv[1:] if argv is None else argv
     settings, note = settings_from_args(args, load_settings())
+    own_taskbar_button()
     root = tk.Tk()
+    set_icon(root)
+    if note:
+        root.withdraw()  # the error box alone, no empty window behind it
+        messagebox.showerror(
+            "prosediff",
+            f"{note}\n\n{received(args)}\n\nUsage: prosediff-gui [REPOSITORY | FILE | OLD NEW]",
+            parent=root,
+        )
+        root.destroy()
+        sys.exit(2)
     first = single_file(args)
     if first is not None:
         root.withdraw()  # the dialog alone, then the window
