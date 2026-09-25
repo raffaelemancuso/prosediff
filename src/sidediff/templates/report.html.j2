@@ -93,9 +93,12 @@ table { width: 100%; border-collapse: collapse; table-layout: fixed;
   font: 12px/1.45 ui-monospace, Consolas, "Liberation Mono", monospace; }
 col.no { width: 5.5em; }
 td { vertical-align: top; padding: 0 8px; }
-/* Prose: a little space between paragraphs (their blank lines are not
-   shown). */
-table.prose td.code, table.prose td.no { padding-bottom: 0.5em; }
+/* Prose: some space between paragraphs (their blank lines are not shown),
+   set with the Spacing buttons. */
+:root { --para-gap: 0.75em; }
+table.prose td.code, table.prose td.no { padding-bottom: var(--para-gap); }
+.spacing { display: inline-flex; align-items: center; gap: 2px; }
+.spacing button { min-width: 1.8em; }
 td.no { color: var(--muted); text-align: right; user-select: none;
   border-right: 1px solid var(--border); white-space: nowrap; }
 /* +, − and ~ in the gutter: the kind of change without relying on colour. */
@@ -341,6 +344,9 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   <button type="button" data-toggle="formatted" aria-pressed="false" title="Show Markdown formatted instead of raw (f)">Formatted</button>
   <button type="button" data-toggle="cb" aria-pressed="false" title="Orange and blue instead of red and green (c)">Colour-blind colours</button>
   <button type="button" data-toggle="tint" aria-pressed="false" title="Tint the whole of an edited line, not only its changed words (t)">Tint edited lines</button>
+  <span class="spacing" role="group" aria-label="Space between paragraphs"><span class="role">Spacing</span>
+    <button type="button" data-gap="-1" title="Less space between paragraphs ([)" aria-label="Less space between paragraphs">−</button>
+    <button type="button" data-gap="1" title="More space between paragraphs (])" aria-label="More space between paragraphs">+</button></span>
   <label title="The author, text and date of a comment, on hovering its marker"><input type="checkbox" data-tips="comments" checked> Comment tooltips</label>
   <label title="What was inserted, deleted or changed, on hovering a change or a changed line"><input type="checkbox" data-tips="changes" checked> Change tooltips</label>
 </div>
@@ -396,14 +402,33 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     var nav = e.target.closest("[data-nav]");
     if (nav) { go(current + Number(nav.dataset.nav)); return; }
     var view = e.target.closest("[data-toggle]");
-    if (view) toggle(view.dataset.toggle);
+    if (view) { toggle(view.dataset.toggle); return; }
+    var gap = e.target.closest("[data-gap]");
+    if (gap) setGap(gapStep + Number(gap.dataset.gap));
   });
+
+  // The space between paragraphs, in steps of a quarter line from none to
+  // three lines; remembered like the views.
+  var GAP_STEP = 0.25, GAP_DEFAULT = 3, GAP_MAX = 12, gapStep = GAP_DEFAULT;
+  function setGap(step) {
+    gapStep = Math.max(0, Math.min(GAP_MAX, step));
+    document.documentElement.style.setProperty("--para-gap", gapStep * GAP_STEP + "em");
+    var less = document.querySelector('[data-gap="-1"]'), more = document.querySelector('[data-gap="1"]');
+    if (less) less.disabled = gapStep === 0;
+    if (more) more.disabled = gapStep === GAP_MAX;
+    try { localStorage.setItem("sidediff-gap", String(gapStep)); } catch (e) {}
+  }
+  try {
+    var saved = localStorage.getItem("sidediff-gap");
+    if (saved !== null && !isNaN(Number(saved))) setGap(Number(saved));
+  } catch (e) {}
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
-                 c: function () { toggle("cb"); }, t: function () { toggle("tint"); } };
+                 c: function () { toggle("cb"); }, t: function () { toggle("tint"); },
+                 "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
   });
 

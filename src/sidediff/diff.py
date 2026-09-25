@@ -874,6 +874,30 @@ def without_blank_lines(lines: list[str], labels: list[str] | None) -> tuple[lis
     )
 
 
+def paragraph_numbers(labels: list[str]) -> list[str]:
+    """Line labels ("5", "7", "7.2" ...) renumbered as paragraphs, in order:
+    1, 2, 2.2 ... (a line's sentences keep their place after the dot)."""
+    numbers: dict[str, str] = {}
+    out = []
+    for label in labels:
+        line, dot, sentence = label.partition(".")
+        number = numbers.setdefault(line, str(len(numbers) + 1))
+        out.append(number + dot + sentence)
+    return out
+
+
+def alignment_keys(old: list[str], new: list[str]) -> tuple[list[str], list[str]]:
+    """The lines as the alignment compares them: without the markers of the
+    comments both sides have. A comment that only moved (its paragraph was
+    deleted, it went to the next) is then no reason to show a line; a new or
+    removed comment still is."""
+    shared = set(placeholders_in("\n".join(old))) & set(placeholders_in("\n".join(new)))
+    if not shared:
+        return old, new
+    pattern = re.compile("[" + "".join(sorted(shared)) + "]")
+    return [pattern.sub("", line) for line in old], [pattern.sub("", line) for line in new]
+
+
 def _is_docx(path: str | None) -> bool:
     return bool(path) and path.lower().endswith(".docx")
 
@@ -902,7 +926,8 @@ def build_files(
     labels: dict[int, tuple[list[str] | None, list[str] | None]] = {}
     notes: dict[int, footnotes.Footnotes] = {}
     for fd, old_bytes, new_bytes in entries:
-        if _is_docx(fd.old_path) or _is_docx(fd.new_path):
+        from_word = _is_docx(fd.old_path) or _is_docx(fd.new_path)
+        if from_word:
             try:
                 if old_bytes:
                     old_bytes = docx_to_markdown(old_bytes, fd.old_path or "", docx_changes)
@@ -946,6 +971,11 @@ def build_files(
         if fd.markdown:
             old_lines, old_labels = without_blank_lines(old_lines, old_labels)
             new_lines, new_labels = without_blank_lines(new_lines, new_labels)
+            if from_word:
+                # No one sees the Markdown a Word document was read into:
+                # its paragraphs are numbered instead of its lines.
+                old_labels = paragraph_numbers(old_labels)
+                new_labels = paragraph_numbers(new_labels)
             # Footnote numbers set aside: a renumbered footnote is no change.
             old_lines, new_lines, notes[id(fd)] = footnotes.set_aside(
                 old_lines, new_lines, footnote_similarity
@@ -953,7 +983,7 @@ def build_files(
         labels[id(fd)] = (old_labels, new_labels)
         texts.append((fd, old_lines, new_lines))
 
-    all_ops = git_opcodes([(old, new) for _, old, new in texts], ignore_whitespace)
+    all_ops = git_opcodes([alignment_keys(old, new) for _, old, new in texts], ignore_whitespace)
     for (fd, old, new), ops in zip(texts, all_ops, strict=False):
         fn = notes.get(id(fd))
         token = footnotes.use_for_tooltips(fn)

@@ -169,10 +169,11 @@ the next time (`%APPDATA%\sidediff\gui.json`).
   citations styled, prose in a proportional font); `c` for colour-blind
   colours (orange and blue instead of red and green); `t` to tint the whole
   of an edited line, as most diff tools do (by default only its changed
-  words are coloured, and its gutter); and two checkboxes to
-  switch off the comment tooltips or the change tooltips (with the comment
-  ones off, a comment inside a changed word shows the change). The browser
-  remembers the views and the checkboxes.
+  words are coloured, and its gutter); − and + (or `[` and `]`) for less or
+  more space between the paragraphs of Markdown and Word documents; and two
+  checkboxes to switch off the comment tooltips or the change tooltips (with
+  the comment ones off, a comment inside a changed word shows the change).
+  The browser remembers the views, the spacing and the checkboxes.
 - Printing (or saving as PDF from the browser) opens every file, drops the
   toolbar and buttons, keeps the colours and does not split a line across
   pages.
@@ -217,13 +218,19 @@ deleted text are dropped with it. Headers, footers and page layout are not
 part of the comparison. Nothing outside Python is needed: no Word, no
 pandoc. On a 12,000-word manuscript with 26 comments and tracked changes by
 two co-authors, the accepted and rejected texts match pandoc's word for word.
+Since nobody sees that Markdown, the rows of a Word document are numbered by
+paragraph (1, 2, 3, and 3.1, 3.2 for the sentences of paragraph 3 with
+`--by-sentence`) rather than by line of it; Markdown files keep their line
+numbers.
 
 Folding comments replaces each comment span, before any filter runs, with
 one character of the Unicode private use area standing for its author and
 text: a comment is then compared like a word, the same comment matches on
 both sides even when its `id` was renumbered by a new conversion, and a
 filter cannot cut it in two. The characters become markers when the page is
-built.
+built. The comments present on both sides are left out when the lines are
+lined up, so a paragraph that only gained a comment moved over from its
+neighbour is not shown as changed; one with a new or removed comment is.
 
 The formatted view recognises the common inline Markdown (headings, block
 quotes, code, strong, emphasis, links, images, citations, pandoc spans with

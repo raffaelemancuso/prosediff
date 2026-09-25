@@ -128,6 +128,28 @@ def test_inserted_paragraph_does_not_shift_the_pairing(tmp_path):
     ]
 
 
+def test_word_documents_are_numbered_by_paragraph(tmp_path):
+    paragraphs = [[("run", f"Paragraph {k} of the document.")] for k in range(1, 7)]
+    a = docx(tmp_path / "a.docx", paragraphs)
+    edited = [list(p) for p in paragraphs]
+    edited[3] = [("run", "Paragraph 4 of the document, edited.")]
+    b = docx(tmp_path / "b.docx", edited)
+    (f,) = compare_paths(a, b, context=None).files
+    rows = [r for r in f.rows if r.kind != "skip"]
+    assert [r.left_label for r in rows] == ["1", "2", "3", "4", "5", "6"]
+    assert next(r for r in rows if r.kind == "replace").right_label == "4"
+    # sentences follow their paragraph's number
+    c = compare_paths(a, b, context=None, by_sentence=True)
+    assert [r.left_label for r in c.files[0].rows][:2] == ["1", "2"]
+
+
+def test_markdown_keeps_its_line_numbers(tmp_path):
+    (tmp_path / "a.md").write_text("One.\n\nTwo.\n\nThree.\n")
+    (tmp_path / "b.md").write_text("One.\n\nTwo, edited.\n\nThree.\n")
+    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None).files
+    assert [r.left_label for r in f.rows] == ["1", "3", "5"]
+
+
 def test_broken_docx_is_listed_as_binary(tmp_path):
     a, b = tmp_path / "a.docx", tmp_path / "b.docx"
     a.write_bytes(b"not a zip")

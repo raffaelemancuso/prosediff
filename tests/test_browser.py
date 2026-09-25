@@ -122,6 +122,21 @@ def test_edited_lines_untinted_unless_asked(page):
     assert page.locator("tr.replace td.right").first.evaluate(background) == untinted
 
 
+def test_space_between_paragraphs(page):
+    cell = page.locator("tr.replace td.right").first
+    gap = "e => parseFloat(getComputedStyle(e).paddingBottom)"
+    default = cell.evaluate(gap)
+    assert default > 0
+    page.click('[data-gap="1"]')
+    assert cell.evaluate(gap) > default
+    page.reload()  # remembered
+    assert page.locator("tr.replace td.right").first.evaluate(gap) > default
+    for _ in range(20):
+        page.keyboard.press("[")
+    assert page.locator("tr.replace td.right").first.evaluate(gap) == 0
+    assert page.is_disabled('[data-gap="-1"]')
+
+
 def test_colour_blind_palette(page):
     before = page.evaluate("getComputedStyle(document.body).getPropertyValue('--ins-line')")
     page.keyboard.press("c")

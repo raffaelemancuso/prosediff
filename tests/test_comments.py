@@ -98,6 +98,24 @@ def test_a_comment_moving_is_not_a_changed_word(builder):
     assert "<ins" not in str(row.right).split("Second")[0]  # the marker is not highlighted
 
 
+def test_a_paragraph_a_comment_only_moved_into_is_not_shown(builder):
+    """The comment was already there, on the paragraph before: its moving
+    to the next paragraph is no reason to show either of them."""
+    lines = [f"Paragraph {k} of the text." for k in range(40)]
+    old = list(lines)
+    old[19] += NOTE
+    builder.write("p.md", "\n\n".join([*old, "The end."]) + "\n")
+    base = builder.commit("first")
+    new = list(lines)
+    new[20] = NOTE + new[20]
+    builder.write("p.md", "\n\n".join([*new, "The end, edited."]) + "\n")
+    target = builder.commit("second")
+    (f,) = compare(builder.path, base, target).files
+    shown = [r for r in f.rows if r.kind != "skip"]
+    assert [r.kind for r in shown if r.changed] == ["replace"]
+    assert not any("Paragraph 20" in str(r.right) for r in shown)
+
+
 def test_a_paragraph_with_only_a_new_comment_is_shown(builder):
     """Its text is unchanged, so it is no edit, but it is not folded away
     with the unchanged lines: the new comment shows, marked new."""
