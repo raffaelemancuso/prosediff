@@ -222,8 +222,9 @@ def main(argv: list[str] | None = None) -> int:
         f.write(render(comparison, args.paths, align=args.align))
 
     c = comparison
+    files = "file" if len(c.files) == 1 else "files"
     print(
-        f"{PROG}: {c.base.short}..{c.target.short}: {len(c.files):,} files, "
+        f"{PROG}: {c.base.short}..{c.target.short}: {len(c.files):,} {files}, "
         f"+{c.additions:,} -{c.deletions:,} -> {args.output}"
     )
     return 0
