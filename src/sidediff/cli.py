@@ -7,7 +7,15 @@ from pathlib import Path
 
 import git
 
-from sidediff.diff import MAX_HIDDEN, MOVE_SIMILARITY, FilterError, compare, compare_paths
+from sidediff.diff import (
+    CONTEXT,
+    MAX_HIDDEN,
+    MOVE_SIMILARITY,
+    PROSE_CONTEXT,
+    FilterError,
+    compare,
+    compare_paths,
+)
 from sidediff.render import ALIGNMENTS, render
 from sidediff.sources import DOCX_CHANGES, SourceError
 
@@ -72,9 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         "-U",
         "--context",
         type=int,
-        default=3,
+        default=None,
         metavar="N",
-        help="unchanged lines shown around each change (default: 3)",
+        help="unchanged lines shown around each change, in every file (default: "
+        f"{PROSE_CONTEXT} in Markdown files and Word documents, whose lines are "
+        f"paragraphs, {CONTEXT} in the others); the page can reveal the rest",
     )
     lines.add_argument("--full", action="store_true", help="show every line of the changed files")
     ap.add_argument(
@@ -160,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="version", version=f"%(prog)s {package_version()}")
     args = ap.parse_args(argv)
 
-    if args.context < 0:
+    if args.context is not None and args.context < 0:
         ap.error("--context must be 0 or more")
     if args.max_hidden < 0:
         ap.error("--max-hidden must be 0 or more")
@@ -178,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
 
     options = dict(
         paths=args.paths,
-        context=None if args.full else args.context,
+        context=None if args.full else ("auto" if args.context is None else args.context),
         md_filter=args.md_filter,
         ignore_whitespace=args.ignore_whitespace,
         fold_comments_md=args.fold_comments,

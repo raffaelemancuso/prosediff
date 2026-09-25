@@ -117,7 +117,7 @@ def test_inserted_paragraph_does_not_shift_the_pairing(tmp_path):
     new = "Body text.\n\nA new closing paragraph.\n\n" + "\n\n".join(notes) + "\n"
     (tmp_path / "a.md").write_text(old)
     (tmp_path / "b.md").write_text(new)
-    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md").files
+    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=3).files
     rows = [r for r in f.rows if r.kind != "skip"]
     assert [(r.kind, r.left_label, r.right_label) for r in rows] == [
         ("equal", "1", "1"),
@@ -141,6 +141,25 @@ def test_word_documents_are_numbered_by_paragraph(tmp_path):
     # sentences follow their paragraph's number
     c = compare_paths(a, b, context=None, by_sentence=True)
     assert [r.left_label for r in c.files[0].rows][:2] == ["1", "2"]
+
+
+def test_context_is_zero_for_prose_three_for_code_unless_set(tmp_path):
+    lines = [f"Line {k} of the file." for k in range(20)]
+    edited = list(lines)
+    edited[10] = "Line 10, edited."
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+    for folder, text in (("a", lines), ("b", edited)):
+        for ext, sep in ((".md", "\n\n"), (".txt", "\n")):
+            (tmp_path / folder / f"f{ext}").write_text(sep.join(text) + "\n")
+
+    def shown(**kw):
+        c = compare_paths(tmp_path / "a", tmp_path / "b", **kw)
+        return {f.path: sum(r.kind == "equal" for r in f.rows) for f in c.files}
+
+    assert shown() == {"f.md": 0, "f.txt": 6}
+    assert shown(context=1) == {"f.md": 2, "f.txt": 2}
+    assert shown(context=None) == {"f.md": 19, "f.txt": 19}
 
 
 def test_markdown_keeps_its_line_numbers(tmp_path):

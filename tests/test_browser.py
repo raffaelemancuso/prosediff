@@ -38,9 +38,7 @@ def page_file(builder, tmp_path):
     builder.write("doc.md", "\n".join(lines) + "\n")
     target = builder.commit("second")
     out = tmp_path / "page.html"
-    out.write_text(
-        render(compare(builder.path, base, target, fold_comments_md=True)), encoding="utf-8"
-    )
+    out.write_text(render(compare(builder.path, base, target, context=3)), encoding="utf-8")
     return out
 
 

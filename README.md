@@ -68,7 +68,7 @@ sidediff --files OLD NEW [options]
 | `-w`, `--ignore-whitespace`| compare lines ignoring whitespace, as `git diff -w`           |
 | `-p`, `--path PATH`        | restrict the diff to this file or folder (repeatable)         |
 | `-o`, `--output FILE`      | output file (default `diff.html`)                             |
-| `-U`, `--context N`        | unchanged lines shown around each change (default 3)          |
+| `-U`, `--context N`        | unchanged lines shown around each change, in every file; unset, 0 in Markdown files and Word documents (whose lines are whole paragraphs) and 3 in the others. In the GUI, the "Context lines" box: `auto` or a number |
 | `--full`                   | show every line of each changed file                          |
 | `--max-hidden N`           | unchanged lines embedded per gap for the page to reveal (default 500); longer gaps are left out, to keep the page light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |

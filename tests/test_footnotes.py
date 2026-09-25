@@ -30,7 +30,7 @@ def versions(tmp_path, edit_third=""):
     )
     (tmp_path / "old.md").write_text(old + "\n")
     (tmp_path / "new.md").write_text(new + "\n")
-    return compare_paths(tmp_path / "old.md", tmp_path / "new.md")
+    return compare_paths(tmp_path / "old.md", tmp_path / "new.md", context=3)
 
 
 def test_renumbered_footnotes_are_no_change(tmp_path):

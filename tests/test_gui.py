@@ -87,6 +87,15 @@ def test_arguments_folder_not_a_repository(tmp_path):
     assert note.startswith("Not a git repository") and s.repo == ""
 
 
+def test_context_lines_box():
+    from sidediff.gui import context_of
+
+    assert context_of(Settings()) == "auto"
+    assert context_of(Settings(context_lines="2")) == 2
+    assert context_of(Settings(context_lines="nonsense")) == "auto"
+    assert context_of(Settings(context_lines="2", full=True)) is None
+
+
 def test_generate_by_sentence(tmp_path):
     moved = "Firms that adopted the new technology are compared with the others."
     (tmp_path / "a.md").write_text(f"First paragraph here. {moved}\n\nSecond paragraph.\n")

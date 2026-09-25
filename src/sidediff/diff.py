@@ -17,6 +17,7 @@ import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import git
 from markupsafe import Markup
@@ -69,6 +70,22 @@ MOVE_MAX_CELLS = 250_000
 # Unchanged lines beyond the context are embedded so the page can reveal
 # them; a longer run than this is left out, to keep the page light.
 MAX_HIDDEN = 500
+# Unchanged lines shown around each change when the context is "auto": of
+# code, as git diff does, and of prose (Markdown and Word documents), where a
+# line is a whole paragraph.
+CONTEXT = 3
+PROSE_CONTEXT = 0
+# A number of lines for every file, "auto", or None for every line.
+Context = int | Literal["auto"] | None
+
+
+def context_for(context: Context, prose: bool) -> int | None:
+    """The unchanged lines to show around each change of one file."""
+    if context == "auto":
+        return PROSE_CONTEXT if prose else CONTEXT
+    return context
+
+
 # Images up to this size are embedded in the page, old and new side by side.
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_TYPES = {
@@ -933,7 +950,7 @@ def _is_docx(path: str | None) -> bool:
 def build_files(
     entries: list[tuple[FileDiff, bytes, bytes]],
     *,
-    context: int | None,
+    context: Context,
     md_filter: str | None,
     ignore_whitespace: bool,
     fold: bool,
@@ -1022,7 +1039,7 @@ def build_files(
         fd.rows, fd.additions, fd.deletions = align(
             old,
             new,
-            context,
+            context_for(context, fd.markdown),
             ops,
             markdown=fd.markdown,
             max_hidden=max_hidden,
@@ -1109,7 +1126,7 @@ def compare(
     base: str,
     target: str | None = None,
     paths: list[str] | None = None,
-    context: int | None = 3,
+    context: Context = "auto",
     md_filter: str | None = None,
     *,
     cached: bool = False,
@@ -1137,8 +1154,11 @@ def compare(
     Markdown file, [note]{.comment-start ...}, as a marker whose tooltip is
     the comment, and lists the comments in a panel; off, the comment markup
     is compared as text. Comments without text are left out, unless
-    empty_comments. max_hidden caps the unchanged lines
-    embedded per gap. docx_changes settles the tracked changes of Word
+    empty_comments. context is the number of unchanged lines shown around
+    each change, in every file; "auto" (the default) is 0 in Markdown files
+    and Word documents, whose lines are paragraphs, and 3 in the others;
+    None shows every line. max_hidden caps
+    the unchanged lines embedded per gap. docx_changes settles the tracked changes of Word
     documents: "accept", "reject" or "all" (kept as markup).
     move_similarity is how alike, from 0 to 1, an edited line must be to
     where it reappears to count as moved (1: only lines moved unchanged).
@@ -1236,7 +1256,7 @@ def compare_paths(
     old: str | Path,
     new: str | Path,
     paths: list[str] | None = None,
-    context: int | None = 3,
+    context: Context = "auto",
     md_filter: str | None = None,
     *,
     ignore_whitespace: bool = False,

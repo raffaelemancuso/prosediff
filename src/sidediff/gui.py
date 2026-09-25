@@ -22,7 +22,14 @@ from tkinter import filedialog, messagebox, ttk
 
 import git
 
-from sidediff.diff import MOVE_SIMILARITY, Comparison, FilterError, compare, compare_paths
+from sidediff.diff import (
+    MOVE_SIMILARITY,
+    Comparison,
+    Context,
+    FilterError,
+    compare,
+    compare_paths,
+)
 from sidediff.render import ALIGNMENTS, render
 from sidediff.sources import DOCX_CHANGES, SourceError
 
@@ -76,7 +83,9 @@ class Settings:
     empty_comments: bool = False
     docx_changes: str = "accept"
     align: str = "justify"
-    context: int = 3
+    # "auto": 0 for Markdown files and Word documents, 3 for the others; a
+    # number applies to every file
+    context_lines: str = "auto"
     full: bool = False
     ignore_whitespace: bool = False
     move_similarity: float = MOVE_SIMILARITY
@@ -190,11 +199,21 @@ def default_output() -> Path:
     return folder / f"sidediff_{datetime.now():%Y%m%d_%H%M%S}.html"
 
 
+def context_of(s: Settings) -> Context:
+    """The context for compare(), from the Context lines box."""
+    if s.full:
+        return None
+    try:
+        return max(0, int(s.context_lines))
+    except ValueError:  # "auto", or anything that is not a number
+        return "auto"
+
+
 def generate(s: Settings) -> tuple[Path, Comparison]:
     """Compare as the settings say and write the page; returns its path."""
     options = dict(
         paths=s.paths or None,
-        context=None if s.full else s.context,
+        context=context_of(s),
         ignore_whitespace=s.ignore_whitespace,
         fold_comments_md=s.fold_comments,
         empty_comments=s.empty_comments,
@@ -319,8 +338,9 @@ class App:
             opts, textvariable=self.align, values=ALIGNMENTS, state="readonly", width=10
         ).grid(row=1, column=3, sticky="w", **pad)
         ttk.Label(opts, text="Context lines").grid(row=2, column=0, sticky="w", **pad)
-        self.context = tk.IntVar(value=self.s.context)
-        ttk.Spinbox(opts, from_=0, to=50, textvariable=self.context, width=6).grid(
+        # "auto": 0 around the changes of Markdown and Word, 3 of other files
+        self.context = tk.StringVar(value=self.s.context_lines)
+        ttk.Spinbox(opts, values=("auto", *range(51)), textvariable=self.context, width=6).grid(
             row=2, column=1, sticky="w", **pad
         )
         self.full = tk.BooleanVar(value=self.s.full)
@@ -465,10 +485,9 @@ class App:
 
     def collect(self) -> Settings:
         """The settings the window shows."""
-        try:
-            context = max(0, int(self.context.get()))
-        except (tk.TclError, ValueError):
-            context = 3
+        context = self.context.get().strip()
+        if not context.isdigit():
+            context = "auto"
         try:
             move_similarity = min(1.0, max(0.05, float(self.move_similarity.get())))
         except (tk.TclError, ValueError):
@@ -486,7 +505,7 @@ class App:
             empty_comments=self.empty_comments.get(),
             docx_changes=self.docx.get(),
             align=self.align.get(),
-            context=context,
+            context_lines=context,
             full=self.full.get(),
             ignore_whitespace=self.ignore_ws.get(),
             move_similarity=move_similarity,
