@@ -97,11 +97,24 @@ def single_file(args: list[str]) -> Path | None:
     return None
 
 
+def page_beside(old: Path, new: Path) -> str:
+    """Where the page comparing two files goes: next to the new one, named
+    after both, so pages of different pairs do not overwrite each other."""
+    return str(new.resolve().parent / f"{old.stem}_vs_{new.stem}.html")
+
+
 def with_second_file(s: Settings, first: Path, second: Path) -> Settings:
     """The settings comparing two files, the older (by modification time)
-    on the left: the draft sent before the one returned."""
+    on the left: the draft sent before the one returned. The page goes next
+    to the newer."""
     older, newer = sorted((first, second), key=lambda p: (p.stat().st_mtime, str(p)))
-    return replace(s, mode="files", old=str(older.resolve()), new=str(newer.resolve()))
+    return replace(
+        s,
+        mode="files",
+        old=str(older.resolve()),
+        new=str(newer.resolve()),
+        output=page_beside(older, newer),
+    )
 
 
 def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
@@ -137,6 +150,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
         if all(p.is_file() and p.suffix.lower() in PREFILLED_FILES for p in (old, new)):
             s.mode = "files"
             s.old, s.new = str(old.resolve()), str(new.resolve())
+            s.output = page_beside(old, new)
             return s, ""
         return s, "Two arguments must be two Markdown or Word files."
     if args:

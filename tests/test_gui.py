@@ -35,8 +35,10 @@ def test_arguments_prefill_two_files(tmp_path):
     a, d = tmp_path / "v1.md", tmp_path / "v2.DOCX"
     a.write_text("x")
     d.write_bytes(b"x")
-    s, note = settings_from_args([str(a), str(d)], Settings())
+    s, note = settings_from_args([str(a), str(d)], Settings(output="elsewhere.html"))
     assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(d))
+    # the page goes next to the last file, named after both
+    assert s.output == str(tmp_path / "v1_vs_v2.html")
 
 
 @pytest.mark.parametrize(
@@ -77,6 +79,7 @@ def test_the_older_file_goes_on_the_left(tmp_path):
     for first, second in ((sent, returned), (returned, sent)):
         s = with_second_file(Settings(), first, second)
         assert (s.mode, s.old, s.new) == ("files", str(sent), str(returned))
+        assert s.output == str(tmp_path / "sent_vs_returned.html")
 
 
 def test_arguments_folder_not_a_repository(tmp_path):

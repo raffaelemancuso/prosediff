@@ -378,6 +378,15 @@ def _offsets(tokens: list[str]) -> list[int]:
     return out
 
 
+def comments_only(old: str, new: str) -> bool:
+    """Whether a change is made of comment markers alone (and blanks)."""
+    return (
+        not PLACEHOLDER.sub("", old).strip()
+        and not PLACEHOLDER.sub("", new).strip()
+        and bool(PLACEHOLDER.search(old) or PLACEHOLDER.search(new))
+    )
+
+
 def merge_across_spaces(ops: list[Opcode], a: list[str]) -> list[Opcode]:
     """Join two changes separated only by whitespace into one change.
 
@@ -424,7 +433,10 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
         o1, o2, n1, n2 = ao[i1], ao[i2], bo[j1], bo[j2]
         old_part, new_part = old[o1:o2], new[n1:n2]
         old_st, new_st = _slice(old_styles, o1, o2), _slice(new_styles, n1, n2)
-        if op == "equal":
+        if op == "equal" or comments_only(old_part, new_part):
+            # Comment markers are not text: whether a comment is new, gone or
+            # moved (to the next paragraph, when its own was deleted) shows in
+            # its icon and in the comments panel, not as a changed word.
             left.append(styled(old_part, old_st))
             right.append(styled(new_part, new_st))
             continue
@@ -519,23 +531,22 @@ def pair_lines(old: list[str], new: list[str]) -> list[tuple[int | None, int | N
     single = n == 1 and m == 1  # one line rewritten in place: always a pair
     for ai, aj in [*anchors, (n, m)]:
         gap_old, gap_new = list(range(pi, ai)), list(range(pj, aj))
-        gone, came = [], []
         for k in range(max(len(gap_old), len(gap_new))):
             i = gap_old[k] if k < len(gap_old) else None
             j = gap_new[k] if k < len(gap_new) else None
-            if i is None or j is None:
-                gone += [i] if i is not None else []
-                came += [j] if j is not None else []
-            elif single or token_similarity(
-                similarity_tokens(old[i]), similarity_tokens(new[j]), PAIRING_FLOOR
+            if (
+                i is None
+                or j is None
+                or single
+                or token_similarity(
+                    similarity_tokens(old[i]), similarity_tokens(new[j]), PAIRING_FLOOR
+                )
             ):
                 pairs.append((i, j))
             else:
-                # too little in common to be the same line edited: shown as
-                # one removed and one added, not face to face
-                gone.append(i)
-                came.append(j)
-        pairs += [(i, None) for i in gone] + [(None, j) for j in came]
+                # too little in common to be the same line edited: shown, in
+                # its place, as one removed and one added, not face to face
+                pairs += [(i, None), (None, j)]
         if (ai, aj) != (n, m):
             pairs.append((ai, aj))
         pi, pj = ai + 1, aj + 1
@@ -810,7 +821,9 @@ def align(
                     w = word_diff(o, n_, style(o), style(n_))
                     rows.append(
                         Row(
-                            "replace",
+                            # no change in the text (only comments came or
+                            # went): an unchanged line, not an edit
+                            "replace" if w.changes else "equal",
                             i1 + pi + 1,
                             w.left,
                             j1 + pj + 1,
@@ -832,8 +845,11 @@ def align(
             if row.right_no is not None:
                 row.right_label = new_labels[row.right_no - 1] if new_labels else str(row.right_no)
     mark_moves(rows, style, move_similarity)
+    # The stops of the page's next/previous navigation: a run of changed
+    # lines of code, but each changed paragraph of prose (its blank lines
+    # are left out, so changed paragraphs are neighbours).
     for prev, r in zip([None, *rows], rows, strict=False):
-        r.first_of_change = r.changed and not (prev and prev.changed)
+        r.first_of_change = r.changed and (markdown or not (prev and prev.changed))
     deletions = sum(r.kind in ("delete", "replace") for r in rows)
     additions = sum(r.kind in ("insert", "replace") for r in rows)
     return rows, additions, deletions

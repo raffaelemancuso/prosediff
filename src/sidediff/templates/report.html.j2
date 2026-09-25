@@ -93,6 +93,9 @@ table { width: 100%; border-collapse: collapse; table-layout: fixed;
   font: 12px/1.45 ui-monospace, Consolas, "Liberation Mono", monospace; }
 col.no { width: 5.5em; }
 td { vertical-align: top; padding: 0 8px; }
+/* Prose: a little space between paragraphs (their blank lines are not
+   shown). */
+table.prose td.code, table.prose td.no { padding-bottom: 0.5em; }
 td.no { color: var(--muted); text-align: right; user-select: none;
   border-right: 1px solid var(--border); white-space: nowrap; }
 /* +, − and ~ in the gutter: the kind of change without relying on colour. */
@@ -291,7 +294,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   {% elif not f.rows %}
   <div class="note">Content unchanged{% if f.change == "renamed" %} (renamed only){% endif %}.</div>
   {% else %}
-  <table>
+  <table{% if f.markdown %} class="prose"{% endif %}>
     <caption class="sr">Changes in {{ f.path }}: old version on the left, new version on the right</caption>
     <colgroup><col class="no"><col><col class="no"><col></colgroup>
     <tbody>

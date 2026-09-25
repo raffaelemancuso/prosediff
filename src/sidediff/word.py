@@ -189,7 +189,9 @@ class Reader:
                 if rid and rid in paragraph.part.rels:
                     target = paragraph.part.rels[rid].target_ref
                 text = render_pieces(inner)
-                pieces.append(Piece(f"[{text}]({target})" if target else text, raw=True))
+                # a link that shows its own address is written once
+                link = f"[{text}]({target})" if target and text != target else text
+                pieces.append(Piece(link, raw=True))
             elif tag == qn("w:sdt"):
                 content = child.find(qn("w:sdtContent"))
                 if content is not None:

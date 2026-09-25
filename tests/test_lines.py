@@ -78,11 +78,12 @@ def test_pairing_skips_inserted_line():
 
 
 def test_pairing_unrelated_lines_stand_alone():
-    # several lines with nothing in common: removed and added, not face to face
+    # several lines with nothing in common: removed and added, not face to
+    # face, each in its place
     assert pair_lines(["a", "b"], ["c", "d", "e"]) == [
         (0, None),
-        (1, None),
         (None, 0),
+        (1, None),
         (None, 1),
         (None, 2),
     ]
@@ -193,3 +194,8 @@ def test_first_of_change_marks_each_run():
     rows, _, _ = align(old, new, context=None)
     firsts = [r.left_no for r in rows if r.first_of_change]
     assert firsts == [2, 4]
+    # in prose each changed paragraph is a stop, neighbours included
+    old = ["Same.", "The first one.", "Same again.", "The second one.", "The third one."]
+    new = ["Same.", "The first edit.", "Same again.", "The second edit.", "The third edit."]
+    rows, _, _ = align(old, new, context=None, markdown=True)
+    assert [r.left_no for r in rows if r.first_of_change] == [2, 4, 5]

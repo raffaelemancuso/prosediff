@@ -52,6 +52,39 @@ def test_plain_and_show_comments():
     assert 'aria-label="new comment by Anna' in new
 
 
+def test_a_comment_moving_is_not_a_changed_word(builder):
+    """A comment whose paragraph was deleted lands on the next one: it is
+    not highlighted as added text, and not described as a change."""
+    builder.write("p.md", f"First paragraph here.{NOTE}\n\nSecond paragraph here.\n")
+    base = builder.commit("first")
+    builder.write("p.md", f"{NOTE}Second paragraph here, edited.\n")
+    target = builder.commit("second")
+    (f,) = compare(builder.path, base, target).files
+    row = next(r for r in f.rows if r.right_no is not None and "Second" in str(r.right))
+    assert row.changes == ['added ", edited"']
+    assert '<span class="comment"' in str(row.right)
+    assert "<ins" not in str(row.right).split("Second")[0]  # the marker is not highlighted
+
+
+def test_a_paragraph_with_only_a_new_comment_is_shown(builder):
+    """Its text is unchanged, so it is no edit, but it is not folded away
+    with the unchanged lines: the new comment shows, marked new."""
+    lines = [f"Paragraph {k} of the text." for k in range(40)]
+    builder.write("p.md", "\n\n".join(lines) + "\n")
+    base = builder.commit("first")
+    lines[20] += NOTE
+    builder.write("p.md", "\n\n".join(lines) + "\n")
+    target = builder.commit("second")
+    c = compare(builder.path, base, target)
+    (f,) = c.files
+    shown = [r for r in f.rows if r.kind != "skip"]
+    row = next(r for r in shown if "Paragraph 20" in str(r.right))
+    assert row.kind == "equal" and row.changes == []  # no edit of the text
+    assert 'class="comment new"' in str(row.right)
+    assert (f.additions, f.deletions) == (0, 0)
+    assert [e.status for e in c.comments] == ["new"]
+
+
 def test_compare_fold_comments(builder, tmp_path):
     builder.write("p.md", f"Some text{NOTE} here.{END}\n")
     base = builder.commit("first")
