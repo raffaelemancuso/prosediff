@@ -54,10 +54,10 @@ def page(browser, page_file):
 def test_next_and_previous_change(page):
     counter = page.locator(".toolbar .counter")
     assert counter.inner_text() == "2"
-    assert counter.get_attribute("title") == "2 changes"
+    assert counter.get_attribute("data-help") == "2 changes"
     page.keyboard.press("n")
     assert counter.inner_text() == "1 / 2"
-    assert counter.get_attribute("title") == "change 1 of 2"
+    assert counter.get_attribute("data-help") == "Change 1 of 2"
     page.keyboard.press("n")
     assert counter.inner_text() == "2 / 2"
     assert page.locator("tr.current").count() == 1
@@ -101,13 +101,31 @@ def test_one_column_view_is_remembered(page):
     assert "unified" not in page.evaluate("document.body.className")
 
 
-def test_formatted_view_hides_markdown_syntax(page):
+def test_formatted_view_is_on_by_default(page):
+    # the Markdown syntax hidden, what it marks styled
     syntax = page.locator(".s-syn").first
-    assert syntax.is_visible()
-    page.keyboard.press("f")
     assert not syntax.is_visible()
+    assert page.get_attribute('[data-toggle="formatted"]', "aria-pressed") == "true"
     bold = page.locator(".s-strong").first
     assert bold.evaluate("e => getComputedStyle(e).fontWeight") == "700"
+    # raw on request, remembered
+    page.keyboard.press("f")
+    assert syntax.is_visible()
+    page.reload()
+    assert page.locator(".s-syn").first.is_visible()
+
+
+def test_toolbar_help_tooltips(page):
+    tip = page.locator("#tip")
+    assert page.locator(".toolbar [title]").count() == 0  # no browser tooltip
+    page.hover('[data-toggle="formatted"]')
+    assert tip.is_visible()
+    assert tip.locator("b").inner_text() == "Formatted"
+    assert tip.locator(".when").inner_text() == "key: f"
+    page.hover('[data-tips="changes"]')  # shown even with change tooltips off
+    assert tip.locator("b").inner_text() == "Change tooltips"
+    page.mouse.move(0, 0)
+    assert not tip.is_visible()
 
 
 def test_edited_lines_untinted_unless_asked(page):

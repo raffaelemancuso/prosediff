@@ -10,12 +10,17 @@ MOVED = "This sentence travels to the end of the file."
 
 
 def test_render_side_by_side(two_commits):
+    """A self-contained page, its content and commit subjects escaped."""
     b, base, target = two_commits
     html = render(compare(b.path, base, target))
     assert html.startswith("<!DOCTYPE html>")
     assert '<tr class="replace' in html
     assert ">world</del>" in html and ">there</ins>" in html
     assert 'href="#file-doc-md"' in html and 'id="file-doc-md"' in html
+    assert not re.search(r'<(script|link)\b[^>]*(src|href)="http', html)
+    assert "<script>x</script>" not in html
+    assert "&lt;script&gt;x&lt;/script&gt;" in html
+    assert "first &lt;draft&gt;" in html
 
 
 def test_render_tooltips(two_commits):
@@ -29,22 +34,6 @@ def test_render_tooltips(two_commits):
     assert 'title="added this line"' in html
 
 
-def test_render_escapes_content_and_subjects(two_commits):
-    b, base, target = two_commits
-    html = render(compare(b.path, base, target))
-    assert "<script>x</script>" not in html
-    assert "&lt;script&gt;x&lt;/script&gt;" in html
-    assert "first &lt;draft&gt;" in html
-
-
-def test_render_no_differences(builder):
-    builder.write("f.txt", "x\n")
-    sha = builder.commit("only")
-    html = render(compare(builder.path, sha, sha))
-    assert "No differences between the two sides." in html
-    assert "<table" not in html
-
-
 def test_render_thousand_separators(builder):
     builder.write("f.txt", "")
     base = builder.commit("empty")
@@ -52,12 +41,6 @@ def test_render_thousand_separators(builder):
     target = builder.commit("big")
     html = render(compare(builder.path, base, target))
     assert "+1,500" in html
-
-
-def test_render_is_self_contained(two_commits):
-    b, base, target = two_commits
-    html = render(compare(b.path, base, target))
-    assert not re.search(r'<(script|link)\b[^>]*(src|href)="http', html)
 
 
 def test_moved_rendered(builder):
@@ -82,7 +65,9 @@ def test_left_out_gap_rendered(builder):
     assert "<tbody hidden>" not in html
 
 
-def test_signs_and_screen_reader_text(builder):
+def test_signs_screen_reader_text_and_print_styles(builder):
+    """What the page offers without the browser tests' script: signs beside
+    the colours, text for screen readers, a print layout."""
     builder.write("f.txt", "keep\nthe old line of text\ngone\n")
     base = builder.commit("first")
     builder.write("f.txt", "keep\nthe new line of text\nadded\n")
@@ -92,15 +77,4 @@ def test_signs_and_screen_reader_text(builder):
     assert '<span class="sr">changed line, old: </span>' in html
     assert '<caption class="sr">Changes in f.txt' in html
     assert 'aria-live="polite"' in html and 'aria-pressed="false"' in html
-
-
-def test_page_offers_views_and_print_styles(builder):
-    builder.write("f.txt", "a\n")
-    base = builder.commit("first")
-    builder.write("f.txt", "b\n")
-    target = builder.commit("second")
-    html = render(compare(builder.path, base, target))
-    for view in ("unified", "formatted", "cb"):
-        assert f'data-toggle="{view}"' in html
-    assert "body.unified tr" in html
     assert "@media print" in html and "beforeprint" in html

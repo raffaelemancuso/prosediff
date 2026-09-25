@@ -149,30 +149,25 @@ def test_a_paragraph_with_only_a_new_comment_is_shown(builder):
 
 def test_compare_fold_comments(builder, tmp_path):
     builder.write("p.md", f"Some text{NOTE} here.{END}\n")
+    builder.write("p.txt", f"x {NOTE}\n")
     base = builder.commit("first")
     renumbered = NOTE.replace('id="3"', 'id="9"')
     builder.write("p.md", f"Some new text{renumbered} here.{END}\n")
-    target = builder.commit("second")
-    c = compare(builder.path, base, target, fold_comments_md=True)
-    (f,) = c.files
-    (row,) = [r for r in f.rows if r.kind == "replace"]
-    assert row.changes == ['added "new"']  # the renumbered comment is no change
-    html = render(c)
-    assert "comment-start" not in html
-    assert MARKER not in html  # the comment was already there: not shown
-    # folding is the default; without it the markup is compared as text
-    assert "comment-start" not in render(compare(builder.path, base, target))
-    c = compare(builder.path, base, target, fold_comments_md=False)
-    assert "comment-start" in render(c)
-
-
-def test_fold_comments_only_markdown(builder):
-    builder.write("p.txt", f"x {NOTE}\n")
-    base = builder.commit("first")
     builder.write("p.txt", f"y {NOTE}\n")
     target = builder.commit("second")
-    html = render(compare(builder.path, base, target, fold_comments_md=True))
+    c = compare(builder.path, base, target)  # folding is the default
+    md, txt = c.files
+    (row,) = [r for r in md.rows if r.kind == "replace"]
+    assert row.changes == ['added "new"']  # the renumbered comment is no change
+    assert "comment-start" not in str(row.right)
+    assert MARKER not in render(c)  # the comment was already there: not shown
+    assert "comment-start" in str(txt.rows[0].right)  # only Markdown is folded
+    assert not PLACEHOLDER.search(render(c))
+    # without folding the markup is compared as text, and there is no panel
+    c = compare(builder.path, base, target, fold_comments_md=False)
+    html = render(c)
     assert "comment-start" in html
+    assert c.comments == [] and '<section class="comments-panel"' not in html
 
 
 def test_comments_panel_statuses_and_links(builder):
@@ -205,21 +200,4 @@ def test_comments_panel_statuses_and_links(builder):
     assert html.count('class="comment new"') == 1
     assert by_text["New remark."].icon == NEW_COMMENT_MARK
     assert by_text["Old remark."].icon == COMMENT_MARK
-
-
-def test_no_panel_without_folding(builder):
-    builder.write("p.md", f"a{NOTE}\n")
-    base = builder.commit("first")
-    builder.write("p.md", f"b{NOTE}\n")
-    target = builder.commit("second")
-    c = compare(builder.path, base, target, fold_comments_md=False)
-    assert c.comments == [] and '<section class="comments-panel"' not in render(c)
-
-
-def test_placeholders_never_leak(builder):
-    builder.write("p.md", f"x{NOTE}{END}\n")
-    base = builder.commit("first")
-    builder.write("p.md", f"y{NOTE}{END}\n")
-    target = builder.commit("second")
-    html = render(compare(builder.path, base, target, fold_comments_md=True))
-    assert not PLACEHOLDER.search(html)
+    assert not PLACEHOLDER.search(html)  # every comment became a marker

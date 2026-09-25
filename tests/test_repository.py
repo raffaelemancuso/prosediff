@@ -85,7 +85,11 @@ def test_compare_path_filter(builder):
 def test_compare_no_differences(builder):
     builder.write("f.txt", "x\n")
     sha = builder.commit("only")
-    assert compare(builder.path, sha, sha).files == []
+    c = compare(builder.path, sha, sha)
+    assert c.files == []
+    html = render(c)
+    assert "No differences between the two sides." in html and "<table" not in html
+    assert compare(builder.path, "HEAD").files == []  # a clean working tree
 
 
 def test_compare_accepts_refs_and_subfolder(builder):
@@ -97,23 +101,17 @@ def test_compare_accepts_refs_and_subfolder(builder):
     assert [f.path for f in c.files] == ["sub/f.txt"]
 
 
-def test_compare_non_utf8_does_not_crash(builder):
+def test_compare_non_utf8_and_crlf(builder):
     builder.write("latin1.txt", "caf\xe9\n".encode("latin-1"))
-    base = builder.commit("first")
-    builder.write("latin1.txt", "caff\xe8\n".encode("latin-1"))
-    target = builder.commit("second")
-    (f,) = compare(builder.path, base, target).files
-    assert f.rows
-
-
-def test_compare_crlf_lines(builder):
     builder.write("w.txt", "a\r\nb\r\n")
     base = builder.commit("first")
+    builder.write("latin1.txt", "caff\xe8\n".encode("latin-1"))
     builder.write("w.txt", "a\r\nc\r\n")
     target = builder.commit("second")
-    (f,) = compare(builder.path, base, target).files
-    assert (f.additions, f.deletions) == (1, 1)
-    assert "\r" not in "".join(r.left + r.right for r in f.rows)
+    latin1, crlf = compare(builder.path, base, target).files
+    assert latin1.rows  # no crash
+    assert (crlf.additions, crlf.deletions) == (1, 1)
+    assert "\r" not in "".join(r.left + r.right for r in crlf.rows)
 
 
 def test_compare_worktree(builder):
@@ -134,39 +132,26 @@ def test_compare_worktree(builder):
     assert c.target.short == "working tree"
 
 
-def test_compare_worktree_clean(builder):
-    builder.write("f.txt", "x\n")
-    builder.commit("only")
-    assert compare(builder.path, "HEAD").files == []
-
-
 def test_compare_md_filter_only_on_markdown(builder):
+    # a filter that upper-cases and re-flows the text: a pure re-wrap of a
+    # Markdown file disappears, a text file is left alone
     builder.write("a.md", "one two\n")
+    builder.write("p.md", "one two three\n")
     builder.write("a.txt", "one two\n")
     base = builder.commit("first")
     builder.write("a.md", "one three\n")
+    builder.write("p.md", "one two\nthree\n")
     builder.write("a.txt", "one three\n")
     target = builder.commit("second")
-    upper = f'"{sys.executable}" -c "import sys; sys.stdout.write(sys.stdin.read().upper())"'
-
-    c = compare(builder.path, base, target, md_filter=upper)
+    flow = (
+        f'"{sys.executable}" -c "import sys; '
+        "sys.stdout.write(' '.join(sys.stdin.read().upper().split()) + chr(10))\""
+    )
+    c = compare(builder.path, base, target, md_filter=flow)
     by_path = {f.path: f for f in c.files}
     assert "ONE" in by_path["a.md"].rows[0].left
     assert "one" in by_path["a.txt"].rows[0].left
-
-
-def test_compare_md_filter_can_remove_differences(builder):
-    # a filter that re-flows the text makes a pure re-wrap disappear
-    builder.write("p.md", "one two three\n")
-    base = builder.commit("first")
-    builder.write("p.md", "one two\nthree\n")
-    target = builder.commit("rewrap")
-    join = (
-        f'"{sys.executable}" -c "import sys; '
-        "sys.stdout.write(' '.join(sys.stdin.read().split()) + chr(10))\""
-    )
-    (f,) = compare(builder.path, base, target, md_filter=join).files
-    assert f.rows == []
+    assert by_path["p.md"].rows == []  # "Content unchanged"
 
 
 def test_compare_cached(builder):
@@ -219,38 +204,37 @@ def test_image_uri():
     assert image_uri("a.png", b"x" * (MAX_IMAGE_BYTES + 1)) is None
 
 
-def test_changed_image_is_shown_side_by_side(builder):
+def test_images_are_shown_side_by_side(builder):
     builder.write("pic.png", PNG_1)
     base = builder.commit("first")
     builder.write("pic.png", PNG_2)
+    builder.write("added.png", PNG_1)
     target = builder.commit("second")
     c = compare(builder.path, base, target)
-    (f,) = c.files
-    assert f.binary and f.old_image and f.new_image
+    added, changed = c.files
+    assert added.old_image is None and added.new_image
+    assert changed.binary and changed.old_image and changed.new_image
     html = render(c)
-    assert html.count('<img src="data:image/png;base64,') == 2
+    assert html.count('<img src="data:image/png;base64,') == 3
     assert "Binary file, not shown" not in html
 
 
-def test_added_image_has_one_side(builder):
-    builder.write("f.txt", "x\n")
-    base = builder.commit("first")
-    builder.write("pic.png", PNG_1)
-    target = builder.commit("second")
-    (f,) = compare(builder.path, base, target).files
-    assert f.old_image is None and f.new_image
+def test_commits_in_between(builder, monkeypatch):
+    import sidediff.diff as d
 
-
-def test_commits_in_between(builder):
     shas = []
-    for k in range(4):
+    for k in range(5):
         builder.write("f.txt", f"{k}\n")
         shas.append(builder.commit(f"commit {k}"))
     c = compare(builder.path, shas[0], shas[3])
     assert [r.subject for r in c.commits] == ["commit 3", "commit 2", "commit 1"]
     assert c.commits_total == 3
-    html = render(c)
-    assert "3 commits in between" in html
+    assert "3 commits in between" in render(c)
+    # a long list is capped
+    monkeypatch.setattr(d, "MAX_LISTED_COMMITS", 2)
+    c = compare(builder.path, shas[0], shas[4])
+    assert len(c.commits) == 2 and c.commits_total == 4
+    assert "and 2 older" in render(c)
 
 
 def test_commits_in_between_worktree_up_to_head(builder):
@@ -261,19 +245,6 @@ def test_commits_in_between_worktree_up_to_head(builder):
     c = compare(builder.path, base)
     assert [r.subject for r in c.commits] == ["second"]
     assert "up to HEAD" in render(c)
-
-
-def test_commits_list_is_capped(builder, monkeypatch):
-    import sidediff.diff as d
-
-    monkeypatch.setattr(d, "MAX_LISTED_COMMITS", 2)
-    shas = []
-    for k in range(5):
-        builder.write("f.txt", f"{k}\n")
-        shas.append(builder.commit(f"commit {k}"))
-    c = compare(builder.path, shas[0], shas[4])
-    assert len(c.commits) == 2 and c.commits_total == 4
-    assert "and 2 older" in render(c)
 
 
 def test_word_counts_per_file_and_total(builder):

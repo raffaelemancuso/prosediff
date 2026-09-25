@@ -406,7 +406,8 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     row.classList.add("current");
     row.scrollIntoView({ block: "center" });
     counter.textContent = fmt(current + 1) + " / " + fmt(changes.length);
-    counter.title = "change " + fmt(current + 1) + " of " + fmt(changes.length);
+    counter.dataset.help = "Change " + fmt(current + 1) + " of " + fmt(changes.length);
+    if (shown === counter) showTip(counter);
   }
 
   // The views (one column, formatted, colour-blind colours) are classes of
@@ -418,8 +419,18 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     try { localStorage.setItem("sidediff-" + name, on ? "1" : "0"); } catch (e) {}
   }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
-  ["unified", "formatted", "cb", "tint"].forEach(function (name) {
-    try { if (localStorage.getItem("sidediff-" + name) === "1") setView(name, true); } catch (e) {}
+  // Formatted Markdown is on by default, the other views off; a choice the
+  // browser remembers wins.
+  var VIEW_DEFAULT = { unified: false, formatted: true, cb: false, tint: false };
+  Object.keys(VIEW_DEFAULT).forEach(function (name) {
+    var on = VIEW_DEFAULT[name];
+    try {
+      var saved = localStorage.getItem("sidediff-" + name);
+      if (saved !== null) on = saved === "1";
+    } catch (e) {}
+    document.body.classList.toggle(name, on);
+    var b = document.querySelector('[data-toggle="' + name + '"]');
+    if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
   });
 
   // Reveal the run of unchanged lines a fold row stands for.
@@ -524,6 +535,12 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     el.dataset.tip = el.title;
     el.removeAttribute("title");
   });
+  // The toolbar's help goes through the same tooltip, always on: its name,
+  // what it does, and its key.
+  document.querySelectorAll(".toolbar [title]").forEach(function (el) {
+    el.dataset.help = el.title;
+    el.removeAttribute("title");
+  });
   function add(cls, text) {
     var el = document.createElement(cls === "b" ? "b" : "span");
     if (cls !== "b") el.className = cls;
@@ -536,6 +553,11 @@ body.unified tr.skip td { grid-column: 1 / -1; }
       add("b", el.dataset.author || "Comment");
       add("line", el.dataset.text);
       if (el.dataset.date) add("when", el.dataset.date);
+    } else if (el.dataset.help) {
+      // "Name: what it does (k)", or a plain text
+      var m = /^(.*?)(?:: (.*?))?(?: \((.+)\))?$/.exec(el.dataset.help);
+      if (m[2]) { add("b", m[1]); add("line", m[2]); } else add("line", m[1]);
+      if (m[3]) add("when", "key: " + m[3]);
     } else {
       var lines = el.dataset.tip.split("\n");
       lines.slice(0, MAX_LINES).forEach(function (l) { add("line", l); });
@@ -569,7 +591,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   var TIPS_DEFAULT = { comments: true, changes: false };
   var tipsOn = { comments: true, changes: true };
   function tipSelector() {
-    return [tipsOn.comments && ".comment", tipsOn.changes && "[data-tip]"]
+    return [".toolbar [data-help]", tipsOn.comments && ".comment", tipsOn.changes && "[data-tip]"]
       .filter(Boolean).join(", ");
   }
   function setTips(kind, on) {
@@ -608,7 +630,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     showTip(el);
   });
   document.addEventListener("focusin", function (e) {
-    var m = tipsOn.comments && e.target.closest(".comment");
+    var m = e.target.closest(".toolbar [data-help]") || (tipsOn.comments && e.target.closest(".comment"));
     if (m) { anchorX = anchorY = 0; showTip(m); }
   });
   document.addEventListener("focusout", hideTip);

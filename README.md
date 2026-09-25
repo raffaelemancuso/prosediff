@@ -164,11 +164,12 @@ the next time (`%APPDATA%\sidediff\gui.json`).
 - Changed images (PNG, JPEG, GIF, WebP, BMP, up to 5 MB) old and new side by
   side; other binary files are listed but not shown.
 - A toolbar: the number of changes, with `n` and `p` (or its arrows) to jump
-  to the next and previous change; four icon buttons, each named in its
-  tooltip: `u` for one column instead of two (each
-  changed line shows its old version above its new one); `f` for Markdown
-  formatted instead of raw (the syntax hidden, emphasis, headings, links and
-  citations styled, prose in a proportional font); `c` for colour-blind
+  to the next and previous change; four icon buttons (hovering any toolbar
+  item shows its name, what it does and its key): `u` for one column instead
+  of two (each changed line shows its old version above its new one); `f` for
+  Markdown formatted, on by default, or raw (formatted: the syntax hidden,
+  emphasis, headings, links and citations styled, prose in a proportional
+  font); `c` for colour-blind
   colours (orange and blue instead of red and green); `t` to tint the whole
   of an edited line, as most diff tools do (by default only its changed
   words are coloured, and its gutter; the tint stops short of the space

@@ -56,25 +56,14 @@ def test_align_context_skips_unchanged_lines():
     assert rows[0].skipped == 7
     assert rows[-1].skipped == 8
     assert rows[1].left_no == 8
-
-
-def test_align_full_has_no_skips():
-    old = [f"line {i}" for i in range(50)]
-    new = [*old[:25], "new", *old[25:]]
-    rows, _, _ = align(old, new, context=None)
-    assert "skip" not in kinds(rows)
-    assert len(rows) == 51
-
-
-def test_align_zero_context():
-    rows, _, _ = align(["a", "b", "c"], ["a", "x", "c"], context=0)
+    # the skip rows hold the lines they hide, for the page to reveal
+    assert [r.left_no for r in rows[0].hidden] == list(range(1, 8))
+    assert [r.left_no for r in rows[-1].hidden] == list(range(13, 21))
+    # no context: only the change; None: every line
+    rows, _, _ = align(old, new, context=0)
     assert kinds(rows) == ["skip", "replace", "skip"]
-
-
-def test_pairing_skips_inserted_line():
-    old = ["alpha beta gamma delta", "one two three four"]
-    new = ["alpha beta gamma DELTA", "brand new line here", "one two three FOUR"]
-    assert pair_lines(old, new) == [(0, 0), (None, 1), (1, 2)]
+    rows, _, _ = align(old, new, context=None)
+    assert "skip" not in kinds(rows) and len(rows) == 20
 
 
 def test_pairing_unrelated_lines_stand_alone():
@@ -91,9 +80,7 @@ def test_pairing_unrelated_lines_stand_alone():
     old = ["the report was written in May", "a different line entirely"]
     new = ["the report was finished in June", "another line altogether"]
     assert pair_lines(old, new)[0] == (0, 0)
-
-
-def test_one_line_rewritten_in_place_is_a_pair():
+    # one line rewritten in place is a pair, however different
     assert pair_lines(["a"], ["c"]) == [(0, 0)]
 
 
@@ -114,6 +101,7 @@ def test_pairing_large_block_falls_back_to_order():
 
 
 def test_align_uses_pairing():
+    """An inserted line between two edited ones: the edits face each other."""
     old = ["x", "alpha beta gamma delta", "one two three four", "y"]
     new = ["x", "alpha beta gamma DELTA", "brand new line here", "one two three FOUR", "y"]
     rows, add, rem = align(old, new, context=None)
@@ -156,23 +144,6 @@ def test_git_opcodes_many_files_one_call():
     assert ops[0] == [("replace", 0, 1, 0, 1)]
     assert ops[1] == [("equal", 0, 1, 0, 1)]
     assert ops[2] == [("equal", 0, 1, 0, 1), ("insert", 1, 1, 1, 2), ("equal", 1, 2, 2, 3)]
-
-
-def test_git_opcodes_ignore_whitespace():
-    (ops,) = git_opcodes([(["a  b", "c"], ["a b", "d"])], ignore_whitespace=True)
-    assert ops[0][0] == "equal"
-    (ops,) = git_opcodes([(["a  b", "c"], ["a b", "d"])])
-    assert ops[0][0] == "replace"
-
-
-def test_skip_rows_hold_the_hidden_lines():
-    old = [f"line {i}" for i in range(1, 21)]
-    new = list(old)
-    new[9] = "changed"
-    rows, _, _ = align(old, new, context=2)
-    first, last = rows[0], rows[-1]
-    assert [r.left_no for r in first.hidden] == list(range(1, 8))
-    assert [r.left_no for r in last.hidden] == list(range(13, 21))
 
 
 def test_long_gaps_are_left_out():
