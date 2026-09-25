@@ -1,6 +1,6 @@
 """Sides outside git: two files or two folders, and Word documents.
 
-A .docx is read into Markdown by sidediff.word (python-docx), its tracked
+A .docx is read into Markdown by prosediff.word (python-docx), its tracked
 changes settled and its comments kept, so they can be folded and listed like
 those of a Markdown file.
 """
@@ -8,9 +8,9 @@ those of a Markdown file.
 from datetime import datetime
 from pathlib import Path
 
-from sidediff.word import CHANGES as DOCX_CHANGES
-from sidediff.word import WordError
-from sidediff.word import docx_to_markdown as _docx_to_markdown
+from prosediff.word import CHANGES as DOCX_CHANGES
+from prosediff.word import WordError
+from prosediff.word import docx_to_markdown as _docx_to_markdown
 
 __all__ = ["DOCX_CHANGES", "SourceError", "describe_side", "docx_to_markdown", "read_side"]
 

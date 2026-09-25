@@ -5,7 +5,7 @@ within a word, word counts.
 import pytest
 from helpers import untitled
 
-from sidediff.diff import describe, word_diff
+from prosediff.diff import describe, word_diff
 
 
 def test_word_diff_marks_only_changed_word():

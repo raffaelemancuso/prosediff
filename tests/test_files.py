@@ -3,8 +3,8 @@
 import pytest
 from helpers import docx, docx_xml
 
-from sidediff import compare_paths, render
-from sidediff.sources import SourceError, docx_to_markdown
+from prosediff import compare_paths, render
+from prosediff.sources import SourceError, docx_to_markdown
 
 
 def test_two_files_with_different_names(tmp_path):

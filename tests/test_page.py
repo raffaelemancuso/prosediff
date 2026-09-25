@@ -4,7 +4,7 @@ and print styles (their behaviour: test_browser.py).
 
 import re
 
-from sidediff import compare, render
+from prosediff import compare, render
 
 MOVED = "This sentence travels to the end of the file."
 

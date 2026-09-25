@@ -2,9 +2,9 @@
 
 import re
 
-from sidediff import compare_paths, render
-from sidediff.diff import footnote_similarity
-from sidediff.footnotes import STAND_IN, match_footnotes, set_aside
+from prosediff import compare_paths, render
+from prosediff.diff import footnote_similarity
+from prosediff.footnotes import STAND_IN, match_footnotes, set_aside
 
 NOTES = {
     "1": "The first note explains the data sources used in the study.",

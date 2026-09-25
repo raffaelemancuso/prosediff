@@ -1,4 +1,4 @@
-"""Command line: sidediff REPO BASE [TARGET], or sidediff --files OLD NEW."""
+"""Command line: prosediff REPO BASE [TARGET], or prosediff --files OLD NEW."""
 
 import argparse
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import git
 
-from sidediff.diff import (
+from prosediff.diff import (
     CONTEXT,
     MAX_HIDDEN,
     MOVE_SIMILARITY,
@@ -16,10 +16,10 @@ from sidediff.diff import (
     compare,
     compare_paths,
 )
-from sidediff.render import ALIGNMENTS, render
-from sidediff.sources import DOCX_CHANGES, SourceError
+from prosediff.render import ALIGNMENTS, render
+from prosediff.sources import DOCX_CHANGES, SourceError
 
-PROG = "sidediff"
+PROG = "prosediff"
 
 
 def package_version() -> str:
@@ -35,8 +35,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Write an HTML page showing the differences between two "
         "commits of a git repository (or a commit and the working tree or the "
         "index), or between two files or two folders, side by side.",
-        epilog="Examples: sidediff . HEAD~1 HEAD; sidediff . HEAD --untracked; "
-        "sidediff --files draft_v1.docx draft_v2.docx",
+        epilog="Examples: prosediff . HEAD~1 HEAD; prosediff . HEAD --untracked; "
+        "prosediff --files draft_v1.docx draft_v2.docx",
     )
     ap.add_argument(
         "repo",

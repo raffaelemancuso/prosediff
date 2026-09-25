@@ -22,7 +22,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import git
 
-from sidediff.diff import (
+from prosediff.diff import (
     MOVE_SIMILARITY,
     Comparison,
     Context,
@@ -30,8 +30,8 @@ from sidediff.diff import (
     compare,
     compare_paths,
 )
-from sidediff.render import ALIGNMENTS, render
-from sidediff.sources import DOCX_CHANGES, SourceError
+from prosediff.render import ALIGNMENTS, render
+from prosediff.sources import DOCX_CHANGES, SourceError
 
 MAX_COMMITS = 200
 WORKTREE = "Working tree (uncommitted changes)"
@@ -170,7 +170,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
 
 def settings_file() -> Path:
     base = os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
-    return Path(base) / "sidediff" / "gui.json"
+    return Path(base) / "prosediff" / "gui.json"
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -194,9 +194,9 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
 
 def default_output() -> Path:
     """A fresh page in the temporary folder, so no repository is cluttered."""
-    folder = Path(tempfile.gettempdir()) / "sidediff"
+    folder = Path(tempfile.gettempdir()) / "prosediff"
     folder.mkdir(exist_ok=True)
-    return folder / f"sidediff_{datetime.now():%Y%m%d_%H%M%S}.html"
+    return folder / f"prosediff_{datetime.now():%Y%m%d_%H%M%S}.html"
 
 
 def context_of(s: Settings) -> Context:
@@ -252,7 +252,7 @@ class App:
         self.s = settings or load_settings()
         self.choices: dict[str, str] = {}  # label -> ref
         self.results: queue.Queue = queue.Queue()
-        root.title("sidediff: compare two versions")
+        root.title("prosediff: compare two versions")
         root.minsize(720, 0)
         pad = {"padx": 6, "pady": 3}
 
@@ -552,7 +552,7 @@ class App:
         self.button.state(["!disabled"])
         if kind == "error":
             self.status.set("Not compared.")
-            messagebox.showerror("sidediff", str(value) or type(value).__name__)
+            messagebox.showerror("prosediff", str(value) or type(value).__name__)
             return
         path, c = value
         self.status.set(
@@ -574,7 +574,7 @@ def ask_second_file(root: tk.Tk, first: Path) -> Path | None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """sidediff-gui [REPOSITORY | FILE | OLD NEW]: the window, prefilled from
+    """prosediff-gui [REPOSITORY | FILE | OLD NEW]: the window, prefilled from
     the arguments when they are a git repository or Markdown or Word files;
     for one file, a dialog asks for the file to compare it with."""
     args = sys.argv[1:] if argv is None else argv

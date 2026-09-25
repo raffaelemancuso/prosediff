@@ -5,18 +5,18 @@ from importlib.metadata import PackageNotFoundError, version
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from sidediff.diff import Comparison
+from prosediff.diff import Comparison
 
 
 def _version() -> str:
     try:
-        return version("sidediff")
+        return version("prosediff")
     except PackageNotFoundError:
         return ""
 
 
 _env = Environment(
-    loader=PackageLoader("sidediff", "templates"),
+    loader=PackageLoader("prosediff", "templates"),
     autoescape=select_autoescape(["html", "j2"]),
     trim_blocks=True,
     lstrip_blocks=True,

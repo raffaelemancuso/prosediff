@@ -2,9 +2,9 @@
 
 import pytest
 
-from sidediff import compare, render
-from sidediff.diff import word_diff
-from sidediff.mdstyle import md_styles, styled
+from prosediff import compare, render
+from prosediff.diff import word_diff
+from prosediff.mdstyle import md_styles, styled
 
 
 def classes_of(line, text):

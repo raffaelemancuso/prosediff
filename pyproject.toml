@@ -1,8 +1,18 @@
 [project]
-name = "sidediff"
+name = "prosediff"
 version = "0.1.0"
 description = "Side-by-side diff for prose, not code: optimised for Word .docx documents, Markdown included, from two files or from git"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["diff", "docx", "word", "markdown", "prose", "compare", "track changes"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Text Processing",
+]
 authors = [
     { name = "Raffaele Mancuso", email = "raffaelemancuso532@gmail.com" }
 ]
@@ -16,12 +26,16 @@ dependencies = [
     "yasbd-lib>=1.0.0,<2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/raffaelemancuso/prosediff"
+Issues = "https://github.com/raffaelemancuso/prosediff/issues"
+
 [project.scripts]
-sidediff = "sidediff.cli:main"
+prosediff = "prosediff.cli:main"
 
 # A window, without a console on Windows.
 [project.gui-scripts]
-sidediff-gui = "sidediff.gui:main"
+prosediff-gui = "prosediff.gui:main"
 
 [dependency-groups]
 dev = [

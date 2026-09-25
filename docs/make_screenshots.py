@@ -18,8 +18,8 @@ import git
 from PIL import ImageGrab
 from playwright.sync_api import sync_playwright
 
-from sidediff import compare, render
-from sidediff.gui import App, Settings
+from prosediff import compare, render
+from prosediff.gui import App, Settings
 
 DOCS = Path(__file__).parent
 

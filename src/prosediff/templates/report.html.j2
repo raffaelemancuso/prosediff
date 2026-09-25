@@ -365,7 +365,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
 {% endfor %}
 {% endif %}
 
-<footer>Generated {{ generated }} by sidediff {{ version }}.</footer>
+<footer>Generated {{ generated }} by prosediff {{ version }}.</footer>
 </main>
 <div id="tip" role="tooltip" hidden></div>
 <div class="toolbar" role="toolbar" aria-label="Changes and views">
@@ -416,7 +416,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     document.body.classList.toggle(name, on);
     var b = document.querySelector('[data-toggle="' + name + '"]');
     if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
-    try { localStorage.setItem("sidediff-" + name, on ? "1" : "0"); } catch (e) {}
+    try { localStorage.setItem("prosediff-" + name, on ? "1" : "0"); } catch (e) {}
   }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
   // Formatted Markdown is on by default, the other views off; a choice the
@@ -425,7 +425,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
     try {
-      var saved = localStorage.getItem("sidediff-" + name);
+      var saved = localStorage.getItem("prosediff-" + name);
       if (saved !== null) on = saved === "1";
     } catch (e) {}
     document.body.classList.toggle(name, on);
@@ -472,7 +472,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
       value.setAttribute("aria-valuenow", String(gapStep * GAP_STEP));
       value.setAttribute("aria-valuetext", lines + (lines === "1.00" ? " line" : " lines"));
     }
-    try { localStorage.setItem("sidediff-gap", String(gapStep)); } catch (e) {}
+    try { localStorage.setItem("prosediff-gap", String(gapStep)); } catch (e) {}
   }
   // The value is an ARIA spinbutton: the arrow keys step it, Page Up and
   // Page Down by a line, Home and End to either end.
@@ -488,7 +488,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     e.stopPropagation();
   });
   try {
-    var saved = localStorage.getItem("sidediff-gap");
+    var saved = localStorage.getItem("prosediff-gap");
     if (saved !== null && !isNaN(Number(saved))) setGap(Number(saved));
   } catch (e) {}
 
@@ -599,13 +599,13 @@ body.unified tr.skip td { grid-column: 1 / -1; }
     document.body.classList.toggle("no-" + kind + "-tips", !on);
     var box = document.querySelector('[data-tips="' + kind + '"]');
     if (box) box.setAttribute("aria-checked", on ? "true" : "false");
-    try { localStorage.setItem("sidediff-tips-" + kind, on ? "1" : "0"); } catch (e) {}
+    try { localStorage.setItem("prosediff-tips-" + kind, on ? "1" : "0"); } catch (e) {}
     hideTip();
   }
   ["comments", "changes"].forEach(function (kind) {
     var on = TIPS_DEFAULT[kind];
     try {
-      var saved = localStorage.getItem("sidediff-tips-" + kind);
+      var saved = localStorage.getItem("prosediff-tips-" + kind);
       if (saved !== null) on = saved === "1";
     } catch (e) {}
     tipsOn[kind] = on;

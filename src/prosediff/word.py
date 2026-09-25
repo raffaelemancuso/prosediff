@@ -10,7 +10,7 @@ that everything lands where it sits in the text:
   [text](url), bold and italic ** and *;
 - each comment becomes, where it starts, the span pandoc writes for it,
   [note]{.comment-start id=... author="..." date="..."}, which the rest of
-  sidediff folds into a marker and lists in the comments panel;
+  prosediff folds into a marker and lists in the comments panel;
 - tracked changes are settled as asked: accepting keeps the inserted runs
   (w:ins, w:moveTo) and drops the deleted ones (w:del, w:moveFrom),
   rejecting does the reverse, and "all" keeps both, as [text]{.insertion

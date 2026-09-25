@@ -721,7 +721,7 @@ wheels = [
 ]
 
 [[package]]
-name = "sidediff"
+name = "prosediff"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

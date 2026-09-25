@@ -6,7 +6,7 @@ Skipped when Playwright's Chromium is not installed
 
 import pytest
 
-from sidediff import compare, render
+from prosediff import compare, render
 
 sync_api = pytest.importorskip("playwright.sync_api")
 

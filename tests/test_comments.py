@@ -2,9 +2,9 @@
 
 from helpers import END, NOTE
 
-from sidediff import compare, render
-from sidediff.comments import NEW_COMMENT_MARK
-from sidediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
+from prosediff import compare, render
+from prosediff.comments import NEW_COMMENT_MARK
+from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
 
 MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
 
@@ -49,7 +49,7 @@ def test_comments_without_text_are_left_out():
 
 
 def test_empty_comments_switch(builder, tmp_path, capsys):
-    from sidediff.cli import main
+    from prosediff.cli import main
 
     empty = '[]{.comment-start id="4" author="Anna" date="2026-09-23T10:00:00Z"}'
     builder.write("p.md", "Text.\n")
@@ -101,7 +101,7 @@ def test_a_comment_on_both_sides_is_not_shown(builder):
 
 
 def test_a_shared_comment_leaves_one_space():
-    from sidediff.diff import without_shared_comments
+    from prosediff.diff import without_shared_comments
 
     comments = Comments()
     old = [fold_comments(s, comments) for s in [f"a {NOTE}b", f"c {NOTE}.", f"{NOTE} d", NOTE]]

@@ -1,7 +1,7 @@
 """Comparing sentence by sentence: splitting prose, labelling the sentences."""
 
-from sidediff import compare_paths, render
-from sidediff.sentences import is_supported, sentences, split_sentences
+from prosediff import compare_paths, render
+from prosediff.sentences import is_supported, sentences, split_sentences
 
 
 def test_sentences_know_abbreviations_and_footnotes():

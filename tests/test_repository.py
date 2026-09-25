@@ -7,8 +7,8 @@ import sys
 
 from helpers import docx
 
-from sidediff import compare, render
-from sidediff.diff import MAX_IMAGE_BYTES, image_uri, is_binary
+from prosediff import compare, render
+from prosediff.diff import MAX_IMAGE_BYTES, image_uri, is_binary
 
 PNG_1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -220,7 +220,7 @@ def test_images_are_shown_side_by_side(builder):
 
 
 def test_commits_in_between(builder, monkeypatch):
-    import sidediff.diff as d
+    import prosediff.diff as d
 
     shas = []
     for k in range(5):

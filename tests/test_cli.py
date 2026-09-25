@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from sidediff.cli import main
+from prosediff.cli import main
 
 
 def test_cli_writes_report(two_commits, tmp_path, capsys):
@@ -88,4 +88,4 @@ def test_cli_rejects_bad_arguments(extra):
 def test_cli_version(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
-    assert capsys.readouterr().out.startswith("sidediff ")
+    assert capsys.readouterr().out.startswith("prosediff ")

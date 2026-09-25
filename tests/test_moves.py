@@ -1,6 +1,6 @@
 """Moved lines: as they were, spacing aside, or lightly edited."""
 
-from sidediff.diff import MIN_MOVE_CHARS, align, mark_moves
+from prosediff.diff import MIN_MOVE_CHARS, align, mark_moves
 
 EDITED = "This long sentence travels to the end of the file, almost as it was."
 
@@ -92,7 +92,7 @@ def test_move_similarity_threshold():
 def test_move_similarity_validated(builder, tmp_path):
     import pytest
 
-    from sidediff import compare_paths
+    from prosediff import compare_paths
 
     (tmp_path / "a.md").write_text("x\n")
     (tmp_path / "b.md").write_text("y\n")

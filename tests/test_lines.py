@@ -7,7 +7,7 @@ import itertools
 import pytest
 from helpers import kinds
 
-from sidediff.diff import PAIRING_MAX_CELLS, align, git_opcodes, pair_lines, split_lines
+from prosediff.diff import PAIRING_MAX_CELLS, align, git_opcodes, pair_lines, split_lines
 
 
 def test_rows_carry_the_changes():

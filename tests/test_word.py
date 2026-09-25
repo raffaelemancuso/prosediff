@@ -4,7 +4,7 @@ import docx as python_docx
 import pytest
 from helpers import docx_xml
 
-from sidediff.word import WordError, docx_to_markdown, omml_text
+from prosediff.word import WordError, docx_to_markdown, omml_text
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def test_comment_is_a_span_with_escaped_brackets(written):
 
 
 def test_comment_brackets_are_unescaped_when_folded(tmp_path, written):
-    from sidediff.comments import Comments, fold_comments
+    from prosediff.comments import Comments, fold_comments
 
     comments = Comments()
     folded = fold_comments(written, comments)

@@ -23,8 +23,8 @@ import git
 from markupsafe import Markup
 from rapidfuzz.distance import Indel
 
-from sidediff import footnotes
-from sidediff.comments import (  # noqa: F401  (re-exported)
+from prosediff import footnotes
+from prosediff.comments import (  # noqa: F401  (re-exported)
     COMMENT_MARK,
     PLACEHOLDER,
     CommentEntry,
@@ -34,9 +34,9 @@ from sidediff.comments import (  # noqa: F401  (re-exported)
     plain,
     show_comments,
 )
-from sidediff.mdstyle import md_styles, styled
-from sidediff.sentences import split_sentences
-from sidediff.sources import SourceError, describe_side, docx_to_markdown, read_side
+from prosediff.mdstyle import md_styles, styled
+from prosediff.sentences import split_sentences
+from prosediff.sources import SourceError, describe_side, docx_to_markdown, read_side
 
 # How many leading bytes are inspected to decide whether a file is binary,
 # as git itself does.
@@ -963,7 +963,7 @@ def build_files(
 ) -> list[CommentEntry]:
     """Fill in the rows of every file; returns the comments for the panel.
 
-    Word documents are read into Markdown first (sidediff.word); a document
+    Word documents are read into Markdown first (prosediff.word); a document
     that cannot be read is listed as a binary file, with the reason.
     """
     comments = Comments()

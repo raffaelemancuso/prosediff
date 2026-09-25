@@ -4,7 +4,7 @@ import tkinter as tk
 
 import pytest
 
-from sidediff.gui import (
+from prosediff.gui import (
     INDEX,
     WORKTREE,
     App,
@@ -55,7 +55,7 @@ def test_unusable_arguments_are_ignored(tmp_path, args, message):
 
 
 def test_one_file_waits_for_its_partner(tmp_path):
-    from sidediff.gui import single_file
+    from prosediff.gui import single_file
 
     sent = tmp_path / "draft.docx"
     sent.write_bytes(b"x")
@@ -69,7 +69,7 @@ def test_one_file_waits_for_its_partner(tmp_path):
 def test_the_older_file_goes_on_the_left(tmp_path):
     import os
 
-    from sidediff.gui import with_second_file
+    from prosediff.gui import with_second_file
 
     sent, returned = tmp_path / "sent.docx", tmp_path / "returned.docx"
     sent.write_bytes(b"x")
@@ -88,7 +88,7 @@ def test_arguments_folder_not_a_repository(tmp_path):
 
 
 def test_context_lines_box():
-    from sidediff.gui import context_of
+    from prosediff.gui import context_of
 
     assert context_of(Settings()) == "auto"
     assert context_of(Settings(context_lines="2")) == 2
@@ -144,7 +144,7 @@ def test_generate_files_and_default_output(tmp_path):
     path, c = generate(
         Settings(mode="files", old=str(tmp_path / "a.md"), new=str(tmp_path / "b.md"))
     )
-    assert path.parent.name == "sidediff" and path.suffix == ".html" and len(c.files) == 1
+    assert path.parent.name == "prosediff" and path.suffix == ".html" and len(c.files) == 1
     with pytest.raises(ValueError, match="old and the new"):
         generate(Settings(mode="files"))
 

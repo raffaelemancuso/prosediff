@@ -1,10 +1,10 @@
-# sidediff
+# prosediff
 
 **Side-by-side comparison of prose, not code: Word documents (.docx) first,
 Markdown too.**
 
 Diff tools are made for code, where a line is a statement, a change is a
-line and nobody comments inside the file. sidediff is made for prose, where
+line and nobody comments inside the file. prosediff is made for prose, where
 a line is a whole paragraph, a change is a few words inside it, paragraphs
 move, and co-authors leave comments in the margin: papers, reports, books,
 the drafts co-authors send back. It is optimised for Word files and works on
@@ -20,9 +20,9 @@ changes) or working tree. Paragraphs wrap and are numbered, changes are
 described in plain English, and the new and removed comments of Word
 documents are shown and listed.
 
-![A page made by sidediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](docs/screenshot_page.png)
+![A page made by prosediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
-## Why sidediff
+## Why prosediff
 
 Tools for comparing versions of a text fall into two camps, and neither
 serves a paper written with co-authors well:
@@ -36,9 +36,9 @@ serves a paper written with co-authors well:
   compare a folder, a git history or a Markdown file, and it leaves you to
   work out which comments are new.
 
-sidediff sits between the two:
+prosediff sits between the two:
 
-- **It compares Word documents directly**: `sidediff --files draft.docx
+- **It compares Word documents directly**: `prosediff --files draft.docx
   draft_returned.docx` shows what a co-author changed, whatever they tracked
   or did not. Their tracked changes are accepted (or rejected) exactly as
   Word would, spaces included, and **their comments are kept**: each shown
@@ -73,11 +73,11 @@ sidediff sits between the two:
 ## Usage
 
 ```
-sidediff REPO BASE [TARGET] [options]
-sidediff --files OLD NEW [options]
+prosediff REPO BASE [TARGET] [options]
+prosediff --files OLD NEW [options]
 ```
 
-(from a checkout: `uv run sidediff ...`; installed: `uv tool install .`)
+(from a checkout: `uv run prosediff ...`; installed: `uv tool install .`)
 
 | Argument / option          | Meaning                                                       |
 |----------------------------|---------------------------------------------------------------|
@@ -105,38 +105,38 @@ sidediff --files OLD NEW [options]
 
 Examples:
 
-- `sidediff . HEAD~1 HEAD -o review.html`: the last commit;
-- `sidediff . HEAD --untracked`: everything not yet committed;
-- `sidediff . HEAD --cached`: what the next commit would record;
-- `sidediff --files draft_v1.docx draft_v2_returned.docx`: what a co-author
+- `prosediff . HEAD~1 HEAD -o review.html`: the last commit;
+- `prosediff . HEAD --untracked`: everything not yet committed;
+- `prosediff . HEAD --cached`: what the next commit would record;
+- `prosediff --files draft_v1.docx draft_v2_returned.docx`: what a co-author
   changed and commented, from the two Word files;
-- `sidediff --files submitted/ revised/`: two folders, file by file.
+- `prosediff --files submitted/ revised/`: two folders, file by file.
 
 ## The window
 
-`sidediff-gui` opens a window to choose what to compare.
-`sidediff-gui REPOSITORY` opens it with a git repository filled in (or the
-repository a folder belongs to); `sidediff-gui FILE.docx` first asks, in a
+`prosediff-gui` opens a window to choose what to compare.
+`prosediff-gui REPOSITORY` opens it with a git repository filled in (or the
+repository a folder belongs to); `prosediff-gui FILE.docx` first asks, in a
 file dialog, for the file to compare it with, the older of the two going on
-the left; `sidediff-gui OLD NEW` opens it with two Markdown or Word files.
+the left; `prosediff-gui OLD NEW` opens it with two Markdown or Word files.
 The Files tab has a button to swap the two.
 
 To have it at hand, install it once:
 
 ```
-uv tool install --editable C:\path\to\sidediff
+uv tool install --editable C:\path\to\prosediff
 ```
 
-This puts `sidediff` and `sidediff-gui` on `PATH` (editable: they always run
-the project's current code; `uv tool uninstall sidediff` removes them). On
-Windows, `sidediff-gui.exe` is a windowed program: double-clicked, pinned,
+This puts `prosediff` and `prosediff-gui` on `PATH` (editable: they always run
+the project's current code; `uv tool uninstall prosediff` removes them). On
+Windows, `prosediff-gui.exe` is a windowed program: double-clicked, pinned,
 behind a shortcut or with files dropped on it, it opens no console.
-`scripts/sidediff_gui.bat` (Windows) and `scripts/sidediff_gui.sh` (bash:
+`scripts/prosediff_gui.bat` (Windows) and `scripts/prosediff_gui.sh` (bash:
 Cygwin, Git Bash, Linux, macOS) start the same window, the installed one when
 there is one, else from the project; a batch file itself always shows a
 console for a moment.
 
-![The sidediff window: a git repository with base and target commits chosen from lists, and the options](docs/screenshot_window.png)
+![The prosediff window: a git repository with base and target commits chosen from lists, and the options](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
 
 - **Git repository**: pick a folder; base and target are chosen among the
   working tree, the index and the latest 200 commits (hash, date, author,
@@ -154,7 +154,7 @@ tracked changes, alignment, context lines or whole files, whitespace) and
 where to save the page (by default a new page in the temporary folder).
 Compare (or Ctrl+Enter) writes the page and opens it in the browser; the
 comparison runs in the background, and the window remembers the choices for
-the next time (`%APPDATA%\sidediff\gui.json`).
+the next time (`%APPDATA%\prosediff\gui.json`).
 
 ## The page
 
@@ -276,7 +276,7 @@ lines as git does (on LF; CRLF counts as LF). A file is binary if its first
 From Python:
 
 ```python
-from sidediff import compare, compare_paths, render
+from prosediff import compare, compare_paths, render
 
 html = render(compare("path/to/repo", "HEAD~1", "HEAD", context=3))
 html = render(compare_paths("v1.docx", "v2.docx", fold_comments_md=True))
