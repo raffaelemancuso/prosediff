@@ -1,12 +1,18 @@
 # sidediff
 
-Write a self-contained HTML page showing the differences between two versions
-of a set of files side by side: the older version on the left, the newer on
-the right, changed words highlighted inside changed lines. The versions are
-commits of a git repository, its index (staged changes) or working tree, or
-two files or two folders, Word documents included. Written with prose in
-mind: long lines wrap, changes are described in plain English, moved
-sentences are recognised, and the comments of Word documents are listed.
+**Side-by-side comparison of Word documents (.docx) and other prose.**
+sidediff is optimised for Word files and for prose: papers, reports, books,
+the drafts co-authors send back. It also works on Markdown and on any text
+file, but plain code is not what it is built for.
+
+It writes a self-contained HTML page showing the differences between two
+versions side by side: the older version on the left, the newer on the right,
+changed words highlighted inside changed paragraphs. The versions are two
+Word documents, two Markdown or text files, two folders, or commits of a git
+repository, its index (staged changes) or working tree. Paragraphs wrap and
+are numbered, changes are described in plain English, moved paragraphs and
+sentences are recognised, and the new and removed comments of Word documents
+are shown and listed.
 
 ![A page made by sidediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](docs/screenshot_page.png)
 

@@ -1,7 +1,7 @@
 [project]
 name = "sidediff"
 version = "0.1.0"
-description = "Write a self-contained HTML page showing the diff between two commits of a git repository side by side"
+description = "Side-by-side HTML comparison optimised for Word .docx documents and prose, Markdown included, from two files or from git"
 readme = "README.md"
 authors = [
     { name = "Raffaele Mancuso", email = "raffaelemancuso532@gmail.com" }
