@@ -53,7 +53,8 @@ def page(browser, page_file):
 
 def test_next_and_previous_change(page):
     counter = page.locator(".toolbar .counter")
-    assert counter.inner_text() == "2 changes"
+    assert counter.inner_text() == "2"
+    assert counter.get_attribute("title") == "2 changes"
     page.keyboard.press("n")
     assert counter.inner_text() == "1 / 2"
     assert counter.get_attribute("title") == "change 1 of 2"

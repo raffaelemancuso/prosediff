@@ -197,7 +197,8 @@ footer { color: var(--muted); font-size: 12px; margin-bottom: 48px; }
 .toolbar button.icon[aria-pressed="true"] { background: var(--skip);
   box-shadow: inset 0 0 0 1px var(--link); }
 .toolbar button:disabled { color: var(--muted); cursor: default; }
-.toolbar .counter { color: var(--muted); min-width: 7em; text-align: center; }
+.toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
+  font-variant-numeric: tabular-nums; }
 .toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 /* The spacing stepper: − and + either side of the value, in one bordered
    row, drawn in the link colour like the icons. */
@@ -369,7 +370,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
 <div id="tip" role="tooltip" hidden></div>
 <div class="toolbar" role="toolbar" aria-label="Changes and views">
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
-  <span class="counter" aria-live="polite">{{ "{:,}".format(c.change_count) }} change{{ "" if c.change_count == 1 else "s" }}</span>
+  <span class="counter" aria-live="polite" title="{{ "{:,}".format(c.change_count) }} change{{ "" if c.change_count == 1 else "s" }}">{{ "{:,}".format(c.change_count) }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
