@@ -1,9 +1,14 @@
 # sidediff
 
-**Side-by-side comparison of Word documents (.docx) and other prose.**
-sidediff is optimised for Word files and for prose: papers, reports, books,
-the drafts co-authors send back. It also works on Markdown and on any text
-file, but plain code is not what it is built for.
+**Side-by-side comparison of prose, not code: Word documents (.docx) first,
+Markdown too.**
+
+Diff tools are made for code, where a line is a statement, a change is a
+line and nobody comments inside the file. sidediff is made for prose, where
+a line is a whole paragraph, a change is a few words inside it, paragraphs
+move, and co-authors leave comments in the margin: papers, reports, books,
+the drafts co-authors send back. It is optimised for Word files and works on
+Markdown and any text file too; for code, a code diff tool serves better.
 
 It writes a self-contained HTML page showing the differences between two
 versions side by side: the older version on the left, the newer on the right,
