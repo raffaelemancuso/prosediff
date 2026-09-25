@@ -22,6 +22,7 @@ import git
 from markupsafe import Markup
 from rapidfuzz.distance import Indel
 
+from sidediff import footnotes
 from sidediff.comments import (  # noqa: F401  (re-exported)
     COMMENT_MARK,
     PLACEHOLDER,
@@ -49,6 +50,11 @@ WORD = re.compile(r"\w+", re.UNICODE)
 # order instead.
 PAIRING_THRESHOLD = 0.5
 PAIRING_MAX_CELLS = 40_000
+# Lines left between the pairs are paired in order when they have at least
+# this much in common; below it, two unrelated lines of a block are shown as
+# one removed and one added rather than face to face (a single line replaced
+# by a single line is always a pair: a rewrite in place).
+PAIRING_FLOOR = 0.25
 # A changed word is highlighted letter by letter when at least half of its
 # letters survive ("repeat" -> "repeated"); otherwise as a whole.
 CHAR_THRESHOLD = 0.5
@@ -301,7 +307,7 @@ MAX_QUOTE = 60
 
 
 def quote(text: str) -> str:
-    text = " ".join(plain(text).split())
+    text = " ".join(footnotes.plain(plain(text)).split())
     if len(text) > MAX_QUOTE:
         text = text[: MAX_QUOTE - 1] + "…"
     return f'"{text}"'
@@ -462,6 +468,11 @@ def token_similarity(a: list[str], b: list[str], cutoff: float) -> float:
     return Indel.normalized_similarity(a, b, score_cutoff=cutoff)
 
 
+def footnote_similarity(old: str, new: str) -> float:
+    """How alike the texts of two footnotes are, 0 to 1."""
+    return token_similarity(similarity_tokens(old), similarity_tokens(new), 0)
+
+
 def similarity(old: str, new: str) -> float:
     """Similarity of two lines, 0 to 1; 0 below the pairing threshold."""
     return token_similarity(similarity_tokens(old), similarity_tokens(new), PAIRING_THRESHOLD)
@@ -473,8 +484,8 @@ def pair_lines(old: list[str], new: list[str]) -> list[tuple[int | None, int | N
     Lines similar enough are paired first, so that as many similar lines as
     possible face each other (dynamic programming over the similarity
     matrix). The lines left between two such pairs are then paired in
-    order, and what remains stands alone: (i, None) is a deleted line,
-    (None, j) an inserted one.
+    order when they have at least PAIRING_FLOOR in common, and what remains
+    stands alone: (i, None) is a deleted line, (None, j) an inserted one.
     """
     n, m = len(old), len(new)
     anchors: list[tuple[int, int]] = []
@@ -505,12 +516,26 @@ def pair_lines(old: list[str], new: list[str]) -> list[tuple[int | None, int | N
 
     pairs: list[tuple[int | None, int | None]] = []
     pi = pj = 0
+    single = n == 1 and m == 1  # one line rewritten in place: always a pair
     for ai, aj in [*anchors, (n, m)]:
         gap_old, gap_new = list(range(pi, ai)), list(range(pj, aj))
+        gone, came = [], []
         for k in range(max(len(gap_old), len(gap_new))):
-            pairs.append(
-                (gap_old[k] if k < len(gap_old) else None, gap_new[k] if k < len(gap_new) else None)
-            )
+            i = gap_old[k] if k < len(gap_old) else None
+            j = gap_new[k] if k < len(gap_new) else None
+            if i is None or j is None:
+                gone += [i] if i is not None else []
+                came += [j] if j is not None else []
+            elif single or token_similarity(
+                similarity_tokens(old[i]), similarity_tokens(new[j]), PAIRING_FLOOR
+            ):
+                pairs.append((i, j))
+            else:
+                # too little in common to be the same line edited: shown as
+                # one removed and one added, not face to face
+                gone.append(i)
+                came.append(j)
+        pairs += [(i, None) for i in gone] + [(None, j) for j in came]
         if (ai, aj) != (n, m):
             pairs.append((ai, aj))
         pi, pj = ai + 1, aj + 1
@@ -817,6 +842,22 @@ def align(
 # From bytes to rows -------------------------------------------------------------
 
 
+def without_blank_lines(lines: list[str], labels: list[str] | None) -> tuple[list[str], list[str]]:
+    """The non-blank lines of prose, each with the label of its place in the
+    file (its line number, or the one it was given before).
+
+    In Markdown a blank line only separates paragraphs. Left in, every one of
+    them matches every other, so an inserted paragraph shifts the alignment
+    of all the paragraphs after it, each paired with its neighbour's
+    counterpart; without them, the paragraphs themselves are aligned.
+    """
+    kept = [k for k, line in enumerate(lines) if line.strip()]
+    return (
+        [lines[k] for k in kept],
+        [labels[k] if labels else str(k + 1) for k in kept],
+    )
+
+
 def _is_docx(path: str | None) -> bool:
     return bool(path) and path.lower().endswith(".docx")
 
@@ -842,6 +883,7 @@ def build_files(
     comments = Comments()
     texts: list[tuple[FileDiff, list[str], list[str]]] = []
     labels: dict[int, tuple[list[str] | None, list[str] | None]] = {}
+    notes: dict[int, footnotes.Footnotes] = {}
     for fd, old_bytes, new_bytes in entries:
         if _is_docx(fd.old_path) or _is_docx(fd.new_path):
             try:
@@ -884,11 +926,20 @@ def build_files(
         if by_sentence and fd.markdown:
             old_lines, old_labels = split_sentences(old_lines, sentence_language)
             new_lines, new_labels = split_sentences(new_lines, sentence_language)
+        if fd.markdown:
+            old_lines, old_labels = without_blank_lines(old_lines, old_labels)
+            new_lines, new_labels = without_blank_lines(new_lines, new_labels)
+            # Footnote numbers set aside: a renumbered footnote is no change.
+            old_lines, new_lines, notes[id(fd)] = footnotes.set_aside(
+                old_lines, new_lines, footnote_similarity
+            )
         labels[id(fd)] = (old_labels, new_labels)
         texts.append((fd, old_lines, new_lines))
 
     all_ops = git_opcodes([(old, new) for _, old, new in texts], ignore_whitespace)
     for (fd, old, new), ops in zip(texts, all_ops, strict=False):
+        fn = notes.get(id(fd))
+        token = footnotes.use_for_tooltips(fn)
         fd.rows, fd.additions, fd.deletions = align(
             old,
             new,
@@ -900,6 +951,12 @@ def build_files(
             old_labels=labels[id(fd)][0],
             new_labels=labels[id(fd)][1],
         )
+        footnotes.reset_tooltips(token)
+        if fn is not None and (fn.old or fn.new):
+            for r in fd.rows:
+                for row in [r, *r.hidden]:
+                    row.left = footnotes.restore(row.left, fn.old)
+                    row.right = footnotes.restore(row.right, fn.new)
 
     panel: list[CommentEntry] = []
     if len(comments):

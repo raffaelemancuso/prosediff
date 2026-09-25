@@ -83,9 +83,9 @@ def test_left_out_gap_rendered(builder):
 
 
 def test_signs_and_screen_reader_text(builder):
-    builder.write("f.txt", "keep\nold\ngone\n")
+    builder.write("f.txt", "keep\nthe old line of text\ngone\n")
     base = builder.commit("first")
-    builder.write("f.txt", "keep\nnew\nadded\n")
+    builder.write("f.txt", "keep\nthe new line of text\nadded\n")
     target = builder.commit("second")
     html = render(compare(builder.path, base, target))
     assert '<span class="sign" aria-hidden="true">~</span>' in html

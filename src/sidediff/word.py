@@ -22,6 +22,7 @@ body and are left out; an image is written [image], with its description
 when it has one, and an equation as its text.
 """
 
+import re
 from dataclasses import dataclass, field
 from io import BytesIO
 
@@ -40,6 +41,8 @@ LIST_STYLES = ("list", "bullet", "number")
 INSERTED = {qn("w:ins"), qn("w:moveTo")}
 DELETED = {qn("w:del"), qn("w:moveFrom")}
 # Wrappers whose content is part of the paragraph's text.
+# A paragraph of nothing but comment spans: a paragraph deleted as a whole.
+COMMENTS_ONLY = re.compile(r"(?:\[(?:[^\[\]\\]|\\.)*\]\{\.comment-start[^}]*\}\s*)+")
 TRANSPARENT = {
     qn("w:smartTag"),
     qn("w:customXml"),
@@ -72,6 +75,23 @@ class _Story:
         self.part = part
 
 
+class _NotesPart:
+    """The footnotes (or endnotes) part as a paragraph of it sees it: its own
+    relationships (the targets of its links), the document's styles, which
+    python-docx gives only the document part."""
+
+    def __init__(self, notes_part, document_part) -> None:
+        self._notes = notes_part
+        self._document = document_part
+
+    @property
+    def rels(self):
+        return self._notes.rels
+
+    def __getattr__(self, name):
+        return getattr(self._document, name)
+
+
 @dataclass
 class Reader:
     document: Document
@@ -80,6 +100,8 @@ class Reader:
     notes: dict = field(default_factory=dict)  # ("footnote"/"endnote", id) -> element
     note_order: list = field(default_factory=list)  # [(kind, id)] as referenced
     shown_comments: set = field(default_factory=set)
+    # comments of a paragraph deleted as a whole, for the next paragraph
+    carried: str = ""
 
     # Paragraph content ----------------------------------------------------------
 
@@ -180,14 +202,23 @@ class Reader:
 
     # Blocks -----------------------------------------------------------------------
 
-    def paragraph_text(self, el) -> str:
-        p = Paragraph(el, _Story(self.document.part))
+    def paragraph_text(self, el, part=None) -> str:
+        """A paragraph's text; part is the one it belongs to (a footnote's
+        links are looked up among the footnotes' relationships)."""
+        doc = self.document.part
+        p = Paragraph(el, _Story(doc if part is None else _NotesPart(part, doc)))
         return render_pieces(self.children(el, p)).strip()
 
     def paragraph(self, el) -> str:
         text = self.paragraph_text(el)
         if not text:
             return ""
+        # A paragraph deleted as a whole keeps only the comments anchored in
+        # it: as Word merges it into the next paragraph, they go there.
+        if COMMENTS_ONLY.fullmatch(text):
+            self.carried += text
+            return ""
+        text, self.carried = self.carried + text, ""
         p = Paragraph(el, _Story(self.document.part))
         style = (p.style.name or "").lower() if p.style is not None else ""
         if style in HEADING_STYLES:
@@ -209,6 +240,18 @@ class Reader:
             width = rows[0].count(" | ") + 1
             rows.insert(1, "|" + "---|" * width)
         return rows
+
+    def body(self) -> list[str]:
+        """The paragraphs and tables of the document; comments carried past
+        the last paragraph join it."""
+        out = self.blocks(self.document.element.body)
+        if self.carried:
+            if out:
+                out[-1] += self.carried
+            else:
+                out.append(self.carried)
+            self.carried = ""
+        return out
 
     def blocks(self, container) -> list[str]:
         out: list[str] = []
@@ -233,11 +276,12 @@ class Reader:
         out = []
         k = 0
         while k < len(self.note_order):
-            el = self.notes.get(self.note_order[k])
+            found = self.notes.get(self.note_order[k])
             k += 1
-            if el is None:
+            if found is None:
                 continue
-            texts = [self.paragraph_text(p) for p in el.iter(qn("w:p"))]
+            el, part = found
+            texts = [self.paragraph_text(p, part) for p in el.iter(qn("w:p"))]
             out.append(f"[^{k}]: " + " ".join(t for t in texts if t))
         return out
 
@@ -337,7 +381,8 @@ def render_pieces(pieces: list[Piece]) -> str:
 
 
 def _notes(document: Document) -> dict:
-    """The footnote and endnote elements, by (kind, id), separators left out."""
+    """The footnote and endnote elements with the part holding them, by
+    (kind, id), separators left out."""
     notes = {}
     for part in document.part.package.iter_parts():
         name = str(part.partname)
@@ -347,7 +392,7 @@ def _notes(document: Document) -> dict:
         root = parse_xml(part.blob)
         for note in root.findall(qn(f"w:{kind}")):
             if note.get(qn("w:type")) in (None, "normal"):
-                notes[(kind, note.get(qn("w:id")))] = note
+                notes[(kind, note.get(qn("w:id")))] = (note, part)
     return notes
 
 
@@ -368,7 +413,7 @@ def docx_to_markdown(data: bytes, changes: str = "accept") -> str:
     except (KeyError, ValueError):
         reader.comments = {}
     reader.notes = _notes(document)
-    lines = reader.blocks(document.element.body)
+    lines = reader.body()
     notes = reader.note_lines()
     text = "\n\n".join(lines)
     if notes:

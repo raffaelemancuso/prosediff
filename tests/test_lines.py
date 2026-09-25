@@ -77,8 +77,23 @@ def test_pairing_skips_inserted_line():
     assert pair_lines(old, new) == [(0, 0), (None, 1), (1, 2)]
 
 
-def test_pairing_dissimilar_lines_stay_side_by_side():
-    assert pair_lines(["a", "b"], ["c", "d", "e"]) == [(0, 0), (1, 1), (None, 2)]
+def test_pairing_unrelated_lines_stand_alone():
+    # several lines with nothing in common: removed and added, not face to face
+    assert pair_lines(["a", "b"], ["c", "d", "e"]) == [
+        (0, None),
+        (1, None),
+        (None, 0),
+        (None, 1),
+        (None, 2),
+    ]
+    # related enough (a quarter of the words), they are paired in order
+    old = ["the report was written in May", "a different line entirely"]
+    new = ["the report was finished in June", "another line altogether"]
+    assert pair_lines(old, new)[0] == (0, 0)
+
+
+def test_one_line_rewritten_in_place_is_a_pair():
+    assert pair_lines(["a"], ["c"]) == [(0, 0)]
 
 
 def test_pairing_reordered_keeps_order():

@@ -108,6 +108,26 @@ def test_compare_two_docx_with_comments_panel(tmp_path):
     assert f'href="#{c.comments[0].anchor}"' in html and f'id="{c.comments[0].anchor}"' in html
 
 
+def test_inserted_paragraph_does_not_shift_the_pairing(tmp_path):
+    """Blank lines between paragraphs match one another: left in, a paragraph
+    inserted above shifts every paragraph below onto its neighbour."""
+    notes = [f"[^{k}]: Footnote number {k} explains point {k} of the text." for k in (1, 2, 3)]
+    old = "Body text.\n\n" + "\n\n".join(notes) + "\n"
+    notes[1] += " With a longer explanation added in the new version."
+    new = "Body text.\n\nA new closing paragraph.\n\n" + "\n\n".join(notes) + "\n"
+    (tmp_path / "a.md").write_text(old)
+    (tmp_path / "b.md").write_text(new)
+    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md").files
+    rows = [r for r in f.rows if r.kind != "skip"]
+    assert [(r.kind, r.left_label, r.right_label) for r in rows] == [
+        ("equal", "1", "1"),
+        ("insert", "", "3"),
+        ("equal", "3", "5"),
+        ("replace", "5", "7"),
+        ("equal", "7", "9"),
+    ]
+
+
 def test_broken_docx_is_listed_as_binary(tmp_path):
     a, b = tmp_path / "a.docx", tmp_path / "b.docx"
     a.write_bytes(b"not a zip")
