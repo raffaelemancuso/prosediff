@@ -1062,6 +1062,12 @@ def build_files(
             added = frozenset(placeholders_in("\n".join(new))) - frozenset(
                 placeholders_in("\n".join(old))
             )
+            # The comments both sides had are gone: a row still showing one
+            # has a new or removed comment, and is a stop of the navigation
+            # like an edited one.
+            for r in fd.rows:
+                if r.kind != "skip" and (placeholders_in(r.left) or placeholders_in(r.right)):
+                    r.first_of_change = True
             for r in fd.rows:
                 for row in [r, *r.hidden]:
                     row.left = show_comments(row.left, comments)

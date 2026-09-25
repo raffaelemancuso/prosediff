@@ -130,7 +130,8 @@ def test_a_paragraph_a_comment_only_moved_into_is_not_shown(builder):
 
 def test_a_paragraph_with_only_a_new_comment_is_shown(builder):
     """Its text is unchanged, so it is no edit, but it is not folded away
-    with the unchanged lines: the new comment shows, marked new."""
+    with the unchanged lines: the new comment shows, marked new, and the
+    navigation stops there."""
     lines = [f"Paragraph {k} of the text." for k in range(40)]
     builder.write("p.md", "\n\n".join(lines) + "\n")
     base = builder.commit("first")
@@ -145,6 +146,7 @@ def test_a_paragraph_with_only_a_new_comment_is_shown(builder):
     assert 'class="comment new"' in str(row.right)
     assert (f.additions, f.deletions) == (0, 0)
     assert [e.status for e in c.comments] == ["new"]
+    assert row.first_of_change and f.change_count == 1
 
 
 def test_compare_fold_comments(builder, tmp_path):

@@ -53,20 +53,22 @@ def page(browser, page_file):
 
 def test_next_and_previous_change(page):
     counter = page.locator(".toolbar .counter")
-    assert counter.inner_text() == "2"
-    assert counter.get_attribute("data-help") == "2 changes"
+    # two edits, and a paragraph that only gained a comment, in between
+    assert counter.inner_text() == "3"
+    assert counter.get_attribute("data-help") == "3 changes"
     page.keyboard.press("n")
-    assert counter.inner_text() == "1 / 2"
-    assert counter.get_attribute("data-help") == "Change 1 of 2"
+    assert counter.inner_text() == "1 / 3"
+    assert counter.get_attribute("data-help") == "Change 1 of 3"
     page.keyboard.press("n")
-    assert counter.inner_text() == "2 / 2"
-    assert page.locator("tr.current").count() == 1
+    assert counter.inner_text() == "2 / 3"
+    assert "Line 20" in page.locator("tr.current").inner_text()
+    page.keyboard.press("n")
     page.keyboard.press("n")  # wraps around
-    assert counter.inner_text() == "1 / 2"
+    assert counter.inner_text() == "1 / 3"
     page.keyboard.press("p")
-    assert counter.inner_text() == "2 / 2"
+    assert counter.inner_text() == "3 / 3"
     page.click('[data-nav="-1"]')
-    assert counter.inner_text() == "1 / 2"
+    assert counter.inner_text() == "2 / 3"
 
 
 def test_show_unchanged_lines(page):
