@@ -1,0 +1,34 @@
+name: publish
+
+# Pushing a tag vX.Y.Z publishes that version to PyPI, once the tests pass.
+# No token: PyPI trusts this workflow (trusted publishing), through the
+# "pypi" environment named in the project's publisher settings on PyPI.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yml
+
+  publish:
+    needs: tests
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/prosediff/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: The tag matches the version in pyproject.toml
+        run: |
+          version=$(uv version --short)
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match version ${version}"
+            exit 1
+          fi
+      - run: uv build
+      - run: uv publish
