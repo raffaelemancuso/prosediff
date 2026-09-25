@@ -145,7 +145,8 @@ understand documents:
   `*.docx` and `*.odt` files in `.git/info/attributes` (not committed; with
   `--global`, git's global attributes file);
 - `git difftool -t prosediff` opens a prosediff page for each changed file,
-  and `git difftool -d -t prosediff` one page for them all.
+  and `git difftool -d -t prosediff` one page for them all (on Windows, if
+  git says it "could not symlink", add `--no-symlinks`).
 
 Both call the Python prosediff was installed with (`python -m prosediff`),
 so they keep working whether or not its scripts are on `PATH`. Running it

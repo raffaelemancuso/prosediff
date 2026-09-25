@@ -98,7 +98,16 @@ def test_setup_git_makes_git_diff_show_documents_as_text(two_documents, capsys):
 def test_difftool_writes_and_opens_a_page(two_documents, browser):
     b = two_documents
     assert main(["--setup-git", str(b.path)]) == 0
-    git(b.path, "difftool", "-d", "-t", "prosediff", "--no-prompt", "HEAD~1", "HEAD")
+    # --no-symlinks: where git init found symlinks to work (GitHub's Windows
+    # runners), git difftool -d tries to link the right side to the working
+    # tree, and on Windows fails ("could not symlink").
+    difftool = ["difftool", "-d", "--no-symlinks", "-t", "prosediff", "--no-prompt"]
+    git(
+        b.path,
+        *difftool,
+        "HEAD~1",
+        "HEAD",
+    )
     page = browser.read_text().strip()
     assert page.startswith("file:") and page.endswith(".html")
     html = Path(url2pathname(urlparse(page).path)).read_text(encoding="utf-8")
