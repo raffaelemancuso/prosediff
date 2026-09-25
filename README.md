@@ -12,12 +12,13 @@ Markdown and any text file too; for code, a code diff tool serves better.
 
 It writes a self-contained HTML page showing the differences between two
 versions side by side: the older version on the left, the newer on the right,
-changed words highlighted inside changed paragraphs. The versions are two
-Word documents, two Markdown or text files, two folders, or commits of a git
-repository, its index (staged changes) or working tree. Paragraphs wrap and
-are numbered, changes are described in plain English, moved paragraphs and
-sentences are recognised, and the new and removed comments of Word documents
-are shown and listed.
+each paragraph facing the paragraph it came from, changed words highlighted
+inside it. Text that moved is followed to its new place **even when it was
+edited on the way**. The versions are two Word documents, two Markdown or
+text files, two folders, or commits of a git repository, its index (staged
+changes) or working tree. Paragraphs wrap and are numbered, changes are
+described in plain English, and the new and removed comments of Word
+documents are shown and listed.
 
 ![A page made by sidediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](docs/screenshot_page.png)
 
@@ -45,12 +46,22 @@ sidediff sits between the two:
   listed in a panel. Only new and removed comments are shown: those already
   in the old version are left out, even where they moved. The same works on the
   Markdown that `pandoc` makes of a Word file, and on Word files in git.
+- **It lines the two versions up correctly**: each edited paragraph faces
+  the paragraph it came from, however much it was rewritten, and a paragraph
+  inserted, deleted or split does not shift the ones below it onto the wrong
+  partners. A paragraph unrelated to anything on the other side is shown as
+  removed or added rather than forced against a stranger. Comments and
+  footnote numbers do not disturb the alignment: a renumbered footnote or a
+  comment that moved is no change.
+- **It follows text that moved, even when it changed**: a paragraph (or,
+  with `--by-sentence`, a sentence) moved elsewhere is shown at both ends,
+  tinted as a move, with the words edited on the way highlighted; how alike
+  it must stay to count as moved is set with `--move-similarity`. Code diff
+  tools show the same text as one deletion and one unrelated insertion.
 - **It is made for prose**: long lines wrap, changes are highlighted word by
   word and down to the letter within a word, each change is described in
-  plain English on hover (`changed "repeat" to "repeated"`), edited
-  paragraphs are paired with the paragraph they came from, moved sentences
-  are recognised even when lightly edited, words are counted as well as
-  lines, and Markdown can be shown formatted.
+  plain English on hover (`changed "repeat" to "repeated"`), words are
+  counted as well as lines, and Markdown can be shown formatted.
 - **It works from git or without it**: two commits, the staged or
   uncommitted changes, two files or two folders, from the command line or
   from a window.
