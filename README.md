@@ -172,8 +172,9 @@ the next time (`%APPDATA%\sidediff\gui.json`).
   colours (orange and blue instead of red and green); `t` to tint the whole
   of an edited line, as most diff tools do (by default only its changed
   words are coloured, and its gutter; the tint stops short of the space
-  between paragraphs); a Spacing stepper, + above the value and − below (or
-  `]` and `[`), for more or less space between the paragraphs of Markdown and
+  between paragraphs); a spacing stepper, − and + either side of the value
+  (or `[` and `]`, or the arrow keys on the value, an ARIA spinbutton), for
+  less or more space between the paragraphs of Markdown and
   Word documents; and two checkboxes for the comment tooltips (on by default)
   and the change tooltips (off by default; with both on, a comment inside a
   changed word shows the comment, and with only the change ones on, the change).
