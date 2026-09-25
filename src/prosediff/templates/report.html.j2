@@ -173,6 +173,7 @@ body.formatted .s-h4, body.formatted .s-h5, body.formatted .s-h6 { font-weight: 
 body.formatted .s-h1 { font-size: 1.4em; } body.formatted .s-h2 { font-size: 1.25em; }
 body.formatted .s-h3 { font-size: 1.1em; }
 footer { color: var(--muted); font-size: 12px; margin-bottom: 48px; }
+footer a { color: inherit; }
 .toolbar { position: fixed; right: 16px; bottom: 16px; z-index: 2; display: flex;
   gap: 8px; align-items: center; background: var(--panel); color: var(--fg);
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
@@ -365,7 +366,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
 {% endfor %}
 {% endif %}
 
-<footer>Generated {{ generated }} by prosediff {{ version }}.</footer>
+<footer>Generated {{ generated }} by <a href="{{ homepage }}">prosediff</a> {{ version }}.</footer>
 </main>
 <div id="tip" role="tooltip" hidden></div>
 <div class="toolbar" role="toolbar" aria-label="Changes and views">

@@ -24,6 +24,7 @@ _env = Environment(
 
 
 ALIGNMENTS = ("left", "justify")
+HOMEPAGE = "https://github.com/raffaelemancuso/prosediff"
 
 
 def render(comparison: Comparison, paths: list[str] | None = None, align: str = "left") -> str:
@@ -37,4 +38,5 @@ def render(comparison: Comparison, paths: list[str] | None = None, align: str = 
         align=align,
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         version=_version(),
+        homepage=HOMEPAGE,
     )

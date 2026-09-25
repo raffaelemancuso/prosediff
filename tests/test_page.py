@@ -23,6 +23,14 @@ def test_render_side_by_side(two_commits):
     assert "first &lt;draft&gt;" in html
 
 
+def test_render_credits_prosediff(two_commits):
+    """The footer names the program, linking to its repository."""
+    b, base, target = two_commits
+    html = render(compare(b.path, base, target))
+    footer = re.search(r"<footer>(.*?)</footer>", html, re.S).group(1)
+    assert 'by <a href="https://github.com/raffaelemancuso/prosediff">prosediff</a>' in footer
+
+
 def test_render_tooltips(two_commits):
     b, base, target = two_commits
     html = render(compare(b.path, base, target))
