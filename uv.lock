@@ -1,6 +1,10 @@
 version = 1
 revision = 3
 requires-python = ">=3.11"
+resolution-markers = [
+    "python_full_version >= '3.13'",
+    "python_full_version < '3.13'",
+]
 
 [[package]]
 name = "beartype"
@@ -361,6 +365,19 @@ wheels = [
 ]
 
 [[package]]
+name = "odfdo"
+version = "3.26.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/97/64/e0c9b9fa0e33d5fe034f9586cc6a018e6428149bcb5aebfe7b0cbf46ccda/odfdo-3.26.1.tar.gz", hash = "sha256:5f8b9ade403fffe54df0414507ad7002f9b0557e536494edd648d2f84a46490b", size = 334968, upload-time = "2026-09-19T14:47:05.968Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/a8/18666212f7ca5c08761c9d5c12f2fc5acb30ed693d11d179cf63afd9c952/odfdo-3.26.1-py3-none-any.whl", hash = "sha256:163a4e73aea4132190346b7404c8f89a95014f8a979e699d9fc3d64f2be94a50", size = 439516, upload-time = "2026-09-19T14:47:04.403Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.3"
 source = { registry = "https://pypi.org/simple" }
@@ -405,6 +422,7 @@ dependencies = [
     { name = "gitpython" },
     { name = "jinja2" },
     { name = "markupsafe" },
+    { name = "odfdo" },
     { name = "python-docx" },
     { name = "rapidfuzz" },
     { name = "yasbd-lib" },
@@ -422,6 +440,7 @@ requires-dist = [
     { name = "gitpython", specifier = ">=3.1.62" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "markupsafe", specifier = ">=3.0" },
+    { name = "odfdo", specifier = ">=3.26.1" },
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "rapidfuzz", specifier = ">=3.14.6" },
     { name = "yasbd-lib", specifier = ">=1.0.0,<2" },

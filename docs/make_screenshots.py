@@ -1,21 +1,22 @@
-"""Remake the README screenshots from a demo repository.
+"""Remake the README screenshots and the demo animation from a demo repository.
 
     uv run --with pillow python docs/make_screenshots.py
 
 The page is photographed by Playwright's Chromium (uv run playwright
-install chromium, once), the window by Pillow, which needs a desktop: the
-window shows on screen for a moment. The demo text and its authors are
-made up.
+install chromium, once), frame by frame for the animation, which Pillow
+puts together; the window by Pillow, which needs a desktop: the window
+shows on screen for a moment. The demo text and its authors are made up.
 """
 
 import ctypes
+import io
 import sys
 import tempfile
 import tkinter as tk
 from pathlib import Path
 
 import git
-from PIL import ImageGrab
+from PIL import Image, ImageGrab
 from playwright.sync_api import sync_playwright
 
 from prosediff import compare, render
@@ -106,6 +107,45 @@ def shoot_page(repo: Path, out: Path) -> None:
         browser.close()
 
 
+def shoot_demo(repo: Path, out: Path) -> None:
+    """The page in use, as a looping GIF: a comment's tooltip, the changes
+    one after the other (n), one column instead of two (u), the colour-blind
+    colours (c)."""
+    page_file = repo.parent / "demo.html"
+    page_file.write_text(render(compare(repo, "HEAD~1", "HEAD"), align="justify"), encoding="utf-8")
+    frames: list[tuple[Image.Image, int]] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1000, "height": 620}, device_scale_factor=1)
+        page.goto(page_file.as_uri())
+
+        def shot(ms: int) -> None:
+            page.wait_for_timeout(150)
+            frames.append((Image.open(io.BytesIO(page.screenshot())).convert("RGB"), ms))
+
+        shot(2200)
+        page.locator(".comment.new").first.hover()
+        shot(2600)
+        page.mouse.move(0, 0)
+        for key, ms in (("n", 1600), ("n", 1600), ("n", 1600), ("u", 2400), ("u", 0), ("c", 2400)):
+            page.keyboard.press(key)
+            if ms:
+                shot(ms)
+        page.keyboard.press("c")
+        browser.close()
+    # one palette for every frame, so the colours do not flicker between them
+    palette = frames[0][0].quantize(colors=255, method=Image.Quantize.MEDIANCUT)
+    images = [f.quantize(palette=palette, dither=Image.Dither.NONE) for f, _ in frames]
+    images[0].save(
+        out,
+        save_all=True,
+        append_images=images[1:],
+        duration=[ms for _, ms in frames],
+        loop=0,
+        optimize=True,
+    )
+
+
 def shoot_window(repo: Path, out: Path) -> None:
     if sys.platform == "win32":  # pixel coordinates, whatever the display scaling
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -128,5 +168,11 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp:
         repo, _ = demo_repo(Path(tmp) / "wonderland")
         shoot_page(repo, DOCS / "screenshot_page.png")
+        shoot_demo(repo, DOCS / "demo.gif")
         shoot_window(repo, DOCS / "screenshot_window.png")
-    print("written:", DOCS / "screenshot_page.png", DOCS / "screenshot_window.png")
+    print(
+        "written:",
+        DOCS / "screenshot_page.png",
+        DOCS / "demo.gif",
+        DOCS / "screenshot_window.png",
+    )

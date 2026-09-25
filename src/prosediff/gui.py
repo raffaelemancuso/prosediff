@@ -12,12 +12,10 @@ import json
 import os
 import queue
 import sys
-import tempfile
 import threading
 import tkinter as tk
 import webbrowser
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -31,7 +29,7 @@ from prosediff.diff import (
     compare,
     compare_paths,
 )
-from prosediff.render import ALIGNMENTS, render
+from prosediff.render import ALIGNMENTS, default_output, render
 from prosediff.sources import DOCX_CHANGES, SourceError
 
 MAX_COMMITS = 200
@@ -96,11 +94,12 @@ class Settings:
     open_page: bool = True
 
 
-PREFILLED_FILES = (".md", ".docx")
+PREFILLED_FILES = (".md", ".docx", ".odt")
 
 
 def single_file(args: list[str]) -> Path | None:
-    """The one Markdown or Word file given, whose partner the window asks for."""
+    """The one Markdown, Word or OpenDocument file given, whose partner the
+    window asks for."""
     if len(args) == 1:
         path = Path(args[0])
         if path.is_file() and path.suffix.lower() in PREFILLED_FILES:
@@ -132,10 +131,10 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
     """The settings to open the window with, given its command-line arguments.
 
     One argument that is a git repository (or a folder inside one) fills in
-    the repository, the sides starting from their defaults; one Markdown or
-    Word file fills in the files tab, its partner to be chosen when the
-    window opens; two Markdown or Word files, or two folders, fill in the
-    files tab. Anything else is ignored, and the second value says why.
+    the repository, the sides starting from their defaults; one Markdown,
+    Word or OpenDocument file fills in the files tab, its partner to be
+    chosen when the window opens; two such files, or two folders, fill in
+    the files tab. Anything else is ignored, and the second value says why.
     """
     s = replace(base)
     if len(args) == 1:
@@ -155,7 +154,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
             s.base = s.target = ""  # start from the defaults
             s.paths = []
             return s, ""
-        return s, f"Not a folder, a Markdown or a Word file: {path}"
+        return s, f"Not a folder, a Markdown, Word or OpenDocument file: {path}"
     if len(args) == 2:
         old, new = Path(args[0]), Path(args[1])
         both_files = all(p.is_file() and p.suffix.lower() in PREFILLED_FILES for p in (old, new))
@@ -164,9 +163,12 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
             s.old, s.new = str(old.resolve()), str(new.resolve())
             s.output = page_beside(old, new)
             return s, ""
-        return s, "Two arguments must be two Markdown or Word files, or two folders."
+        return s, "Two arguments must be two Markdown, Word or OpenDocument files, or two folders."
     if args:
-        return s, "Give one git repository, two Markdown or Word files, or two folders."
+        return (
+            s,
+            "Give one git repository, two Markdown, Word or OpenDocument files, or two folders.",
+        )
     return s, ""
 
 
@@ -192,13 +194,6 @@ def save_settings(s: Settings, path: Path | None = None) -> None:
         path.write_text(json.dumps(asdict(s), indent=2), encoding="utf-8")
     except OSError:
         pass  # remembering is a convenience
-
-
-def default_output() -> Path:
-    """A fresh page in the temporary folder, so no repository is cluttered."""
-    folder = Path(tempfile.gettempdir()) / "prosediff"
-    folder.mkdir(exist_ok=True)
-    return folder / f"prosediff_{datetime.now():%Y%m%d_%H%M%S}.html"
 
 
 def context_of(s: Settings) -> Context:
@@ -570,7 +565,7 @@ def ask_second_file(root: tk.Tk, first: Path) -> Path | None:
         parent=root,
         title=f"Compare {first.name} with…",
         initialdir=str(first.parent),
-        filetypes=[("Word and Markdown", "*.docx *.md"), ("All files", "*.*")],
+        filetypes=[("Word, OpenDocument and Markdown", "*.docx *.odt *.md"), ("All files", "*.*")],
     )
     return Path(chosen) if chosen else None
 
@@ -613,7 +608,7 @@ def set_icon(root: tk.Tk) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     """prosediff-gui [REPOSITORY | FILE | OLD NEW]: the window, prefilled from
-    the arguments when they are a git repository, Markdown or Word files, or
+    the arguments when they are a git repository, Markdown, Word or OpenDocument files, or
     two folders; for one file, a dialog asks for the file to compare it with.
     Arguments that are none of these are reported in an error box, with the
     arguments received, and the program exits once it is dismissed."""

@@ -1,7 +1,9 @@
 """Render a Comparison to a self-contained HTML page."""
 
+import tempfile
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
@@ -25,6 +27,21 @@ _env = Environment(
 
 ALIGNMENTS = ("left", "justify")
 HOMEPAGE = "https://github.com/raffaelemancuso/prosediff"
+
+
+def default_output() -> Path:
+    """A fresh page in the temporary folder, so no repository is cluttered;
+    created empty, so pages made in the same second (git difftool, one per
+    file) do not overwrite each other."""
+    folder = Path(tempfile.gettempdir()) / "prosediff"
+    folder.mkdir(exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f"prosediff_{datetime.now():%Y%m%d_%H%M%S}_",
+        suffix=".html",
+        dir=folder,
+        delete=False,
+    ) as f:
+        return Path(f.name)
 
 
 def render(comparison: Comparison, paths: list[str] | None = None, align: str = "left") -> str:

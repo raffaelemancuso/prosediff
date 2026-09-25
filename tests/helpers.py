@@ -142,3 +142,39 @@ def kinds(rows):
 def untitled(html) -> str:
     """The markup without the tooltips, to check the highlighting alone."""
     return re.sub(r' title="[^"]*"', "", str(html))
+
+
+def odt_xml(path, body, styles=""):
+    """An OpenDocument text from raw XML: body is the content of office:text,
+    styles the automatic styles (what odfdo does not write directly:
+    tracked changes, comments with dates)."""
+    ns = (
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+        'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" '
+        'xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" '
+        'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+        'xmlns:xlink="http://www.w3.org/1999/xlink" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'office:version="1.3"'
+    )
+    mime = "application/vnd.oasis.opendocument.text"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("mimetype", mime, compress_type=zipfile.ZIP_STORED)
+        z.writestr(
+            "META-INF/manifest.xml",
+            '<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:'
+            'manifest:1.0" manifest:version="1.3">'
+            f'<manifest:file-entry manifest:full-path="/" manifest:media-type="{mime}"/>'
+            '<manifest:file-entry manifest:full-path="content.xml" '
+            'manifest:media-type="text/xml"/></manifest:manifest>',
+        )
+        z.writestr(
+            "content.xml",
+            f"<office:document-content {ns}><office:automatic-styles>{styles}"
+            f"</office:automatic-styles><office:body><office:text>{body}</office:text>"
+            "</office:body></office:document-content>",
+        )
+    return path

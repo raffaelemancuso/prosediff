@@ -1,7 +1,9 @@
-"""Command line: prosediff REPO BASE [TARGET], or prosediff --files OLD NEW."""
+"""Command line: prosediff REPO BASE [TARGET], or prosediff --files OLD NEW;
+prosediff --setup-git and --to-markdown for git's own commands."""
 
 import argparse
 import sys
+import webbrowser
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -16,8 +18,9 @@ from prosediff.diff import (
     compare,
     compare_paths,
 )
-from prosediff.render import ALIGNMENTS, render
-from prosediff.sources import DOCX_CHANGES, SourceError
+from prosediff.gitsetup import SetupError, document_name, setup_git
+from prosediff.render import ALIGNMENTS, default_output, render
+from prosediff.sources import DOCX_CHANGES, SourceError, document_to_markdown
 
 PROG = "prosediff"
 
@@ -36,15 +39,17 @@ def main(argv: list[str] | None = None) -> int:
         "commits of a git repository (or a commit and the working tree or the "
         "index), or between two files or two folders, side by side.",
         epilog="Examples: prosediff . HEAD~1 HEAD; prosediff . HEAD --untracked; "
-        "prosediff --files draft_v1.docx draft_v2.docx",
+        "prosediff --files draft_v1.docx draft_v2.docx --open; prosediff --setup-git",
     )
     ap.add_argument(
         "repo",
+        nargs="?",
         metavar="REPO|OLD",
         help="the repository (or any folder inside it); with --files, the old file or folder",
     )
     ap.add_argument(
         "base",
+        nargs="?",
         metavar="BASE|NEW",
         help="the older commit: hash, branch, tag, HEAD~2, ...; with "
         "--files, the new file or folder",
@@ -72,9 +77,9 @@ def main(argv: list[str] | None = None) -> int:
         "-o",
         "--output",
         type=Path,
-        default=Path("diff.html"),
-        help="output file (default: diff.html)",
+        help="output file (default: diff.html; with --open, a new page in the temporary folder)",
     )
+    ap.add_argument("--open", action="store_true", help="open the page in the browser once written")
     lines = ap.add_mutually_exclusive_group()
     lines.add_argument(
         "-U",
@@ -167,8 +172,42 @@ def main(argv: list[str] | None = None) -> int:
         help="the language whose rules split sentences with --by-sentence "
         "(default: en; e.g. it, de, fr; others fall back to a simple rule)",
     )
+    git_group = ap.add_argument_group("git's own commands")
+    git_group.add_argument(
+        "--setup-git",
+        action="store_true",
+        help="make git diff, git log -p and git show show Word and OpenDocument files as "
+        "text, and add a difftool: git difftool -t prosediff (-d: one page for all files); "
+        "for the repository REPO (default: the current folder) or, with --global, for all",
+    )
+    git_group.add_argument(
+        "--global",
+        dest="global_",
+        action="store_true",
+        help="with --setup-git, set git up for every repository of the user",
+    )
+    git_group.add_argument(
+        "--to-markdown",
+        type=Path,
+        metavar="FILE",
+        help="print a Word document or OpenDocument text as the Markdown prosediff "
+        "compares, tracked changes as --docx-changes says (git's textconv command)",
+    )
     ap.add_argument("--version", action="version", version=f"%(prog)s {package_version()}")
     args = ap.parse_args(argv)
+
+    if args.global_ and not args.setup_git:
+        ap.error("--global goes with --setup-git")
+    if args.setup_git:
+        if args.base or (args.global_ and args.repo):
+            ap.error("--setup-git takes one REPO, or --global and none")
+        return _setup_git(None if args.global_ else Path(args.repo or "."))
+    if args.to_markdown:
+        if args.repo:
+            ap.error("--to-markdown takes one FILE and no other argument")
+        return _to_markdown(args.to_markdown, args.docx_changes)
+    if not args.base:
+        ap.error("give REPO and BASE, or --files OLD NEW")
 
     if args.context is not None and args.context < 0:
         ap.error("--context must be 0 or more")
@@ -228,15 +267,47 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # newline="\n" keeps the page LF on Windows too.
-    with open(args.output, "w", encoding="utf-8", newline="\n") as f:
+    output = args.output or (default_output() if args.open else Path("diff.html"))
+    with open(output, "w", encoding="utf-8", newline="\n") as f:
         f.write(render(comparison, args.paths, align=args.align))
 
     c = comparison
     files = "file" if len(c.files) == 1 else "files"
     print(
         f"{PROG}: {c.base.short}..{c.target.short}: {len(c.files):,} {files}, "
-        f"+{c.additions:,} -{c.deletions:,} -> {args.output}"
+        f"+{c.additions:,} -{c.deletions:,} -> {output}"
     )
+    if args.open:
+        webbrowser.open(output.resolve().as_uri())
+    return 0
+
+
+def _setup_git(repo: Path | None) -> int:
+    try:
+        done = setup_git(repo)
+    except SetupError as e:
+        print(f"{PROG}: {e}", file=sys.stderr)
+        return 1
+    print("\n".join(done))
+    print(
+        "git diff now shows Word and OpenDocument files as text; "
+        "git difftool -d -t prosediff opens a prosediff page."
+    )
+    return 0
+
+
+def _to_markdown(path: Path, changes: str) -> int:
+    """The Markdown of a document on stdout, as bytes: UTF-8 whatever the
+    console's encoding, for git to read."""
+    try:
+        data = path.read_bytes()
+        text = document_to_markdown(data, document_name(data, path.name), changes)
+    except (OSError, SourceError) as e:
+        print(f"{PROG}: {e}", file=sys.stderr)
+        return 1
+    sys.stdout.flush()
+    sys.stdout.buffer.write(text)
+    sys.stdout.buffer.flush()
     return 0
 
 

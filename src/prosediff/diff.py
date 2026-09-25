@@ -36,7 +36,14 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
 )
 from prosediff.mdstyle import md_styles, styled
 from prosediff.sentences import split_sentences
-from prosediff.sources import SourceError, describe_side, docx_to_markdown, read_side
+from prosediff.sources import (
+    DOCUMENT_SUFFIXES,
+    SourceError,
+    describe_side,
+    document_to_markdown,
+    is_document,
+    read_side,
+)
 
 # How many leading bytes are inspected to decide whether a file is binary,
 # as git itself does.
@@ -943,10 +950,6 @@ def without_shared_comments(
     return old, new, old_labels, new_labels
 
 
-def _is_docx(path: str | None) -> bool:
-    return bool(path) and path.lower().endswith(".docx")
-
-
 def build_files(
     entries: list[tuple[FileDiff, bytes, bytes]],
     *,
@@ -963,24 +966,30 @@ def build_files(
 ) -> list[CommentEntry]:
     """Fill in the rows of every file; returns the comments for the panel.
 
-    Word documents are read into Markdown first (prosediff.word); a document
-    that cannot be read is listed as a binary file, with the reason.
+    Word and OpenDocument texts are read into Markdown first (prosediff.word,
+    prosediff.odt); a document that cannot be read is listed as a binary
+    file, with the reason.
     """
     comments = Comments()
     texts: list[tuple[FileDiff, list[str], list[str]]] = []
     labels: dict[int, tuple[list[str] | None, list[str] | None]] = {}
     notes: dict[int, footnotes.Footnotes] = {}
     for fd, old_bytes, new_bytes in entries:
-        from_word = _is_docx(fd.old_path) or _is_docx(fd.new_path)
+        from_word = is_document(fd.old_path) or is_document(fd.new_path)
         if from_word:
             try:
                 if old_bytes:
-                    old_bytes = docx_to_markdown(old_bytes, fd.old_path or "", docx_changes)
+                    old_bytes = document_to_markdown(old_bytes, fd.old_path or "", docx_changes)
                 if new_bytes:
-                    new_bytes = docx_to_markdown(new_bytes, fd.new_path or "", docx_changes)
+                    new_bytes = document_to_markdown(new_bytes, fd.new_path or "", docx_changes)
                 fd.markdown = True
+                kinds = {
+                    DOCUMENT_SUFFIXES[Path(p).suffix.lower()]
+                    for p in (fd.old_path, fd.new_path)
+                    if is_document(p)
+                }
                 fd.note = (
-                    "converted from Word, tracked changes "
+                    f"converted from {' and '.join(sorted(kinds))}, tracked changes "
                     + {"accept": "accepted", "reject": "rejected", "all": "shown as markup"}[
                         docx_changes
                     ]

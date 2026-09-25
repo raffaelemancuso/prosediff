@@ -1,18 +1,31 @@
-"""Sides outside git: two files or two folders, and Word documents.
+"""Sides outside git: two files or two folders, and word-processor documents.
 
-A .docx is read into Markdown by prosediff.word (python-docx), its tracked
-changes settled and its comments kept, so they can be folded and listed like
-those of a Markdown file.
+A .docx is read into Markdown by prosediff.word (python-docx), an .odt by
+prosediff.odt (odfdo), their tracked changes settled and their comments kept,
+so they can be folded and listed like those of a Markdown file.
 """
 
 from datetime import datetime
 from pathlib import Path
 
+from prosediff.odt import OdtError, odt_to_markdown
 from prosediff.word import CHANGES as DOCX_CHANGES
 from prosediff.word import WordError
 from prosediff.word import docx_to_markdown as _docx_to_markdown
 
-__all__ = ["DOCX_CHANGES", "SourceError", "describe_side", "docx_to_markdown", "read_side"]
+__all__ = [
+    "DOCUMENT_SUFFIXES",
+    "DOCX_CHANGES",
+    "SourceError",
+    "describe_side",
+    "document_to_markdown",
+    "docx_to_markdown",
+    "is_document",
+    "read_side",
+]
+
+# The word-processor documents read into Markdown, and what the page calls them.
+DOCUMENT_SUFFIXES = {".docx": "Word", ".odt": "OpenDocument"}
 
 
 class SourceError(RuntimeError):
@@ -29,6 +42,22 @@ def docx_to_markdown(data: bytes, name: str, changes: str = "accept") -> bytes:
         return _docx_to_markdown(data, changes).encode("utf-8")
     except WordError as e:
         raise SourceError(f"{name} is not a readable Word document: {e}") from None
+
+
+def is_document(path: str | None) -> bool:
+    """Whether a path names a Word or OpenDocument text, read into Markdown."""
+    return bool(path) and Path(path).suffix.lower() in DOCUMENT_SUFFIXES
+
+
+def document_to_markdown(data: bytes, name: str, changes: str = "accept") -> bytes:
+    """A Word document or an OpenDocument text as Markdown, by its name's
+    extension; changes as in docx_to_markdown."""
+    if Path(name).suffix.lower() == ".odt":
+        try:
+            return odt_to_markdown(data, changes).encode("utf-8")
+        except OdtError as e:
+            raise SourceError(f"{name} is not a readable OpenDocument text: {e}") from None
+    return docx_to_markdown(data, name, changes)
 
 
 def read_side(path: Path) -> dict[str, bytes]:

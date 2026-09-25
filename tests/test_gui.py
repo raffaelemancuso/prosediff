@@ -59,7 +59,7 @@ def test_arguments_prefill_two_folders(tmp_path):
     "args,message",
     [
         (["plain"], "Not a folder"),
-        (["x.txt", "y.txt"], "two Markdown or Word files"),
+        (["x.txt", "y.txt"], "two Markdown, Word or OpenDocument files"),
         (["a", "b", "c"], "Give one git repository"),
     ],
 )
@@ -250,7 +250,7 @@ def test_invalid_arguments_show_an_error_and_exit(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exited:
         gui.main([str(tmp_path / "notes.txt")])
     assert exited.value.code == 2
-    assert shown[0].startswith("Not a folder, a Markdown or a Word file")
+    assert shown[0].startswith("Not a folder, a Markdown, Word or OpenDocument file")
     assert "Usage: prosediff-gui" in shown[0] and shown[1] == "destroyed"
     assert f"Received 1 argument:\n1. “{tmp_path / 'notes.txt'}”  (not found)" in shown[0]
 
