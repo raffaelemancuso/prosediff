@@ -90,14 +90,27 @@ Examples:
 
 ## The window
 
-`sidediff-gui` opens a window to choose what to compare (from a checkout:
-`uv run sidediff-gui`; on Windows it runs without a console).
+`sidediff-gui` opens a window to choose what to compare.
 `sidediff-gui REPOSITORY` opens it with a git repository filled in (or the
-repository a folder belongs to), `sidediff-gui OLD NEW` with two Markdown or
-Word files. `scripts/sidediff_gui.bat` (Windows) and `scripts/sidediff_gui.sh`
-(bash: Cygwin, Git Bash, Linux, macOS) do the same from anywhere, finding the
-project from their own location; put `scripts/` on `PATH`, or make a shortcut
-to the batch file.
+repository a folder belongs to); `sidediff-gui FILE.docx` first asks, in a
+file dialog, for the file to compare it with, the older of the two going on
+the left; `sidediff-gui OLD NEW` opens it with two Markdown or Word files.
+The Files tab has a button to swap the two.
+
+To have it at hand, install it once:
+
+```
+uv tool install --editable C:\path\to\sidediff
+```
+
+This puts `sidediff` and `sidediff-gui` on `PATH` (editable: they always run
+the project's current code; `uv tool uninstall sidediff` removes them). On
+Windows, `sidediff-gui.exe` is a windowed program: double-clicked, pinned,
+behind a shortcut or with files dropped on it, it opens no console.
+`scripts/sidediff_gui.bat` (Windows) and `scripts/sidediff_gui.sh` (bash:
+Cygwin, Git Bash, Linux, macOS) start the same window, the installed one when
+there is one, else from the project; a batch file itself always shows a
+console for a moment.
 
 ![The sidediff window: a git repository with base and target commits chosen from lists, and the options](docs/screenshot_window.png)
 

@@ -276,7 +276,10 @@ class App:
             files_tab,
             text="Two files (whatever their names, Word documents included) or two folders.",
             foreground="grey",
-        ).grid(row=2, column=1, columnspan=3, sticky="w", padx=6)
+        ).grid(row=2, column=1, sticky="w", padx=6)
+        ttk.Button(files_tab, text="⇅ Swap", command=self.swap_files).grid(
+            row=2, column=2, columnspan=2, sticky="ew", **pad
+        )
 
         # Options
         opts = ttk.LabelFrame(root, text="Options", padding=8)
@@ -382,6 +385,12 @@ class App:
         f = filedialog.askdirectory(title="Folder")
         if f:
             var.set(f)
+
+    def swap_files(self) -> None:
+        """Exchange the old and the new file or folder."""
+        old, new = self.old.get(), self.new.get()
+        self.old.set(new)
+        self.new.set(old)
 
     def pick_output(self) -> None:
         f = filedialog.asksaveasfilename(

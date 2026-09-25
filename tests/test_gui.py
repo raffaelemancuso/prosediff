@@ -194,3 +194,10 @@ def test_window_loads_a_repository(root, history):
 def test_window_rejects_a_folder_that_is_not_a_repository(root, tmp_path):
     app = App(root, Settings(repo=str(tmp_path)))
     assert "Not a git repository" in app.status.get()
+
+
+def test_swap_files(root):
+    app = App(root, Settings(mode="files", old="sent.docx", new="returned.docx"))
+    app.swap_files()
+    s = app.collect()
+    assert (s.old, s.new) == ("returned.docx", "sent.docx")
