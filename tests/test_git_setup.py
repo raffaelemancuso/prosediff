@@ -53,9 +53,12 @@ def browser(tmp_path, monkeypatch):
 
 
 def git(repo, *args, **kw):
-    return subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, encoding="utf-8", check=True, **kw
-    ).stdout
+    """git's output; its output and errors in the message when it fails."""
+    done = subprocess.run(["git", *args], cwd=repo, capture_output=True, encoding="utf-8", **kw)
+    assert done.returncode == 0, (
+        f"git {' '.join(args)}: {done.returncode}\n{done.stdout}{done.stderr}"
+    )
+    return done.stdout
 
 
 def test_to_markdown(tmp_path, capsysbinary):
