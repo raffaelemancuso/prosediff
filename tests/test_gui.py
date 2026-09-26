@@ -1,7 +1,8 @@
-"""The window: choosing the sides, generating the page, remembering choices."""
+"""The window: choosing the sides, generating the HTML report, remembering choices."""
 
 import sys
 import tkinter as tk
+from pathlib import Path
 
 import pytest
 
@@ -38,7 +39,7 @@ def test_arguments_prefill_two_files(tmp_path):
     d.write_bytes(b"x")
     s, note = settings_from_args([str(a), str(d)], Settings(output="elsewhere.html"))
     assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(d))
-    # the page goes next to the last file, named after both
+    # the HTML report goes next to the last file, named after both
     assert s.output == str(tmp_path / "v1_vs_v2.html")
 
 
@@ -47,7 +48,7 @@ def test_arguments_prefill_two_folders(tmp_path):
     a.mkdir()
     b.mkdir()
     s, note = settings_from_args([str(a), str(b)], Settings(mode="git"))
-    assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(b))
+    assert note == "" and s.mode == "folders" and (s.old_folder, s.new_folder) == (str(a), str(b))
     assert s.output == str(b / "prosediff.html")
     # a folder and a file do not make a pair
     (tmp_path / "v1.md").write_text("x")
@@ -130,7 +131,7 @@ def test_generate_git(history, tmp_path):
 
 
 def test_generate_files_and_default_output(tmp_path):
-    """Two files make a page in the temporary folder by default, compared
+    """Two files make an HTML report in the temporary folder by default, compared
     sentence by sentence when asked; without both files, an error."""
     moved = "Firms that adopted the new technology are compared with the others."
     (tmp_path / "a.md").write_text(f"First paragraph here. {moved}\n\nSecond paragraph.\n")
@@ -141,8 +142,31 @@ def test_generate_files_and_default_output(tmp_path):
     assert c.moved == 0
     s.by_sentence = True
     assert generate(s)[1].moved == 1
-    with pytest.raises(ValueError, match="old and the new"):
+    s.output_format = "diff"
+    path, _ = generate(s)
+    assert path.suffix == ".diff" and path.read_text().startswith("--- a/a.md\n+++ b/b.md\n")
+    s.output = str(tmp_path / "a_vs_b.html")  # the format chosen wins over the suffix
+    assert generate(s)[0] == tmp_path / "a_vs_b.diff"
+    with pytest.raises(ValueError, match="old and the new file"):
         generate(Settings(mode="files"))
+    with pytest.raises(ValueError, match="old and the new folder"):
+        generate(Settings(mode="folders", old=s.old, new=s.new))
+
+
+def test_folders_remembered_in_the_shared_tab_move(tmp_path):
+    """Two folders remembered when files and folders shared a tab open in
+    the folders tab."""
+    import json
+
+    f = tmp_path / "gui.json"
+    f.write_text(json.dumps({"mode": "files", "old": str(tmp_path), "new": str(tmp_path)}))
+    s = load_settings(f)
+    assert (s.mode, s.old, s.old_folder, s.new_folder) == (
+        "folders",
+        "",
+        str(tmp_path),
+        str(tmp_path),
+    )
 
 
 def test_settings_are_remembered(tmp_path):
@@ -208,6 +232,58 @@ def test_swap_files(root):
     app.swap_files()
     s = app.collect()
     assert (s.old, s.new) == ("returned.docx", "sent.docx")
+    app = App(root, Settings(mode="folders", old_folder="sent", new_folder="returned"))
+    app.swap_files()
+    s = app.collect()
+    assert (s.mode, s.old_folder, s.new_folder) == ("folders", "returned", "sent")
+
+
+def test_format_renames_the_output(root):
+    """Choosing a format gives the Save to file its extension; a name of
+    another kind, or none, is left as it is."""
+    app = App(root, Settings(output="C:/p/a_vs_b.html"))
+    for fmt, expected in (
+        ("diff", "a_vs_b.diff"),
+        ("wdiff", "a_vs_b.wdiff"),
+        ("html", "a_vs_b.html"),
+    ):
+        app.output_format.set(fmt)
+        app.rename_output()
+        assert Path(app.output.get()).name == expected
+    for kept in ("changes.patch", "notes.txt", ""):
+        app.output.set(kept)
+        app.output_format.set("diff")
+        app.rename_output()
+        assert app.output.get() == kept
+
+
+def test_mode_switch(root):
+    """The segmented button shows the fields of one source at a time, and
+    what it shows is what is compared."""
+    app = App(root, Settings(mode="files"))
+    root.update_idletasks()
+    assert app.sides["files"].winfo_manager() == "pack"
+    assert not app.sides["folders"].winfo_manager()
+    app.mode.set("folders")
+    app.show_mode()
+    assert app.sides["folders"].winfo_manager() == "pack"
+    assert not app.sides["files"].winfo_manager()
+    assert app.collect().mode == "folders"
+
+
+def test_comments_choice(root, tmp_path):
+    """One choice for the comments; comments without text are a choice of
+    markers only; the checkbox of older versions is remembered as text."""
+    import json
+
+    app = App(root, Settings(comments="none"))
+    assert app.collect().comments == "none"
+    assert app.empty_comments_box.instate(["disabled"])
+    app.comments.set("markers")
+    assert not app.empty_comments_box.instate(["disabled"])
+    f = tmp_path / "gui.json"
+    f.write_text(json.dumps({"fold_comments": False}))
+    assert load_settings(f).comments == "text"
 
 
 def test_invalid_arguments_show_an_error_and_exit(monkeypatch, tmp_path):
@@ -323,3 +399,64 @@ def test_linux_colour_scheme_from_the_portal(monkeypatch):
     assert gui.system_dark()
     monkeypatch.setitem(sys.modules, "jeepney", None)  # not installed
     assert gui.portal_color_scheme() is None and not gui.system_dark()
+
+
+def test_move_defaults_follow_prosediff(root, tmp_path):
+    """The moved-line similarity and algorithm are remembered only when they
+    are not prosediff's defaults, so a new default reaches the window; the
+    old default 0.8, remembered before the algorithm could be chosen, gives
+    way to the new one, and any other value keeps its algorithm, tokens."""
+    import json
+
+    from prosediff.diff import MOVE_ALGORITHM, MOVE_SIMILARITY
+
+    app = App(root, Settings())
+    assert (app.move_similarity.get(), app.move_algorithm.get()) == (
+        MOVE_SIMILARITY,
+        MOVE_ALGORITHM,
+    )
+    s = app.collect()
+    assert (s.move_similarity, s.move_algorithm) == (None, None)
+    app.move_similarity.set(0.55)
+    app.move_algorithm.set("chars")
+    s = app.collect()
+    assert (s.move_similarity, s.move_algorithm) == (0.55, "chars")
+    f = tmp_path / "gui.json"
+    f.write_text(json.dumps({"move_similarity": 0.8}))
+    s = load_settings(f)
+    assert (s.move_similarity, s.move_algorithm) == (None, None)
+    f.write_text(json.dumps({"move_similarity": 0.6}))
+    s = load_settings(f)
+    assert (s.move_similarity, s.move_algorithm) == (0.6, "tokens")
+
+
+def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
+    """Compare saves nothing; Save options writes the choices, Reset to
+    defaults puts every option back, leaving what is compared alone."""
+    from prosediff import gui
+
+    f = tmp_path / "gui.json"
+    monkeypatch.setattr(gui, "settings_file", lambda: f)
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_bytes(b"One.\n")
+    new.write_bytes(b"Two.\n")
+    app = App(root, Settings(mode="files", old=str(old), new=str(new), open_page=False))
+    app.comments.set("none")
+    app.move_algorithm.set("chars")
+    app.output_format.set("wdiff")
+    app.run()
+    for _ in range(300):  # the comparison runs in a thread: at most 30 s
+        root.update()
+        if not app.button.instate(["disabled"]):
+            break
+        root.after(100)
+    assert not app.button.instate(["disabled"]) and "changed" in app.status.get()
+    assert not f.exists()
+    app.save_options()
+    saved = load_settings(f)
+    assert (saved.comments, saved.move_algorithm) == ("none", "chars")
+    assert b"\r" not in f.read_bytes()
+    app.reset_options()
+    s = app.collect()
+    assert (s.comments, s.move_algorithm, s.output_format) == ("markers", None, "html")
+    assert s.old == str(old)

@@ -7,8 +7,8 @@ Two things are set, for one repository or (global) for every one:
   Markdown prosediff reads a document into, instead of "Binary files
   differ" (the attributes of one repository go in .git/info/attributes,
   which is not committed; the global ones in git's global attributes file);
-- a difftool, "prosediff": git difftool -t prosediff opens a prosediff page
-  for each changed file, git difftool -d -t prosediff one page for them all.
+- a difftool, "prosediff": git difftool -t prosediff opens a prosediff HTML report
+  for each changed file, git difftool -d -t prosediff one HTML report for them all.
 
 Both run this Python with -m prosediff, so they work wherever prosediff was
 installed, uv tool or virtual environment, whether its scripts are on PATH

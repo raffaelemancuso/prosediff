@@ -233,7 +233,7 @@ def test_compare_cached(dirty):
 def test_compare_untracked_and_no_differences(dirty):
     """Untracked files join the working tree on request, the ignored ones
     left out, paths restricting them too; a commit against itself has no
-    differences, and the page says so."""
+    differences, and the HTML report says so."""
     b, sha = dirty
     c = compare(b.path, sha, sha)
     assert c.files == []

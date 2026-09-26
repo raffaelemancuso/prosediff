@@ -1,4 +1,5 @@
-"""Render a Comparison to a self-contained HTML page."""
+"""Render a Comparison to a self-contained HTML report, or to a unified diff
+(prosediff.unified)."""
 
 import tempfile
 from datetime import datetime
@@ -7,10 +8,11 @@ from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from prosediff.diff import Comparison
+from prosediff.diff import CONTEXT, Comparison
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
 from prosediff.language import file_language_note, flag_code, paragraph_language_note
+from prosediff.unified import unified
 
 
 def _version() -> str:
@@ -33,18 +35,29 @@ _env.globals["paragraph_language_note"] = paragraph_language_note
 
 
 ALIGNMENTS = ("left", "justify")
+# What prosediff writes: the HTML report, a unified diff or a word diff; and their
+# files' suffix.
+FORMATS = {"html": ".html", "diff": ".diff", "wdiff": ".wdiff"}
+# The suffixes each text format is recognised by.
+TEXT_SUFFIXES = {".diff": "diff", ".patch": "diff", ".wdiff": "wdiff"}
 HOMEPAGE = "https://github.com/raffaelemancuso/prosediff"
 
 
-def default_output() -> Path:
-    """A fresh page in the temporary folder, so no repository is cluttered;
-    created empty, so pages made in the same second (git difftool, one per
-    file) do not overwrite each other."""
+def format_of(path: Path | str | None) -> str:
+    """The format a file name asks for: a unified diff for .diff and .patch,
+    a word diff for .wdiff, else the HTML report."""
+    return TEXT_SUFFIXES.get(Path(path).suffix.lower(), "html") if path else "html"
+
+
+def default_output(fmt: str = "html") -> Path:
+    """A fresh HTML report (or diff) in the temporary folder, so no repository is
+    cluttered; created empty, so HTML reports made in the same second (git
+    difftool, one per file) do not overwrite each other."""
     folder = Path(tempfile.gettempdir()) / "prosediff"
     folder.mkdir(exist_ok=True)
     with tempfile.NamedTemporaryFile(
         prefix=f"prosediff_{datetime.now():%Y%m%d_%H%M%S}_",
-        suffix=".html",
+        suffix=FORMATS[fmt],
         dir=folder,
         delete=False,
     ) as f:
@@ -52,7 +65,7 @@ def default_output() -> Path:
 
 
 def page_flags(comparison: Comparison) -> set[str]:
-    """The countries whose flags the page shows: a file's language's in its
+    """The countries whose flags the HTML report shows: a file's language's in its
     header, or, when its paragraphs differ, each paragraph's."""
     codes = set()
     for f in comparison.files:
@@ -68,7 +81,7 @@ def page_flags(comparison: Comparison) -> set[str]:
 
 
 def render(comparison: Comparison, paths: list[str] | None = None, align: str = "left") -> str:
-    """The page; align ("left" or "justify") sets how wrapped lines are aligned."""
+    """The HTML report; align ("left" or "justify") sets how wrapped lines are aligned."""
     if align not in ALIGNMENTS:
         raise ValueError(f"align must be one of {ALIGNMENTS}, not {align!r}")
     template = _env.get_template("report.html.j2")
@@ -81,3 +94,25 @@ def render(comparison: Comparison, paths: list[str] | None = None, align: str = 
         homepage=HOMEPAGE,
         flag_css=flag_css(page_flags(comparison)),
     )
+
+
+def write_output(
+    comparison: Comparison,
+    path: Path,
+    fmt: str = "html",
+    paths: list[str] | None = None,
+    align: str = "left",
+    context: int | str | None = CONTEXT,
+) -> None:
+    """Write the HTML report (fmt "html"), the unified diff ("diff") or the word
+    diff ("wdiff"), LF line ends on every system. The text formats have
+    context unchanged lines around each change (None: every line; "auto":
+    git's 3)."""
+    if fmt not in FORMATS:
+        raise ValueError(f"format must be one of {tuple(FORMATS)}, not {fmt!r}")
+    if fmt != "html":
+        text = unified(comparison, CONTEXT if context == "auto" else context, fmt)
+    else:
+        text = render(comparison, paths, align=align)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)

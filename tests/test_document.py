@@ -77,7 +77,7 @@ UNDERLINE = '<w:rPr><w:u w:val="single"/></w:rPr>'
 def test_formatting_changes(tmp_path):
     """Text made bold or underlined, its words the same, is a formatting
     change: marked on the row, described, counted in the file header, and
-    shown unless the page's switch is off (the rows stay equal)."""
+    shown unless the HTML report's switch is off (the rows stay equal)."""
     old = docx_xml(
         tmp_path / "old.docx",
         f"<w:p>{run('A plain claim, and a link.')}</w:p><w:p>{run('Other text.')}</w:p>",
@@ -110,6 +110,40 @@ def test_formatting_changes_alone_list_the_file(tmp_path):
     # the unchanged line is folded away, until the switch shows it
     rows = [row for r in f.rows for row in (r.hidden if r.kind == "skip" else [r])]
     assert [row.format_changes for row in rows] == [['made "words" bold']]
+
+
+STYLES = (
+    '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>'
+    "</w:style>"
+    '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>'
+    '<w:basedOn w:val="Normal"/><w:rPr><w:b/></w:rPr></w:style>'
+    '<w:style w:type="paragraph" w:styleId="Lead"><w:name w:val="Lead"/>'
+    '<w:basedOn w:val="Normal"/><w:rPr><w:b/></w:rPr></w:style>'
+)
+
+
+def para(style, text, props=""):
+    return f'<w:p><w:pPr><w:pStyle w:val="{style}"/></w:pPr>{run(text, props)}</w:p>'
+
+
+def test_bold_from_a_style_is_bold(tmp_path):
+    """Text bold through its paragraph's style reads as text made bold on the
+    run: no formatting change between the two. A heading's text is not
+    marked with the bold its style gives it."""
+    direct = '<w:rPr><w:b w:val="true"/></w:rPr>'
+    old = docx_xml(
+        tmp_path / "old.docx",
+        para("Heading1", "A title.", direct) + para("Normal", "A lead.", direct),
+        styles=STYLES,
+    )
+    new = docx_xml(
+        tmp_path / "new.docx", para("Heading1", "A title.") + para("Lead", "A lead."), styles=STYLES
+    )
+    (f,) = compare_paths(old, new, context=None).files
+    assert f.formatted_rows == 0
+    got = lines(read_document(new.read_bytes(), "new.docx"), lambda c: "")
+    assert got[0].styles == [frozenset({"h1"})] * len("A title.")
+    assert got[1].styles == [frozenset({"strong"})] * len("A lead.")
 
 
 def test_styles_read_and_written(tmp_path):
@@ -153,3 +187,16 @@ def test_odt_styles(tmp_path):
     )
     doc = read_document(odt_xml(tmp_path / "d.odt", body, styles).read_bytes(), "d.odt")
     assert to_markdown(doc) == "[U]{.underline} ~~S~~ ^P^ ~D~\n"
+
+
+def test_unified_diff_of_documents(tmp_path):
+    """A Word document's unified diff is that of its Markdown."""
+    from prosediff.unified import unified
+
+    old = docx_xml(tmp_path / "old.docx", f"<w:p>{run('Same.')}</w:p><w:p>{run('Old.')}</w:p>")
+    new = docx_xml(
+        tmp_path / "new.docx", f"<w:p>{run('Same.')}</w:p><w:p>{run('New', BOLD)}{run('.')}</w:p>"
+    )
+    text = unified(compare_paths(old, new))
+    assert text.startswith("--- a/old.docx\n+++ b/new.docx\n@@")
+    assert "-Old.\n+**New**.\n" in text

@@ -1,4 +1,4 @@
-"""The page's interactive parts, driven in a real (headless) browser.
+"""The HTML report's interactive parts, driven in a real (headless) browser.
 
 Skipped when Playwright's Chromium is not installed
 (uv run playwright install chromium).
@@ -27,7 +27,7 @@ def browser():
 
 @pytest.fixture(scope="module")
 def page_file(tmp_path_factory):
-    """A page with two changes far apart in a Markdown file (so unchanged
+    """An HTML report with two changes far apart in a Markdown file (so unchanged
     lines are folded between them), bold text, and a new comment between
     them; built once, as no test changes it."""
     tmp_path = tmp_path_factory.mktemp("page")
@@ -200,13 +200,13 @@ def test_space_between_paragraphs(page):
     assert spin.get_attribute("aria-valuenow") == "1.25"
     page.keyboard.press("End")
     assert spin.inner_text() == "3.00" and page.is_disabled('[data-gap="1"]')
-    page.keyboard.press("n")  # the page's own keys still work from it
+    page.keyboard.press("n")  # the HTML report's own keys still work from it
     assert page.locator("tr.current").count() == 1
 
 
 def test_comment_link_goes_to_its_row(page):
     page.locator(".comments-panel a").first.click()
-    # the page reacts to the hash change, which the browser fires afterwards
+    # the HTML report reacts to the hash change, which the browser fires afterwards
     page.wait_for_selector("tr.target", state="visible", timeout=5_000)
     target = page.locator("tr.target")
     assert target.count() == 1

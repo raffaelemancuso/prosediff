@@ -1,4 +1,4 @@
-"""The language of the prose: given or guessed, and what it sets on the page."""
+"""The language of the prose: given or guessed, and what it sets in the HTML report."""
 
 import re
 import zipfile
@@ -54,7 +54,7 @@ def test_detect_language():
 
 
 def test_guessed_per_file_and_hyphenated(tmp_path):
-    """guess guesses each prose file's language; the page hyphenates by it."""
+    """guess guesses each prose file's language; the HTML report hyphenates by it."""
     old, new = pair(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     c = compare_paths(old, new)
     (f,) = c.files
@@ -99,7 +99,7 @@ GERMAN = (
 GERMAN_EDITED = GERMAN.replace("gestern", "heute")
 
 
-# A flag on the page: its country, its language, its tooltip.
+# A flag in the HTML report: its country, its language, its tooltip.
 FLAG = re.compile(
     r'<span class="flag flag-(\w+)" role="img" aria-label="([^"]*)"(?: title="([^"]*)")?></span>'
 )

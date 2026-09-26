@@ -12,7 +12,7 @@ threshold), and every number is replaced by a stand-in: one character of the
 Unicode supplementary private use area, the same on both sides for a
 matched pair, its own for a footnote the other side lacks. A renumbered
 footnote then compares equal; a reference to a footnote added or deleted
-still differs. When the page is built, each side gets its own numbers back.
+still differs. When the HTML report is built, each side gets its own numbers back.
 """
 
 import re

@@ -222,7 +222,7 @@ def test_git_runs_without_a_console_window(tmp_path, monkeypatch):
 
 
 def test_folders_page_goes_into_the_new_folder(tmp_path, monkeypatch):
-    """Without -o, the page comparing two folders is prosediff.html in the
+    """Without -o, the HTML report comparing two folders is prosediff.html in the
     new one; compared again, the folders leave it out, whatever --include
     says. With --open it goes to the temporary folder, as git difftool -d
     needs; two files keep diff.html."""

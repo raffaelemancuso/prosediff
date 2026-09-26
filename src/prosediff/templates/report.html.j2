@@ -85,7 +85,7 @@ details.file[open] > summary { border-bottom: 1px solid var(--border); }
 .note { padding: 12px; color: var(--muted); }
 .file-note { color: var(--muted); font-style: italic; }
 /* A language's flag: in the file header, or before each paragraph's number;
-   the flags the page shows follow, each an SVG of flag-icons. */
+   the flags the HTML report shows follow, each an SVG of flag-icons. */
 .flag { display: inline-block; width: 1.33em; height: 1em; vertical-align: -.12em;
   background: center / cover no-repeat; box-shadow: 0 0 0 1px rgba(0, 0, 0, .15);
   font-style: normal; line-height: 1; cursor: help; }
@@ -154,7 +154,7 @@ tr.moved-out td.no.l, tr.moved-in td.no.r { color: var(--move); font-weight: 600
   padding: 0 2px; }
 /* A new comment's icon says it all: no box around it. */
 .comment.new { background: none; padding: 0; }
-/* The one tooltip of the page, for comments (the author in bold, the
+/* The one tooltip of the HTML report, for comments (the author in bold, the
    comment below, its date in grey) and the toolbar's help. The script
    places it next to what is hovered or focused, so no file box clips it. */
 #tip { position: fixed; z-index: 3; max-width: 32em; padding: 6px 10px;
@@ -432,7 +432,7 @@ thead.print, .print-note { display: none; }
     {% if r.kind == "skip" %}
     </tbody>
     {% if r.omitted %}
-    <tbody><tr class="skip"><td colspan="4"><span class="omitted">⋯ {{ "{:,}".format(r.omitted) }} unchanged lines, left out of the page (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
+    <tbody><tr class="skip"><td colspan="4"><span class="omitted">⋯ {{ "{:,}".format(r.omitted) }} unchanged lines, left out of the HTML report (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
     {% else %}
     <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
     <tbody hidden>

@@ -16,9 +16,9 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
-# The styles a run of text can have, as classes of the page: s-strong, ...
+# The styles a run of text can have, as classes of the HTML report: s-strong, ...
 STRONG, EM, UNDERLINE, STRIKE, SUP, SUB = "strong", "em", "u", "strike", "sup", "sub"
-# What a list item starts with on the page.
+# What a list item starts with in the HTML report.
 BULLET = "\u2022 "
 
 
@@ -325,7 +325,7 @@ class Builder:
 
 
 def _date(date: str) -> str:
-    """A tracked change's date as the page shows it: 2026-01-01 10:15."""
+    """A tracked change's date as the HTML report shows it: 2026-01-01 10:15."""
     m = re.match(r"(\d{4}-\d\d-\d\d)(?:T(\d\d:\d\d))?", date)
     return " ".join(filter(None, m.groups())) if m else ""
 

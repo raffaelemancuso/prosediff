@@ -1,4 +1,4 @@
-"""Soft hyphens in the page's prose, placed across its markup."""
+"""Soft hyphens in the HTML report's prose, placed across its markup."""
 
 from markupsafe import Markup
 

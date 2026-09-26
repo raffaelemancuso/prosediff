@@ -1,14 +1,18 @@
 """Word documents read with python-docx, into paragraphs of styled text.
 
 python-docx opens the document and resolves what the XML alone does not say:
-paragraph and run styles, bold, italic, underline and the like, link targets,
-and the comments (author, date, text). The paragraphs are then walked element
+paragraph and run styles, link targets, and the comments (author, date,
+text); docx-plus resolves the bold, italic, underline and the like each run
+shows, wherever they are set: on the run, in its character style, in the
+paragraph's style or the document's defaults. The paragraphs are then walked element
 by element, into a prosediff.document.Document, so that everything lands
 where it sits in the text:
 
 - headings (Title, Heading 1-6), list paragraphs and tables are blocks of
-  their kind, footnotes and endnotes numbered blocks of their own, referenced
-  where they are; each run keeps its styles, each link its target;
+  their kind (a heading's text is not marked with what its style already
+  makes it, a bold heading's text is not also bold), footnotes and endnotes
+  numbered blocks of their own, referenced where they are; each run keeps
+  its styles, each link its target;
 - each comment is kept where it starts, for the rest of prosediff to fold
   into a marker and list in the comments panel;
 - tracked changes are settled as asked: accepting keeps the inserted runs
@@ -29,12 +33,12 @@ from dataclasses import dataclass, field
 from io import BytesIO
 
 import docx
-from docx.enum.text import WD_UNDERLINE
 from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
+from docx_plus.styles.inspect import resolve_effective_formatting
 
 from prosediff.document import (
     EM,
@@ -118,6 +122,9 @@ class Reader:
     # of the whole in each language.
     languages: WordLanguages | None = None
     letters: Counter = field(default_factory=Counter)
+    # The styles of the paragraph being read that its runs do not restate:
+    # a heading's own (its text is bold as a heading, not as bold text).
+    plain: frozenset = frozenset()
 
     def language_of(self, paragraphs) -> str | None:
         if self.languages is None:
@@ -151,20 +158,12 @@ class Reader:
         """
         r = Run(el, paragraph)
         style = (r.style.name or "").lower() if r.style is not None else ""
-        styles = set()
-        if r.bold or style == "strong":
+        styles = set(styles_of(resolve_effective_formatting(r)))
+        if style == "strong":
             styles.add(STRONG)
-        if r.italic or style == "emphasis":
+        elif style == "emphasis":
             styles.add(EM)
-        if r.underline not in (None, False, WD_UNDERLINE.NONE):
-            styles.add(UNDERLINE)
-        if r.font.strike or r.font.double_strike:
-            styles.add(STRIKE)
-        if r.font.superscript:
-            styles.add(SUP)
-        elif r.font.subscript:
-            styles.add(SUB)
-        styles = frozenset(styles)
+        styles = frozenset(styles - self.plain)
         out: list = []
         for child in el:
             tag = child.tag
@@ -240,6 +239,10 @@ class Reader:
         relationships)."""
         doc = self.document.part
         p = Paragraph(el, _Story(doc if part is None else _NotesPart(part, doc)))
+        style = (p.style.name or "").lower() if p.style is not None else ""
+        self.plain = (
+            styles_of(resolve_effective_formatting(p)) if style in HEADING_STYLES else frozenset()
+        )
         return strip(self.children(el, p))
 
     def cell(self, paragraphs, part=None) -> list:
@@ -334,6 +337,26 @@ class Reader:
                 )
             )
         return out
+
+
+def styles_of(fmt) -> frozenset[str]:
+    """The styles a run (or a paragraph's own text) shows, from its formatting
+    resolved through the styles: bold, italic, underline, struck through,
+    superscript, subscript."""
+    styles = set()
+    if fmt.bold:
+        styles.add(STRONG)
+    if fmt.italic:
+        styles.add(EM)
+    if fmt.underline not in (None, "none"):
+        styles.add(UNDERLINE)
+    if fmt.strike or fmt.double_strike:
+        styles.add(STRIKE)
+    if fmt.vert_align == "superscript":
+        styles.add(SUP)
+    elif fmt.vert_align == "subscript":
+        styles.add(SUB)
+    return frozenset(styles)
 
 
 def _m(name: str) -> str:

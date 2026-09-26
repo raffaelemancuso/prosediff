@@ -211,6 +211,19 @@ wheels = [
 ]
 
 [[package]]
+name = "docx-plus"
+version = "0.6.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "python-docx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bd/ab/51e66ebb6c24e463e248627f6a58f4be02d34051d475abd21e75f446b408/docx_plus-0.6.2.tar.gz", hash = "sha256:440d5134b4de0866f0d9d7562cf60eda1876e3add3fc0f062caf67092995c1dd", size = 532288, upload-time = "2026-08-22T01:43:47.197Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bc/99/ff2408415a54258ad7de96d99654a79fa09d9f0a8af7985f23ee04f14669/docx_plus-0.6.2-py3-none-any.whl", hash = "sha256:6701723d935fc8aba8f3f96aaf901e3cd62853a5ab0be11a1b1519d75c724c17", size = 356811, upload-time = "2026-08-22T01:43:45.863Z" },
+]
+
+[[package]]
 name = "ftfy"
 version = "6.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -808,15 +821,15 @@ wheels = [
 
 [[package]]
 name = "odfdo"
-version = "3.26.1"
+version = "3.26.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lxml" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/64/e0c9b9fa0e33d5fe034f9586cc6a018e6428149bcb5aebfe7b0cbf46ccda/odfdo-3.26.1.tar.gz", hash = "sha256:5f8b9ade403fffe54df0414507ad7002f9b0557e536494edd648d2f84a46490b", size = 334968, upload-time = "2026-09-19T14:47:05.968Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/14/1b91a76e3965536fe5b032dd413222e58ead283a191e54d1a5ab7afd281f/odfdo-3.26.2.tar.gz", hash = "sha256:5d1aa82cdf906cc00c2f247c39f117b8a22e791eed9464319d1d3c0185cd1022", size = 348605, upload-time = "2026-09-26T10:46:13.713Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/a8/18666212f7ca5c08761c9d5c12f2fc5acb30ed693d11d179cf63afd9c952/odfdo-3.26.1-py3-none-any.whl", hash = "sha256:163a4e73aea4132190346b7404c8f89a95014f8a979e699d9fc3d64f2be94a50", size = 439516, upload-time = "2026-09-19T14:47:04.403Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/c4/5e6b1c29c9e82fda7d4b723ceba54d08adf31ddf64681d450d7ab72d5e0a/odfdo-3.26.2-py3-none-any.whl", hash = "sha256:63854acad12ad320b3e09155d4be014845a5a483f749d4346986d76fba4a8bbf", size = 455737, upload-time = "2026-09-26T10:46:12.296Z" },
 ]
 
 [[package]]
@@ -948,12 +961,14 @@ source = { editable = "." }
 dependencies = [
     { name = "cchardet" },
     { name = "charset-normalizer" },
+    { name = "docx-plus" },
     { name = "gitpython" },
     { name = "jeepney", marker = "sys_platform == 'linux'" },
     { name = "jinja2" },
     { name = "langcodes", extra = ["data"] },
     { name = "lxml" },
     { name = "markupsafe" },
+    { name = "odfdo" },
     { name = "psutil" },
     { name = "py3langid" },
     { name = "pyphen" },
@@ -963,14 +978,8 @@ dependencies = [
     { name = "yasbd-lib" },
 ]
 
-[package.optional-dependencies]
-odt = [
-    { name = "odfdo" },
-]
-
 [package.dev-dependencies]
 dev = [
-    { name = "odfdo" },
     { name = "playwright" },
     { name = "pytest" },
     { name = "ruff" },
@@ -980,13 +989,14 @@ dev = [
 requires-dist = [
     { name = "cchardet", specifier = ">=2.3.0" },
     { name = "charset-normalizer", specifier = ">=3.5.1" },
+    { name = "docx-plus", specifier = ">=0.6.2" },
     { name = "gitpython", specifier = ">=3.1.62" },
     { name = "jeepney", marker = "sys_platform == 'linux'", specifier = ">=0.9.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langcodes", extras = ["data"], specifier = ">=3.5.1" },
     { name = "lxml", specifier = ">=6.1.3" },
     { name = "markupsafe", specifier = ">=3.0" },
-    { name = "odfdo", marker = "extra == 'odt'", specifier = ">=3.26.1" },
+    { name = "odfdo", specifier = ">=3.26.2" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "py3langid", specifier = ">=0.4.0" },
     { name = "pyphen", specifier = ">=0.18.1" },
@@ -999,7 +1009,6 @@ provides-extras = ["odt"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "odfdo", specifier = ">=3.26.1" },
     { name = "playwright", specifier = ">=1.63.0" },
     { name = "pytest", specifier = ">=8.4.0" },
     { name = "ruff", specifier = ">=0.16.9" },

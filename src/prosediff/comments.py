@@ -6,7 +6,7 @@ Folding replaces each comment-start span with one character of the Unicode
 private use area standing for (author, note), and drops comment-end: the
 comment is then compared like a word, the same comment matches on both sides
 even when a new conversion renumbered its id, and a filter cannot cut it in
-two. The characters become markers when the page is built.
+two. The characters become markers when the HTML report is built.
 """
 
 import re
@@ -186,7 +186,7 @@ MARKER = Markup(
 def show_comments(markup: Markup, comments: Comments, new: frozenset[str] = frozenset()) -> Markup:
     """Replace the placeholders of a cell with comment markers.
 
-    The page shows the author, the comment and its date when a marker is
+    The HTML report shows the author, the comment and its date when a marker is
     hovered or focused. The comments in new (placeholders) were added since
     the base and get their own icon. Tooltips never hold placeholders (see
     plain), so every one left in the markup is in the text of the line.

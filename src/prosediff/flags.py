@@ -1,9 +1,9 @@
-"""The flags the page shows languages by.
+"""The flags the HTML report shows languages by.
 
 Browsers draw a flag emoji only where the system has the glyphs: Windows has
-none, and shows two letters instead. So the page draws each flag from an SVG
+none, and shows two letters instead. So the HTML report draws each flag from an SVG
 of flag-icons (MIT, https://github.com/lipis/flag-icons), kept in flags.zip
-(docs/make_flags.py remakes it): each flag the page shows is embedded once,
+(docs/make_flags.py remakes it): each flag the HTML report shows is embedded once,
 as the background of a CSS class, however many paragraphs show it.
 """
 

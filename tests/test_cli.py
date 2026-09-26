@@ -135,3 +135,33 @@ def test_cli_files_and_folders_are_told_apart(tmp_path, capsys):
     assert "use --files" in capsys.readouterr().err
     assert main(["--folders", *folders, *out]) == 0
     assert main(["--files", *files, *out]) == 0
+
+
+def test_cli_writes_a_unified_diff(tmp_path, monkeypatch):
+    """--format diff, or an output ending in .diff or .patch, writes a
+    unified diff instead of the HTML report, with -U lines of context; binary
+    files are named, not shown."""
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+    lines = [f"line {k}" for k in range(1, 11)]
+    (tmp_path / "a" / "t.txt").write_text("\n".join(lines) + "\n")
+    lines[4] = "line five"
+    (tmp_path / "b" / "t.txt").write_text("\n".join(lines) + "\n")
+    old, new = tmp_path / "a" / "t.txt", tmp_path / "b" / "t.txt"
+    out = tmp_path / "changes.patch"
+    assert main(["--files", str(old), str(new), "-o", str(out), "-U", "1"]) == 0
+    assert out.read_bytes().decode() == (
+        "--- a/t.txt\n+++ b/t.txt\n@@ -4,3 +4,3 @@\n line 4\n-line 5\n+line five\n line 6\n"
+    )
+    # --format diff names the default output .diff
+    monkeypatch.chdir(tmp_path)
+    assert main(["--files", str(old), str(new), "--format", "diff"]) == 0
+    assert (tmp_path / "diff.diff").read_text().count("\n ") == 6
+    # into the new folder, as prosediff.diff; an image is named, not shown
+    (tmp_path / "a" / "p.png").write_bytes(b"\x89PNG\x00a")
+    (tmp_path / "b" / "p.png").write_bytes(b"\x89PNG\x00b")
+    folders = ["--folders", str(tmp_path / "a"), str(tmp_path / "b"), "--include", ""]
+    assert main([*folders, "--format", "diff", "--full"]) == 0
+    text = (tmp_path / "b" / "prosediff.diff").read_text()
+    assert "Binary files a/p.png and b/p.png differ" in text
+    assert "@@ -1,10 +1,10 @@" in text

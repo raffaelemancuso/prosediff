@@ -1,7 +1,7 @@
 """Sides outside git: two files or two folders, and word-processor documents.
 
 A .docx is read by prosediff.word (python-docx), an .odt by prosediff.odt
-(odfdo, an optional dependency: the odt extra), into paragraphs of styled
+(odfdo), into paragraphs of styled
 text (prosediff.document), their tracked changes settled and their comments
 kept; Markdown is only written from them, for git's own commands.
 """
@@ -11,6 +11,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from prosediff.document import Document, to_markdown
+from prosediff.odt import OdtError, read_odt
 from prosediff.word import CHANGES as DOCX_CHANGES
 from prosediff.word import WordError, read_docx
 
@@ -30,14 +31,14 @@ __all__ = [
     "read_side",
 ]
 
-# The word-processor documents prosediff reads, and what the page calls them.
+# The word-processor documents prosediff reads, and what the HTML report calls them.
 DOCUMENT_SUFFIXES = {".docx": "Word", ".odt": "OpenDocument"}
 # The files of two folders compared by default: prose, not code or data.
 FOLDER_FILES = "*.docx|*.odt|*.md|*.typ|*.txt"
 # The lock files word processors leave next to an open document: Word's
 # ~$name.docx, LibreOffice's .~lock.name.odt#. Never a side's content.
 LOCK_FILES = ("~$*", ".~lock.*#")
-# The page comparing two folders goes into the new one, by default, under
+# The HTML report comparing two folders goes into the new one, by default, under
 # this name; at the top of a folder, it is never one of the files compared.
 FOLDER_PAGE = "prosediff.html"
 
@@ -72,14 +73,6 @@ def read_document(data: bytes, name: str, changes: str = "accept") -> Document:
     docx_to_markdown."""
     if Path(name).suffix.lower() == ".odt":
         try:
-            from prosediff.odt import OdtError, read_odt
-        except ImportError:
-            raise SourceError(
-                f"{name} is an OpenDocument text, which needs odfdo: install prosediff "
-                'with its odt extra (uv tool install "prosediff[odt]", or '
-                'pip install "prosediff[odt]")'
-            ) from None
-        try:
             return read_odt(data, changes)
         except OdtError as e:
             raise SourceError(f"{name} is not a readable OpenDocument text: {e}") from None
@@ -110,7 +103,7 @@ def read_side(path: Path, include: str | None = None) -> dict[str, bytes]:
 
     A file is a side of one file, under its own name; a folder contributes
     every file below it that the include patterns match (patterns()), .git
-    folders, the lock files of open documents and a page of prosediff's own
+    folders, the lock files of open documents and an HTML report of prosediff's own
     (FOLDER_PAGE) at its top excepted.
     """
     if path.is_file():
@@ -130,12 +123,12 @@ def read_side(path: Path, include: str | None = None) -> dict[str, bytes]:
 
 
 def default_page(old: Path, new: Path) -> Path | None:
-    """Where the page comparing two folders goes when no output is given:
+    """Where the HTML report comparing two folders goes when no output is given:
     into the new one, as FOLDER_PAGE. None for anything else."""
     return new / FOLDER_PAGE if old.is_dir() and new.is_dir() else None
 
 
 def describe_side(path: Path) -> tuple[str, str, str, str]:
-    """(full name, short name, kind, date) of a side, for the page header."""
+    """(full name, short name, kind, date) of a side, for the HTML report header."""
     stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     return str(path.resolve()), path.name, "folder" if path.is_dir() else "file", stamp

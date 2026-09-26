@@ -26,7 +26,7 @@ the drafts co-authors send back. It is optimised for Word files, reads the
 OpenDocument texts of LibreOffice (.odt) as well, and works on Markdown and
 any text file too; for code, a code diff tool serves better.
 
-It writes a self-contained HTML page showing the differences between two
+It writes a self-contained HTML report showing the differences between two
 versions side by side: the older version on the left, the newer on the right,
 each paragraph facing the paragraph it came from, changed words highlighted
 inside it. Text that moved is followed to its new place **even when it was
@@ -36,7 +36,7 @@ changes) or working tree. Paragraphs wrap and are numbered, changes are
 described in plain English, and the new and removed comments of Word
 documents are shown and listed.
 
-![A page made by prosediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
+![An HTML report made by prosediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 ## Why prosediff
 
@@ -76,7 +76,8 @@ prosediff sits between the two:
 - **It follows text that moved, even when it changed**: a paragraph (or,
   with `--by-sentence`, a sentence) moved elsewhere is shown at both ends,
   tinted as a move, with the words edited on the way highlighted; how alike
-  it must stay to count as moved is set with `--move-similarity`. Code diff
+  it must stay to count as moved is set with `--move-similarity` and
+  `--move-algorithm` (see [Moved lines](#moved-lines-algorithm-and-threshold)). Code diff
   tools show the same text as one deletion and one unrelated insertion.
 - **It is made for prose**: long lines wrap, changes are highlighted word by
   word and down to the letter within a word, each change is described in
@@ -102,11 +103,6 @@ prosediff --to-markdown FILE
 
 (installed: `uv tool install prosediff`; from a checkout: `uv run prosediff ...`)
 
-OpenDocument texts (.odt) need an optional dependency, odfdo: install
-`"prosediff[odt]"` instead (`uv tool install "prosediff[odt]"`, or
-`pip install "prosediff[odt]"`). Without it, an .odt file is listed as not
-read, with that advice.
-
 | Argument / option          | Meaning                                                       |
 |----------------------------|---------------------------------------------------------------|
 | `--git REPO BASE [TARGET]` | compare commits of a git repository. REPO: the repository, or any folder inside it; BASE: the older commit (hash, branch, tag, `HEAD~2`, ...); TARGET: the newer commit; without it, BASE is compared with the working tree (tracked files), as `git diff BASE` does |
@@ -117,21 +113,23 @@ read, with that advice.
 | `--untracked`              | with `--git` and the working tree, also show the untracked files `.gitignore` does not exclude |
 | `-w`, `--ignore-whitespace`| compare lines ignoring whitespace, as `git diff -w`           |
 | `-p`, `--path PATH`        | with `--git` or `--folders`, restrict the diff to this file or folder (repeatable) |
-| `-o`, `--output FILE`      | output file. Default: with `--open`, a new page in the temporary folder; otherwise, comparing two folders, `prosediff.html` in the new one (never compared itself when the folders are compared again), else `diff.html`. The GUI puts the page comparing two folders into the new one too |
+| `-o`, `--output FILE`      | output file. Default: with `--open`, a new HTML report in the temporary folder; otherwise, comparing two folders, `prosediff.html` in the new one (never compared itself when the folders are compared again), else `diff.html` (`.diff` or `.wdiff` with `--format diff` or `wdiff`). The GUI puts the HTML report comparing two folders into the new one too |
+| `--format html\|diff\|wdiff` | `html`: the HTML report (default); `diff`: a unified diff, with `-U` lines of context (default 3) or `--full`, its lines paired as the HTML report pairs them (an edited line's removal followed by its new text). A text file's diff is a patch `git apply` and `patch` can apply. For Markdown files and Word and OpenDocument documents, the lines are those the HTML report compares: one per paragraph (or sentence, with `--by-sentence`), blank lines left out, numbered as in the HTML report; a document's formatting is written in Markdown (`**bold**`), the comments added or removed in [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit) (`{>>Author (date): text<<}`; those both sides have are left out, as in the HTML report), and tracked changes kept with `--docx-changes all` as `{++inserted++}` and `{--deleted--}`: a diff to read, not to apply. `wdiff`: a word diff, as `git diff --word-diff` writes one, the same lines with the words changed within each marked `[-removed-]{+added+}` (paired as in the HTML report), a line removed or added whole marked whole. Moved lines are marked only in the HTML report. Default: `diff` when the output file ends in `.diff` or `.patch`, `wdiff` for `.wdiff`. In the GUI, "Format" |
 | `-U`, `--context N`        | unchanged lines shown around each change, in every file; unset, 0 in Markdown files and Word documents (whose lines are whole paragraphs) and 3 in the others. In the GUI, the "Context lines" box: `auto` or a number |
 | `--full`                   | show every line of each changed file                          |
-| `--max-hidden N`           | unchanged lines embedded per gap for the page to reveal (default 500); longer gaps are left out, to keep the page light |
+| `--max-hidden N`           | unchanged lines embedded per gap for the HTML report to reveal (default 500); longer gaps are left out, to keep the HTML report light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
-| `--no-fold-comments`       | compare the comment markup of Markdown and Word documents as text; by default each comment added or removed since the base is shown as a 💬 marker (🆕 when added), with the author, the comment and its date on hover, and listed in a panel, while the comments both sides have are left out |
+| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (🆕 when added), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. `--no-fold-comments` is the older spelling of `text`. In the GUI, "Comments" |
 | `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
 | `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or keep them all, shown as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file (not Word or OpenDocument files, which are not read as Markdown) are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
 | `--by-sentence`            | compare the prose of Markdown files and Word documents sentence by sentence instead of paragraph by paragraph: a sentence moved between paragraphs is recognised, and each sentence is labelled with its line and its place in it (`12.3`) |
-| `--language CODE`          | the language of the prose: its rules split sentences with `--by-sentence` (about forty languages are known; others fall back to a simple rule), and the page hyphenates wrapped lines by it. A code, e.g. `en`, `it`, `de`, `fr`, `pt-br`; `document`, the languages Word and OpenDocument files mark their text with, in the runs' and the styles' settings: each paragraph is split and hyphenated by its own, and the file's language is the one most of its letters are marked with, for the paragraphs that mark none (an error for Markdown and text files); or `guess`, guessed from each file's text (py3langid). Default: `document` for Word and OpenDocument files, `guess` for the others and for a document that marks no language. A file whose language is unknown (too short or too mixed to guess) is split by English rules and not hyphenated |
+| `--language CODE`          | the language of the prose: its rules split sentences with `--by-sentence` (about forty languages are known; others fall back to a simple rule), and the HTML report hyphenates wrapped lines by it. A code, e.g. `en`, `it`, `de`, `fr`, `pt-br`; `document`, the languages Word and OpenDocument files mark their text with, in the runs' and the styles' settings: each paragraph is split and hyphenated by its own, and the file's language is the one most of its letters are marked with, for the paragraphs that mark none (an error for Markdown and text files); or `guess`, guessed from each file's text (py3langid). Default: `document` for Word and OpenDocument files, `guess` for the others and for a document that marks no language. A file whose language is unknown (too short or too mixed to guess) is split by English rules and not hyphenated |
 | `--encoding NAME`          | the encoding of text and Markdown files, e.g. `utf-8`, `cp1252`, `latin-1` (Word and OpenDocument files carry their own). Default `auto`: UTF-8, unless a file cannot be read as UTF-8 or reads with control characters; then the encoding is guessed with [cchardet](https://pypi.org/project/cchardet/) (Mozilla's uchardet, reliable even on a few words), or, when its guess cannot read the file, with [charset-normalizer](https://pypi.org/project/charset-normalizer/); Windows-1252 is preferred when it reads the text alike, and the file header says which was used. In the GUI, the "Text encoding" box |
-| `--move-similarity X`      | how alike, above 0 and at most 1, an edited line must be to where it reappears to count as moved (default 0.8; 1: only lines moved unchanged) |
-| `--open`                   | open the page in the browser once it is written |
-| `--setup-git`              | set git up to show Word and OpenDocument files as text and to open prosediff pages from `git difftool` (see below), for the repository REPO (default: the current folder) |
+| `--move-similarity X`      | how alike, above 0 and at most 1, an edited line must be to where it reappears to count as moved, by `--move-algorithm` (default 0.7; 1: only lines moved unchanged) |
+| `--move-algorithm NAME`    | how that likeness is measured: `token-sort` (default), the words and punctuation two lines have in common whatever their order; `tokens`, in order; `chars`, their characters in common, in order; `levenshtein`, 1 − the words inserted, deleted or replaced over the longer line's; `token-set`, the words both share against the rest of each. See [Moved lines](#moved-lines-algorithm-and-threshold). In the GUI, the list next to "Moved-line similarity" |
+| `--open`                   | open the HTML report in the browser once it is written |
+| `--setup-git`              | set git up to show Word and OpenDocument files as text and to open prosediff HTML reports from `git difftool` (see below), for the repository REPO (default: the current folder) |
 | `--global`                 | with `--setup-git`, for every repository of the user instead |
 | `--to-markdown FILE`       | print a Word or OpenDocument file as Markdown (pandoc's: formatting, comments and tracked changes included), tracked changes as `--docx-changes` says: what `git diff` shows once set up |
 | `--version`                | print the version                                             |
@@ -147,7 +145,11 @@ Examples:
   Word, OpenDocument, Markdown, Typst and text files; `--include` picks
   others);
 - `prosediff --files draft.odt draft_returned.odt --open`: two LibreOffice
-  documents, the page opened in the browser.
+  documents, the HTML report opened in the browser;
+- `prosediff --files draft_v1.docx draft_v2.docx -o changes.diff`: the same
+  comparison as a unified diff, to read in an editor or send as a patch;
+- `prosediff --files draft_v1.docx draft_v2.docx -o changes.wdiff
+  --comments none`: as a word diff, the comments left out.
 
 ## With git's own commands
 
@@ -160,8 +162,8 @@ understand documents:
   differ": a textconv driver running `prosediff --to-markdown`, given the
   `*.docx` and `*.odt` files in `.git/info/attributes` (not committed; with
   `--global`, git's global attributes file);
-- `git difftool -t prosediff` opens a prosediff page for each changed file,
-  and `git difftool -d -t prosediff` one page for them all (on Windows, if
+- `git difftool -t prosediff` opens a prosediff HTML report for each changed file,
+  and `git difftool -d -t prosediff` one HTML report for them all (on Windows, if
   git says it "could not symlink", add `--no-symlinks`). A repository set up
   by prosediff 0.3.1 or earlier needs `prosediff --setup-git` again for
   `git difftool -d`, which the `--files` it was given no longer accepts.
@@ -183,15 +185,13 @@ the left; `prosediff-gui OLD NEW` opens it with two Markdown, Word or
 OpenDocument files, or two folders. Any other arguments (a folder outside git, a `.txt` file,
 three files) show an error box listing the arguments received, and the
 program exits once it is dismissed.
-The Files tab has a button to swap the two.
+The Files and Folders views have a button to swap the two.
 
 To have it at hand, install it once:
 
 ```
 uv tool install --editable C:\path\to\prosediff
 ```
-
-(`--editable "C:\path\to\prosediff[odt]"` to read OpenDocument texts too.)
 
 This puts `prosediff` and `prosediff-gui` on `PATH` (editable: they always run
 the project's current code; `uv tool uninstall prosediff` removes them). On
@@ -202,31 +202,45 @@ Cygwin, Git Bash, Linux, macOS) start the same window, the installed one when
 there is one, else from the project; a batch file itself always shows a
 console for a moment.
 
-![The prosediff window: a git repository with base and target commits chosen from lists, and the options](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
+![The prosediff window: a git repository with base and target commits chosen from lists, the options in two cards, and the output](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
+
+What is compared is chosen with the segmented button at the top, which
+shows the fields of one of three sources:
 
 - **Git repository**: pick a folder; base and target are chosen among the
   working tree, the index and the latest 200 commits (hash, date, author,
   subject), or typed as any ref (`HEAD~15`, a tag). The window starts from
   the uncommitted changes when there are any, otherwise from the last
   commit. Optionally, untracked files and a list of paths (separated by `;`).
-- **Files or folders**: two files (whatever their names, Word documents
-  included) or two folders, of which only the files matching the patterns
-  of "Folders: only" (`--include`) are compared.
-- **Options**: besides those below, comparing sentence by sentence, the
-  similarity at which an edited line counts as moved, and the document
+- **Files**: two files, whatever their names, Word documents included.
+- **Folders**: two folders, of which only the files matching the patterns
+  of "Only" (`--include`) are compared.
+
+The options sit in two cards, each explained by a tooltip (rest the pointer
+on it, or on its ⓘ):
+
+- **What is compared**: Word and OpenDocument tracked changes, how alike a
+  line must stay to count as moved and how that is measured, the document
   language (`default`: the one Word and OpenDocument files mark, the others
   guessed; `document`; `guess`, guessed from each file; or a code such as
-  `it`), which splits sentences and hyphenates lines.
+  `it`), which splits sentences and hyphenates lines, the encoding of text
+  files, and switches to compare sentence by sentence and to ignore
+  whitespace.
+- **How it is shown**: the comments (markers, text or none), comments
+  without text, context lines or whole files, and the alignment of wrapped
+  lines.
 
-Below, the options that matter when reading a diff (comment markers, Word
-tracked changes, alignment, context lines or whole files, whitespace) and
-where to save the page (by default, comparing two folders, `prosediff.html`
-in the new one; otherwise a new page in the temporary folder).
-Compare (or Ctrl+Enter) writes the page and opens it in the browser; the
-comparison runs in the background, and the window remembers the choices for
-the next time (`%APPDATA%\prosediff\gui.json`).
+Under **Output**, the format (HTML report, unified diff or word diff, the
+extension of the file following it) and where to save it (by default,
+comparing two folders, `prosediff.html` in the new one; otherwise a new file
+in the temporary folder). Compare (or Ctrl+Enter) writes it and opens it;
+the comparison runs in the background, a progress bar running meanwhile, a
+notification says when it is done. The window remembers its choices only
+when asked: **Save options** writes them (to `%APPDATA%\prosediff\gui.json`)
+for it to open with next time, and **Reset to defaults** puts every option
+back to its default (what is compared and where the output goes stay).
 
-## The page
+## The HTML report
 
 - The two sides (hash or file name, subject, author, date) and, for
   commits, the commits in between (reachable from the target, or from HEAD
@@ -249,8 +263,9 @@ the next time (`%APPDATA%\prosediff\gui.json`).
   highlighted.
 - A removed line that reappears elsewhere in the file (at least 20 non-space
   characters) is shown as moved, in its own colour, with "moved to line N" /
-  "moved from line N": as it was (spacing aside), or lightly edited (at
-  least 80% similar), in which case its edits are highlighted too.
+  "moved from line N": as it was (spacing aside), or edited (at least 70%
+  alike by default, its words compared whatever their order), in which case
+  its edits are highlighted too.
 - Changed images (PNG, JPEG, GIF, WebP, BMP, up to 5 MB) old and new side by
   side; other binary files are listed but not shown.
 - A toolbar: the number of changes, with `n` and `p` (or its arrows) to jump
@@ -286,7 +301,7 @@ the next time (`%APPDATA%\prosediff\gui.json`).
   language. Its tooltip names the language and how it was found: marked in
   the document, guessed from the text, or given with `--language`. The
   flags are SVGs of [flag-icons](https://github.com/lipis/flag-icons) (MIT),
-  embedded in the page, so they show on Windows too, which has no flag emoji.
+  embedded in the HTML report, so they show on Windows too, which has no flag emoji.
 - Printing (or saving as PDF from the browser's Print dialog) opens every
   file, drops the toolbar and buttons, keeps the colours (the light ones,
   even from a browser in dark mode), lets a long paragraph continue on the
@@ -301,7 +316,7 @@ the next time (`%APPDATA%\prosediff\gui.json`).
 
 Changes are also marked without colour, by a sign in the line-number gutter
 (`−` removed, `+` added, `~` changed, `→` `←` moved), and every changed row
-tells screen readers what it is. The page follows the browser's light or dark
+tells screen readers what it is. The HTML report follows the browser's light or dark
 mode and needs no network: the CSS, the JavaScript and the images are inline.
 
 ## How it works
@@ -323,7 +338,56 @@ paragraph thus stands alone instead of shifting every pair below it. Paired
 lines are compared again word by word, and a word replaced by a single word
 is compared letter by letter when at least half its letters survive. Moved
 lines are found among the lines left removed and added, identical ones
-first, then the most similar pairs. The page is rendered with Jinja2.
+first, then the most similar pairs. The HTML report is rendered with Jinja2.
+
+### Moved lines: algorithm and threshold
+
+Which removed and added lines count as one line moved depends on how their
+likeness is measured and on the threshold it must reach. Five measures are
+offered, all computed by rapidfuzz on the words and punctuation of the two
+lines (spacing aside): `tokens` (in common, in order: twice their longest
+common subsequence over their total length), `chars` (the same on
+characters), `levenshtein` (1 − words inserted, deleted or replaced over the
+longer line's), `token-sort` (in common whatever their order: `tokens` on
+the words sorted) and `token-set` (rapidfuzz's `token_set_ratio`: the words
+both share against the rest of each).
+
+They were compared on simulated revisions of five public-domain books from
+Project Gutenberg (Austen, Darwin, Mill, Manzoni, Goethe: English, Italian
+and German; a novel, science, an essay, drama), where where every paragraph
+went is known: 1,000 stretches of 40 paragraphs, in each 4 paragraphs moved
+and edited one way (words replaced, deleted or inserted at 0% to 50%, or
+sentences reordered, with or without 10% of words edited), and 4 deleted
+while 4 others were inserted, half of them the deleted paragraph's closest
+look-alike from elsewhere in the book, which a threshold must turn down. A
+move found is right when it pairs a paragraph with its own new version;
+recall counts the moves a reader would still call moves (up to 30% of words
+edited, or reordered). The time is that of scoring 250,000 pairs, the most
+prosediff scores in one file (500 removed × 500 added paragraphs). The best
+threshold of each measure:
+
+| algorithm    | threshold | precision | recall | F1    | time, 250,000 pairs |
+|--------------|----------:|----------:|-------:|------:|--------------------:|
+| `token-sort` |      0.70 |     99.0% |  99.0% | 99.0% |              0.68 s |
+| `token-set`  |      0.80 |     98.7% |  99.5% | 99.1% |              5.24 s |
+| `chars`      |      0.50 |     94.4% |  98.7% | 96.5% |              1.23 s |
+| `tokens`     |      0.40 |     93.4% |  98.2% | 95.7% |              0.97 s |
+| `levenshtein`|      0.30 |     92.7% |  87.6% | 90.1% |              0.70 s |
+
+`token-sort` and `token-set` are the only ones that follow a paragraph
+whose sentences were reordered, and they keep false moves rare where the
+order-bound measures need a low threshold to reach the same recall (and
+then pair unrelated paragraphs). The two are tied on F1, and `token-sort` is
+eight times faster, hence the default: `token-sort` at 0.70. The former
+default, `tokens` at 0.80, had the same precision (99.1%) but found only
+73.7% of the moves: 66% of those with 30% of their words edited and 29% of
+the reordered ones, against 96% and 100% now. Lower `--move-similarity` to
+follow heavier rewrites (at 0.60, `token-sort` finds 93% of paragraphs with
+half their words changed, 2.1% of its moves then wrong), raise it to be
+stricter.
+The full tables, by threshold and kind of edit, are in
+[docs/move_sensitivity.txt](docs/move_sensitivity.txt); `uv run python
+docs/move_sensitivity.py` remakes them.
 
 **Word and OpenDocument files are read directly, not converted to
 Markdown.** A Word document is read with python-docx, which opens the
@@ -363,7 +427,7 @@ Folding comments replaces each comment (in a Markdown file, each comment
 span, before any filter runs) with one character of the Unicode private use
 area standing for its author and text: a comment is then compared like a
 word, the same comment matches on both sides even when its `id` was
-renumbered, and a filter cannot cut it in two. The characters become markers when the page is
+renumbered, and a filter cannot cut it in two. The characters become markers when the HTML report is
 built. The comments present on both sides are then taken out of the text,
 with the spaces around them (one is left where a comment stood between two
 words), before the lines are lined up: they are never shown, and a

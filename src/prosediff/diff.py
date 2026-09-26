@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
+from itertools import groupby
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +26,8 @@ import git
 import psutil
 from charset_normalizer import from_bytes
 from markupsafe import Markup
-from rapidfuzz.distance import Indel
+from rapidfuzz import fuzz
+from rapidfuzz.distance import Indel, Levenshtein
 
 from prosediff import document, footnotes
 from prosediff.comments import (  # noqa: F401  (re-exported)
@@ -56,6 +58,11 @@ from prosediff.sources import (
     read_document,
     read_side,
 )
+
+# The styles of a document's line the text formats write: its formatting,
+# and its tracked changes; and a heading's style (h1 ... h6).
+TEXT_MARKS = frozenset(document.FORMATTING) | {"tc-ins", "tc-del"}
+HEADING = re.compile(r"h[1-6]")
 
 # Windows opens a console for a console program (git, cmd.exe) started from
 # a process without one, such as the window of prosediff-gui: a terminal
@@ -98,13 +105,15 @@ CHAR_THRESHOLD = 0.5
 # A removed line that reappears elsewhere in the file counts as moved when it
 # holds at least this many non-space characters (shorter lines, "}" or
 # "---", recur by chance) and is at least this similar to where it reappears
-# (1 = identical, spacing aside). The fuzzy matching scores every remaining
+# (1 = identical, spacing aside), by MOVE_ALGORITHM: the pair that did best
+# on simulated revisions, for precision, recall and speed
+# (docs/move_sensitivity.py). The fuzzy matching scores every remaining
 # removed line against every remaining added one, up to this many pairs.
 MIN_MOVE_CHARS = 20
-MOVE_SIMILARITY = 0.8
+MOVE_SIMILARITY = 0.7
 MOVE_MAX_CELLS = 250_000
-# Unchanged lines beyond the context are embedded so the page can reveal
-# them; a longer run than this is left out, to keep the page light.
+# Unchanged lines beyond the context are embedded so the HTML report can reveal
+# them; a longer run than this is left out, to keep the HTML report light.
 MAX_HIDDEN = 500
 # Unchanged lines shown around each change when the context is "auto": of
 # code, as git diff does, and of prose (Markdown and Word documents), where a
@@ -122,7 +131,7 @@ def context_for(context: Context, prose: bool) -> int | None:
     return context
 
 
-# Images up to this size are embedded in the page, old and new side by side.
+# Images up to this size are embedded in the HTML report, old and new side by side.
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_TYPES = {
     ".png": "image/png",
@@ -172,7 +181,7 @@ class Row:
     kind is "equal", "delete", "insert", "replace", "moved-out" (a removed
     line that reappears elsewhere), "moved-in" (where it reappears), or
     "skip" for a run of unchanged lines left out between two changes;
-    hidden holds that run, so the page can reveal it, or omitted counts it
+    hidden holds that run, so the HTML report can reveal it, or omitted counts it
     when it is too long to embed.
     """
 
@@ -187,12 +196,12 @@ class Row:
     changes: list[str] = field(default_factory=list)
     words_added: int = 0
     words_removed: int = 0
-    # The first row of a run of changed rows: one stop of the page's
+    # The first row of a run of changed rows: one stop of the HTML report's
     # next/previous change navigation.
     first_of_change: bool = False
     # The line as text, before markup (to recognise moved lines).
     text: str = ""
-    # id of the row in the page, when something links to it.
+    # id of the row in the HTML report, when something links to it.
     anchor: str = ""
     # What the gutter shows for each side: the line number, or with
     # sentence-by-sentence comparison the line and the sentence ("12.3").
@@ -203,7 +212,7 @@ class Row:
     left_lang: str = ""
     right_lang: str = ""
     # Its formatting changes, in plain English: text of a document made bold,
-    # underlined, ... (the page shows them on demand).
+    # underlined, ... (the HTML report shows them on demand).
     format_changes: list[str] = field(default_factory=list)
 
     @property
@@ -239,8 +248,16 @@ class FileDiff:
     language: str = ""
     language_source: str = ""
     # Whether some of its paragraphs are marked with another language than
-    # the file's: the page then shows each paragraph's.
+    # the file's: the HTML report then shows each paragraph's.
     mixed_languages: bool = False
+    # The line pairing every format shows (line_pairs): (old, new) line
+    # indexes, 0-based, None on the side a line is missing from; and the
+    # lines as text (diff_line), for the formats written as text.
+    pairs: list[tuple[int | None, int | None]] = field(default_factory=list)
+    old_lines: list[str] = field(default_factory=list)
+    new_lines: list[str] = field(default_factory=list)
+    # The comments folded out of those lines, behind their placeholders.
+    comments: Comments | None = None
 
     @property
     def path(self) -> str:
@@ -688,6 +705,20 @@ def merge_across_spaces(ops: list[Opcode], a: list[str]) -> list[Opcode]:
     return merged
 
 
+def word_ops(old: str, new: str) -> list[Opcode]:
+    """The changes between two lines word by word, as opcodes over their
+    characters: the one word pairing of prosediff, that of the HTML report's
+    changed lines and of the word diff. Changes separated only by whitespace
+    are one change."""
+    a, b = TOKEN.findall(old), TOKEN.findall(new)
+    ao, bo = _offsets(a), _offsets(b)
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    return [
+        (op, ao[i1], ao[i2], bo[j1], bo[j2])
+        for op, i1, i2, j1, j2 in merge_across_spaces(matcher.get_opcodes(), a)
+    ]
+
+
 def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles = None) -> WordDiff:
     """Both lines as HTML, the changed tokens wrapped in <del> and <ins>.
 
@@ -696,13 +727,9 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
     only the changed letters in <mark>. The styles, if given, are the
     Markdown styles of each character of the two lines.
     """
-    a, b = TOKEN.findall(old), TOKEN.findall(new)
-    ao, bo = _offsets(a), _offsets(b)
     left, right, changes, formats = [], [], [], []
     added = removed = 0
-    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    for op, i1, i2, j1, j2 in merge_across_spaces(matcher.get_opcodes(), a):
-        o1, o2, n1, n2 = ao[i1], ao[i2], bo[j1], bo[j2]
+    for op, o1, o2, n1, n2 in word_ops(old, new):
         old_part, new_part = old[o1:o2], new[n1:n2]
         old_st, new_st = _slice(old_styles, o1, o2), _slice(new_styles, n1, n2)
         if op == "equal" or comments_only(old_part, new_part):
@@ -722,11 +749,8 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
         changes.append(describe(old_part, new_part))
         marks = None
         if (
-            op == "replace"
-            and i2 - i1 == 1
-            and j2 - j1 == 1
-            and WORD.fullmatch(old_part)
-            and WORD.fullmatch(new_part)
+            # one word for one (a word is one token)
+            op == "replace" and WORD.fullmatch(old_part) and WORD.fullmatch(new_part)
         ):
             marks = char_marks(old_part, new_part, old_st, new_st)
         if marks:
@@ -999,15 +1023,71 @@ def _make_move(out: Row, into: Row, style: Styler) -> None:
     out.words_removed, into.words_added = w.words_removed, w.words_added
 
 
+def _spaced(line: str) -> str:
+    return " ".join(line.split())
+
+
+def _sorted_tokens(line: str) -> list[str]:
+    return sorted(similarity_tokens(line))
+
+
+# How alike two lines are for the moved-line matching, 0 to 1, each measure
+# as (what a line becomes before it is compared, the score of two of them,
+# 0 below the cutoff). All of rapidfuzz, in C.
+MOVE_ALGORITHMS = {
+    # words and punctuation in common, in order: 2 x longest common
+    # subsequence / total length
+    "tokens": (
+        similarity_tokens,
+        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
+    ),
+    # characters in common, in order (spacing aside)
+    "chars": (
+        _spaced,
+        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
+    ),
+    # words and punctuation: 1 - edits (insertions, deletions, substitutions)
+    # / length of the longer line
+    "levenshtein": (
+        similarity_tokens,
+        lambda a, b, cutoff: Levenshtein.normalized_similarity(a, b, score_cutoff=cutoff),
+    ),
+    # words and punctuation in common, whatever their order
+    "token-sort": (
+        _sorted_tokens,
+        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
+    ),
+    # the words both lines share against the rest of each, whatever their
+    # order (a line inside a longer one scores high)
+    "token-set": (
+        _spaced,
+        lambda a, b, cutoff: fuzz.token_set_ratio(a, b, score_cutoff=cutoff * 100) / 100,
+    ),
+}
+MOVE_ALGORITHM = "token-sort"
+MOVE_TOLERANCE = 1e-9
+MOVE_MARGIN = 0.01
+
+
+def check_move_algorithm(name: str) -> None:
+    if name not in MOVE_ALGORITHMS:
+        raise ValueError(
+            f"move algorithm must be one of {', '.join(MOVE_ALGORITHMS)}, not {name!r}"
+        )
+
+
 def mark_moves(
-    rows: list[Row], style: Styler | None = None, similarity: float = MOVE_SIMILARITY
+    rows: list[Row],
+    style: Styler | None = None,
+    similarity: float = MOVE_SIMILARITY,
+    algorithm: str = MOVE_ALGORITHM,
 ) -> None:
     """Turn a removed line that reappears as an added line into a move.
 
     First the identical lines (spacing aside), each removed line with the
     first unmatched identical added line; then the edited ones at least
-    similarity alike (1: none), the most similar pairs first, compared word
-    by word.
+    similarity alike (1: none) by algorithm (one of MOVE_ALGORITHMS), the
+    most similar pairs first.
     """
     style = style or Styler(False)
     removed: dict[str, list[Row]] = defaultdict(list)
@@ -1022,13 +1102,17 @@ def mark_moves(
     ins = [r for r in rows if r.kind == "insert" and move_key(r.text)]
     if similarity >= 1 or not outs or not ins or len(outs) * len(ins) > MOVE_MAX_CELLS:
         return
-    out_tokens = [similarity_tokens(r.text) for r in outs]
-    in_tokens = [similarity_tokens(r.text) for r in ins]
+    prepare, score = MOVE_ALGORITHMS[algorithm]
+    out_items = [prepare(r.text) for r in outs]
+    in_items = [prepare(r.text) for r in ins]
+    # "at least similarity": rapidfuzz's cutoff can turn down a score right
+    # at it, so the scores are taken from a little below and then checked
+    cutoff = max(0.0, similarity - MOVE_MARGIN)
     candidates = []
-    for a, ta in enumerate(out_tokens):
-        for b, tb in enumerate(in_tokens):
-            s = token_similarity(ta, tb, similarity)
-            if s:
+    for a, ta in enumerate(out_items):
+        for b, tb in enumerate(in_items):
+            s = score(ta, tb, cutoff)
+            if s and s >= similarity - MOVE_TOLERANCE:
                 candidates.append((s, a, b))
     used_out, used_in = set(), set()
     for _, a, b in sorted(candidates, key=lambda c: (-c[0], c[1], c[2])):
@@ -1036,6 +1120,97 @@ def mark_moves(
             used_out.add(a)
             used_in.add(b)
             _make_move(outs[a], ins[b], style)
+
+
+Pairing = list[tuple[str, int | None, int | None]]
+
+
+def line_pairs(
+    ops: list[Opcode],
+    old: list[str],
+    new: list[str],
+    move_similarity: float = MOVE_SIMILARITY,
+    move_algorithm: str = MOVE_ALGORITHM,
+) -> Pairing:
+    """The lines of two versions in the order every format shows them, as
+    (tag, old index, new index), 0-based: the opcodes' tag ("equal",
+    "delete", "insert" or "replace"), None for the side a line is missing
+    from; a replaced block's lines paired as pair_lines pairs them. The one
+    line pairing of prosediff: the HTML report's rows and the unified diff's
+    hunks are both made from it.
+
+    Two lines paired with less than PAIRING_THRESHOLD in common (paired in
+    order, or a line replaced by a single line, a rewrite in place) stand
+    alone when either one is moved: it matches a line removed or added
+    elsewhere, by move_similarity and move_algorithm, as mark_moves will
+    find it. A sentence moved into another paragraph is thus not taken for
+    a rewrite of the unrelated sentence it lands next to, which may share
+    little more than its punctuation and a year in brackets.
+    """
+    out: Pairing = []
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            out += [(tag, i1 + t, j1 + t) for t in range(i2 - i1)]
+        elif tag == "delete":
+            out += [(tag, i, None) for i in range(i1, i2)]
+        elif tag == "insert":
+            out += [(tag, None, j) for j in range(j1, j2)]
+        else:
+            out += [
+                (tag, None if i is None else i1 + i, None if j is None else j1 + j)
+                for i, j in pair_lines(old[i1:i2], new[j1:j2])
+            ]
+    return unpair_moved(out, old, new, move_similarity, move_algorithm)
+
+
+def unpair_moved(
+    pairs: Pairing, old: list[str], new: list[str], similarity: float, algorithm: str
+) -> Pairing:
+    """The pairing with each weak pair (less than PAIRING_THRESHOLD in
+    common) split in two when either of its lines matches, as a move, a line
+    left alone elsewhere or a side of another weak pair."""
+    weak = [
+        k
+        for k, (tag, i, j) in enumerate(pairs)
+        if tag == "replace"
+        and i is not None
+        and j is not None
+        and not token_similarity(
+            similarity_tokens(old[i]), similarity_tokens(new[j]), PAIRING_THRESHOLD
+        )
+    ]
+    if not weak or similarity > 1:
+        return pairs
+    prepare, score = MOVE_ALGORITHMS[algorithm]
+    cutoff = max(0.0, similarity - MOVE_MARGIN)
+
+    def alike(a: str, b: str) -> bool:
+        key_a, key_b = move_key(a), move_key(b)
+        if not key_a or not key_b:
+            return False
+        if key_a == key_b:
+            return True
+        return similarity < 1 and score(prepare(a), prepare(b), cutoff) >= (
+            similarity - MOVE_TOLERANCE
+        )
+
+    removed = {i for tag, i, j in pairs if j is None and i is not None}
+    added = {j for tag, i, j in pairs if i is None and j is not None}
+    weak_old = {pairs[k][1] for k in weak}
+    weak_new = {pairs[k][2] for k in weak}
+    split = set()
+    for k in weak:
+        _, i, j = pairs[k]
+        others_new = added | (weak_new - {j})
+        others_old = removed | (weak_old - {i})
+        if any(alike(old[i], new[b]) for b in others_new) or any(
+            alike(old[a], new[j]) for a in others_old
+        ):
+            split.add(k)
+    out: Pairing = []
+    for k, (tag, i, j) in enumerate(pairs):
+        out += [(tag, i, None), (tag, None, j)] if k in split else [(tag, i, j)]
+    return out
 
 
 def align(
@@ -1047,15 +1222,18 @@ def align(
     markdown: bool = False,
     max_hidden: int | None = MAX_HIDDEN,
     move_similarity: float = MOVE_SIMILARITY,
+    move_algorithm: str = MOVE_ALGORITHM,
     old_labels: list[str] | None = None,
     new_labels: list[str] | None = None,
+    pairs: Pairing | None = None,
 ) -> tuple[list[Row], int, int]:
     """Side-by-side rows for two versions of a file, with the line counts.
 
     context is the number of unchanged lines shown around each change; the
     others are gathered in "skip" rows, which embed at most max_hidden lines
     (None: all). None shows the whole file. opcodes is the line alignment
-    (difflib's if not given). markdown styles the lines for the page's
+    (difflib's if not given), pairs the pairing made from it (line_pairs,
+    made here if not given). markdown styles the lines for the HTML report's
     formatted view. The counts are the lines added and removed; moved lines
     count in neither.
     """
@@ -1078,51 +1256,48 @@ def align(
         """count unchanged rows, from old line i and new line j (0-based)."""
         return [equal_row(i + t, j + t) for t in range(count)]
 
+    def changed_row(i: int | None, j: int | None) -> Row:
+        if j is None:
+            return deleted_row(i + 1, old[i], style)
+        if i is None:
+            return inserted_row(j + 1, new[j], style)
+        w = word_diff(old[i], new[j], style(old[i]), style(new[j]))
+        return Row(
+            # no change in the text (only comments came or went): an
+            # unchanged line, not an edit
+            "replace" if w.changes else "equal",
+            i + 1,
+            w.left,
+            j + 1,
+            w.right,
+            changes=w.changes,
+            words_added=w.words_added,
+            words_removed=w.words_removed,
+            format_changes=w.format_changes,
+        )
+
+    if pairs is None:
+        pairs = line_pairs(ops, old, new, move_similarity, move_algorithm)
+    # runs of unchanged lines, and of changed ones
+    runs = [(equal, list(run)) for equal, run in groupby(pairs, lambda p: p[0] == "equal")]
     rows: list[Row] = []
-    last = len(ops) - 1
-    for k, (tag, i1, i2, j1, j2) in enumerate(ops):
-        if tag == "equal":
-            lead = 0 if context is None or k == 0 else context
-            trail = 0 if context is None or k == last else context
-            n = i2 - i1
-            if context is not None and n > lead + trail:
-                gap = n - lead - trail
-                rows += equal_rows(i1, j1, lead)
-                if max_hidden is not None and gap > max_hidden:
-                    rows.append(Row("skip", omitted=gap))
-                else:
-                    rows.append(Row("skip", hidden=equal_rows(i1 + lead, j1 + lead, gap)))
-                rows += equal_rows(i2 - trail, j2 - trail, trail)
+    for k, (equal, run) in enumerate(runs):
+        if not equal:
+            rows += [changed_row(i, j) for _, i, j in run]
+            continue
+        i1, j1, n = run[0][1], run[0][2], len(run)
+        lead = 0 if context is None or k == 0 else context
+        trail = 0 if context is None or k == len(runs) - 1 else context
+        if context is not None and n > lead + trail:
+            gap = n - lead - trail
+            rows += equal_rows(i1, j1, lead)
+            if max_hidden is not None and gap > max_hidden:
+                rows.append(Row("skip", omitted=gap))
             else:
-                rows += equal_rows(i1, j1, n)
-        elif tag == "delete":
-            rows += [deleted_row(i + 1, old[i], style) for i in range(i1, i2)]
-        elif tag == "insert":
-            rows += [inserted_row(j + 1, new[j], style) for j in range(j1, j2)]
+                rows.append(Row("skip", hidden=equal_rows(i1 + lead, j1 + lead, gap)))
+            rows += equal_rows(i1 + n - trail, j1 + n - trail, trail)
         else:
-            for pi, pj in pair_lines(old[i1:i2], new[j1:j2]):
-                if pi is not None and pj is not None:
-                    o, n_ = old[i1 + pi], new[j1 + pj]
-                    w = word_diff(o, n_, style(o), style(n_))
-                    rows.append(
-                        Row(
-                            # no change in the text (only comments came or
-                            # went): an unchanged line, not an edit
-                            "replace" if w.changes else "equal",
-                            i1 + pi + 1,
-                            w.left,
-                            j1 + pj + 1,
-                            w.right,
-                            changes=w.changes,
-                            words_added=w.words_added,
-                            words_removed=w.words_removed,
-                            format_changes=w.format_changes,
-                        )
-                    )
-                elif pi is not None:
-                    rows.append(deleted_row(i1 + pi + 1, old[i1 + pi], style))
-                else:
-                    rows.append(inserted_row(j1 + pj + 1, new[j1 + pj], style))
+            rows += equal_rows(i1, j1, n)
 
     for r in rows:
         for row in [r, *r.hidden]:
@@ -1130,8 +1305,8 @@ def align(
                 row.left_label = old_labels[row.left_no - 1] if old_labels else str(row.left_no)
             if row.right_no is not None:
                 row.right_label = new_labels[row.right_no - 1] if new_labels else str(row.right_no)
-    mark_moves(rows, style, move_similarity)
-    # The stops of the page's next/previous navigation: a run of changed
+    mark_moves(rows, style, move_similarity, move_algorithm)
+    # The stops of the HTML report's next/previous navigation: a run of changed
     # lines of code, but each changed paragraph of prose (its blank lines
     # are left out, so changed paragraphs are neighbours).
     for prev, r in zip([None, *rows], rows, strict=False):
@@ -1186,30 +1361,40 @@ def set_row_languages(rows: list[Row], old: list[str], new: list[str], language:
     return mixed
 
 
+def remove_marks(line: str, pattern: re.Pattern) -> str:
+    """The line without the comment placeholders pattern matches (with the
+    blanks around them): one space is left where they stood between two
+    words, none at an edge or before punctuation."""
+
+    def gap(m: re.Match[str]) -> str:
+        at_edge = m.start() == 0 or m.end() == len(line)
+        spaced = any(c in " \t" for c in m.group())
+        before_punct = not at_edge and line[m.end()] in ".,;:!?)]}"
+        return " " if spaced and not at_edge and not before_punct else ""
+
+    return sub(pattern, gap, line)
+
+
 def without_shared_comments(
     old: list[str],
     new: list[str],
     old_labels: list[str] | None,
     new_labels: list[str] | None,
+    every: bool = False,
 ) -> tuple[list[str], list[str], list[str] | None, list[str] | None]:
     """The lines without the comments both sides have, moved or not: only
-    new and removed comments are shown. A comment goes with the spaces
-    around it, leaving one where it stood between two words; a line left
-    empty goes too, with its label."""
-    shared = set(placeholders_in("\n".join(old))) & set(placeholders_in("\n".join(new)))
+    new and removed comments are shown (every: without any comment at all).
+    A comment goes with the spaces around it, leaving one where it stood
+    between two words; a line left empty goes too, with its label."""
+    in_old, in_new = set(placeholders_in("\n".join(old))), set(placeholders_in("\n".join(new)))
+    shared = in_old | in_new if every else in_old & in_new
     if not shared:
         return old, new, old_labels, new_labels
     marks = "".join(sorted(shared))
     pattern = re.compile(f"[ \\t]*(?:[{marks}][ \\t]*)+")
 
     def strip(line: str) -> str:
-        def gap(m: re.Match[str]) -> str:
-            at_edge = m.start() == 0 or m.end() == len(line)
-            spaced = any(c in " \t" for c in m.group())
-            before_punct = not at_edge and line[m.end()] in ".,;:!?)]}"
-            return " " if spaced and not at_edge and not before_punct else ""
-
-        return sub(pattern, gap, line)
+        return remove_marks(line, pattern)
 
     def side(lines: list[str], labels: list[str] | None) -> tuple[list[str], list[str] | None]:
         kept, kept_labels = [], []
@@ -1234,9 +1419,11 @@ def build_files(
     ignore_whitespace: bool,
     fold: bool,
     empty_comments: bool = False,
+    drop_comments: bool = False,
     max_hidden: int | None,
     docx_changes: str,
     move_similarity: float = MOVE_SIMILARITY,
+    move_algorithm: str = MOVE_ALGORITHM,
     by_sentence: bool = False,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
@@ -1259,6 +1446,8 @@ def build_files(
                     "code (en, it, ...) or guess"
                 )
     comments = Comments()
+    # to leave the comments out, they are first found, as when folding them
+    fold = fold or drop_comments
     texts: list[tuple[FileDiff, list[str], list[str]]] = []
     labels: dict[int, tuple[list[str] | None, list[str] | None]] = {}
     notes: dict[int, footnotes.Footnotes] = {}
@@ -1361,7 +1550,7 @@ def build_files(
                 new_labels = paragraph_numbers(new_labels)
             if fold:
                 old_lines, new_lines, old_labels, new_labels = without_shared_comments(
-                    old_lines, new_lines, old_labels, new_labels
+                    old_lines, new_lines, old_labels, new_labels, every=drop_comments
                 )
             # Footnote numbers set aside: a renumbered footnote is no change.
             old_lines, new_lines, notes[id(fd)] = footnotes.set_aside(
@@ -1374,6 +1563,14 @@ def build_files(
     for (fd, old, new), ops in zip(texts, all_ops, strict=False):
         fn = notes.get(id(fd))
         token = footnotes.use_for_tooltips(fn)
+        pairs = line_pairs(ops, old, new, move_similarity, move_algorithm)
+        fd.pairs = [(i, j) for _, i, j in pairs]
+        if fd.markdown:
+            fd.old_lines = [diff_line(x, fn.old if fn else {}) for x in old]
+            fd.new_lines = [diff_line(x, fn.new if fn else {}) for x in new]
+            fd.comments = comments
+        else:
+            fd.old_lines, fd.new_lines = list(old), list(new)
         fd.rows, fd.additions, fd.deletions = align(
             old,
             new,
@@ -1382,8 +1579,10 @@ def build_files(
             markdown=fd.markdown,
             max_hidden=max_hidden,
             move_similarity=move_similarity,
+            move_algorithm=move_algorithm,
             old_labels=labels[id(fd)][0],
             new_labels=labels[id(fd)][1],
+            pairs=pairs,
         )
         footnotes.reset_tooltips(token)
         fd.mixed_languages = set_row_languages(fd.rows, old, new, fd.language)
@@ -1412,6 +1611,49 @@ def build_files(
                     row.left = show_comments(row.left, comments)
                     row.right = show_comments(row.right, comments, added)
     return panel
+
+
+def line_markdown(line: str) -> str:
+    """A document's line with its formatting written in pandoc's Markdown, as
+    --to-markdown writes it (a heading's level as its #s), and its tracked
+    changes in CriticMarkup: {++inserted++}, {--deleted--}. Any other line
+    as it is."""
+    if not isinstance(line, Line):
+        return line
+    out, k = [], 0
+    for key, run in groupby(line.styles, lambda st: st & TEXT_MARKS):
+        n = len(list(run))
+        text = document.markdown([document.Text(str.__getitem__(line, slice(k, k + n)), key)])
+        if "tc-ins" in key:
+            text = f"{{++{text}++}}"
+        elif "tc-del" in key:
+            text = f"{{--{text}--}}"
+        out.append(text)
+        k += n
+    text = "".join(out)
+    level = next((int(st[1]) for st in (line.styles[:1] or [()])[0] if HEADING.fullmatch(st)), 0)
+    return f"{'#' * level} {text}" if line.kind == "heading" and level else text
+
+
+def diff_line(line: str, notes: dict[str, str]) -> str:
+    """A compared line of prose as the text formats write it: its formatting
+    in Markdown (line_markdown) and its footnotes by their own numbers; its
+    comments stay placeholders, for comment_text."""
+    return footnotes.STAND_IN.sub(lambda m: f"[^{notes.get(m[0], '?')}]", line_markdown(line))
+
+
+def comment_text(line: str, comments: Comments | None) -> str:
+    """A line of the text formats with its comments written out in
+    CriticMarkup, {>>Author (date): text<<}."""
+    if comments is None or not len(comments) or not PLACEHOLDER.search(line):
+        return line
+
+    def comment(m: re.Match) -> str:
+        c = comments.get(m[0])
+        who = " ".join(filter(None, (c.author, f"({c.date})" if c.date else "")))
+        return f"{{>>{who}: {c.text}<<}}" if who else f"{{>>{c.text}<<}}"
+
+    return PLACEHOLDER.sub(comment, line)
 
 
 def comment_entries(
@@ -1479,9 +1721,11 @@ def compare(
     ignore_whitespace: bool = False,
     fold_comments_md: bool = True,
     empty_comments: bool = False,
+    drop_comments: bool = False,
     max_hidden: int | None = MAX_HIDDEN,
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
+    move_algorithm: str = MOVE_ALGORITHM,
     by_sentence: bool = False,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
@@ -1500,14 +1744,16 @@ def compare(
     Markdown file, [note]{.comment-start ...}, as a marker whose tooltip is
     the comment, and lists the comments in a panel; off, the comment markup
     is compared as text. Comments without text are left out, unless
-    empty_comments. context is the number of unchanged lines shown around
-    each change, in every file; "auto" (the default) is 0 in Markdown files
+    empty_comments. drop_comments leaves every comment out, in every format.
+    context is the number of unchanged lines shown around each change, in
+    every file; "auto" (the default) is 0 in Markdown files
     and Word documents, whose lines are paragraphs, and 3 in the others;
     None shows every line. max_hidden caps
     the unchanged lines embedded per gap. docx_changes settles the tracked changes of Word
     documents: "accept", "reject" or "all" (kept as markup).
     move_similarity is how alike, from 0 to 1, an edited line must be to
-    where it reappears to count as moved (1: only lines moved unchanged).
+    where it reappears to count as moved (1: only lines moved unchanged), by
+    move_algorithm, one of MOVE_ALGORITHMS.
     by_sentence compares the prose of Markdown files (and Word documents)
     sentence by sentence instead of line by line; each sentence is labelled
     with its line and its place in it ("12.3"). language is that of their
@@ -1521,6 +1767,7 @@ def compare(
     not, then guessed (decode_text).
     """
     check_move_similarity(move_similarity)
+    check_move_algorithm(move_algorithm)
     language = normalize_language(language)
     encoding = check_encoding(encoding)
     if cached and target is not None:
@@ -1564,9 +1811,11 @@ def compare(
         ignore_whitespace=ignore_whitespace,
         fold=fold_comments_md,
         empty_comments=empty_comments,
+        drop_comments=drop_comments,
         max_hidden=max_hidden,
         docx_changes=docx_changes,
         move_similarity=move_similarity,
+        move_algorithm=move_algorithm,
         by_sentence=by_sentence,
         language=language,
         encoding=encoding,
@@ -1618,9 +1867,11 @@ def compare_paths(
     ignore_whitespace: bool = False,
     fold_comments_md: bool = True,
     empty_comments: bool = False,
+    drop_comments: bool = False,
     max_hidden: int | None = MAX_HIDDEN,
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
+    move_algorithm: str = MOVE_ALGORITHM,
     by_sentence: bool = False,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
@@ -1638,6 +1889,7 @@ def compare_paths(
     ignoring case. The other options are those of compare().
     """
     check_move_similarity(move_similarity)
+    check_move_algorithm(move_algorithm)
     language = normalize_language(language)
     encoding = check_encoding(encoding)
     old, new = Path(old), Path(new)
@@ -1679,9 +1931,11 @@ def compare_paths(
         ignore_whitespace=ignore_whitespace,
         fold=fold_comments_md,
         empty_comments=empty_comments,
+        drop_comments=drop_comments,
         max_hidden=max_hidden,
         docx_changes=docx_changes,
         move_similarity=move_similarity,
+        move_algorithm=move_algorithm,
         by_sentence=by_sentence,
         language=language,
         encoding=encoding,

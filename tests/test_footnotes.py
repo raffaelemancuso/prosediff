@@ -53,7 +53,7 @@ def test_renumbered_footnotes_are_no_change(tmp_path):
     assert text(rows, "left")[3].startswith("[^3]: The third note")
     assert text(rows, "right")[3].startswith("[^2]: The third note")
     assert "Body C.[^3]" in text(rows, "left")[0] and "Body C.[^2]" in text(rows, "right")[0]
-    # and so does the page, with no stand-in left in it
+    # and so does the HTML report, with no stand-in left in it
     html = render(c)
     assert not STAND_IN.search(html)
     assert "[^3]: The third note" in html and "[^2]: The third note" in html

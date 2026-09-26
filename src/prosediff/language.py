@@ -7,7 +7,7 @@ with (the one most of its letters are in); or guessed from the text when
 "guess", by py3langid, a naive Bayes classifier over byte n-grams that knows
 some 140 languages. A guess is kept only when the text is long enough and
 the classifier sure enough of it; otherwise the language stays unknown, and
-the page does not hyphenate what it cannot name. By default ("default"),
+the HTML report does not hyphenate what it cannot name. By default ("default"),
 Word and OpenDocument files say their language, and the others, or a
 document that marks none, are guessed.
 """
@@ -23,7 +23,7 @@ from lxml import etree
 GUESS = "guess"
 DOCUMENT = "document"
 DEFAULT = "default"
-# A language tag as BCP 47 writes it, in the forms the page and yasbd use.
+# A language tag as BCP 47 writes it, in the forms the HTML report and yasbd use.
 TAG = re.compile(r"^[a-z]{2,3}(-[a-z0-9]{2,8})*$")
 # Below these, a guess is noise: "Hello world" reads as Fulfulde. A
 # paragraph's vote needs less confidence, since the majority of the
@@ -332,7 +332,7 @@ class OdtLanguages:
         return most_letters(counts), counts
 
 
-# How the page shows a language ----------------------------------------------------
+# How the HTML report shows a language ----------------------------------------------------
 
 # How the language of a file was found, as its tooltip says it.
 SOURCES = {

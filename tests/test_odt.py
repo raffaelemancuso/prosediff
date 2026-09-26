@@ -1,7 +1,5 @@
 """Reading OpenDocument texts (.odt) into Markdown (odfdo), as Word documents are."""
 
-import sys
-
 import pytest
 from helpers import odt_xml
 
@@ -108,13 +106,3 @@ def test_broken_odt_is_listed_as_binary(tmp_path):
     (tmp_path / "b.odt").write_bytes(b"not a zip either")
     (f,) = compare_paths(tmp_path / "a.odt", tmp_path / "b.odt").files
     assert f.binary and "not a readable OpenDocument text" in f.note
-
-
-def test_without_odfdo_an_odt_is_listed_with_how_to_read_it(tmp_path, monkeypatch):
-    """odfdo is optional (the odt extra): without it, .odt files are not read."""
-    monkeypatch.setitem(sys.modules, "odfdo", None)  # import odfdo fails
-    monkeypatch.delitem(sys.modules, "prosediff.odt", raising=False)
-    a = odt_xml(tmp_path / "a.odt", "<text:p>The cat sat.</text:p>")
-    b = odt_xml(tmp_path / "b.odt", "<text:p>The cat slept.</text:p>")
-    (f,) = compare_paths(a, b).files
-    assert f.binary and 'uv tool install "prosediff[odt]"' in f.note

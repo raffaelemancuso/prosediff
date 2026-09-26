@@ -1,8 +1,8 @@
-"""Soft hyphens in the prose of the page, by its language's rules.
+"""Soft hyphens in the prose of the HTML report, by its language's rules.
 
 CSS can ask the browser to hyphenate (hyphens: auto), but a browser does so
 only where it has that language's dictionary: Chrome and Edge fetch theirs
-into the user's profile on demand, so a page could print hyphenated on one
+into the user's profile on demand, so an HTML report could print hyphenated on one
 machine and not on another. Soft hyphens (U+00AD) are honoured everywhere:
 invisible, they become a hyphen only where a line breaks at them. They are
 placed by pyphen, which carries the hyphenation patterns of LibreOffice for

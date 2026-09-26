@@ -1,6 +1,6 @@
 """Inline Markdown styles, character by character, for the formatted view.
 
-The page shows a Markdown line raw by default; the formatted view hides its
+The HTML report shows a Markdown line raw by default; the formatted view hides its
 syntax (the ** of **bold**, the (url) of a link, the # of a heading) and
 styles what it marks. Change markup (<del>, <ins>) and formatting cannot be
 nested into one another in general (a change may start inside a bold run and
@@ -16,7 +16,7 @@ images, citations and pandoc bracketed spans with attributes.
 A Word or OpenDocument text read with its tracked changes kept ("all") has
 them as [text]{.insertion author=... date=...} and [text]{.deletion ...}
 spans: their text is styled as Word shows it, and carries the change's
-author and date for the page's tooltip. A style starting with "@" is such
+author and date for the HTML report's tooltip. A style starting with "@" is such
 a value, name=value, written as a data- attribute instead of a class.
 """
 

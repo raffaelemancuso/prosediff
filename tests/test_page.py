@@ -21,7 +21,7 @@ def page(tmp_path_factory):
     """A Markdown file gaining markup to escape, from a commit whose subject
     needs escaping too, a file that grew by 1,500 lines, one with a line
     moved, one with a long unchanged stretch and one with a line changed,
-    removed and added; the repository, the commits and the page built once,
+    removed and added; the repository, the commits and the HTML report built once,
     as no test changes them."""
     b = RepoBuilder(tmp_path_factory.mktemp("page") / "repo")
     b.write_all(
@@ -81,17 +81,17 @@ def test_moved_rendered(page):
 
 
 def test_left_out_gap_rendered(page):
-    """An unchanged stretch longer than max_hidden is left out of the page,
+    """An unchanged stretch longer than max_hidden is left out of the HTML report,
     not hidden in it."""
     b, base, target, _, html = page
-    assert "left out of the page" not in html
+    assert "left out of the HTML report" not in html
     html = render(compare(b.path, base, target, paths=["gap.txt"], max_hidden=5))
-    assert "left out of the page" in html
+    assert "left out of the HTML report" in html
     assert "<tbody hidden>" not in html
 
 
 def test_signs_screen_reader_text_and_print_styles(page):
-    """What the page offers without the browser tests' script: signs beside
+    """What the HTML report offers without the browser tests' script: signs beside
     the colours, text for screen readers, a print layout."""
     html = page[4]
     assert '<span class="sign" aria-hidden="true">~</span>' in html

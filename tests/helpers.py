@@ -84,10 +84,11 @@ def docx(path, paragraphs, comment=None):
     return path
 
 
-def docx_xml(path, body, footnotes=None, comments=None):
+def docx_xml(path, body, footnotes=None, comments=None, styles=None):
     """A Word document from raw XML: body is the content of w:body, footnotes
-    the w:footnote elements, comments the w:comment elements (for what
-    python-docx cannot write: tracked changes, footnotes, equations)."""
+    the w:footnote elements, comments the w:comment elements, styles the
+    w:style elements (for what python-docx cannot write: tracked changes,
+    footnotes, equations)."""
     w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     m = "http://schemas.openxmlformats.org/officeDocument/2006/math"
     ns = f'xmlns:w="{w}" xmlns:m="{m}"'
@@ -98,6 +99,8 @@ def docx_xml(path, body, footnotes=None, comments=None):
         parts["footnotes"] = (f"{ct}.footnotes+xml", f"{rel}/footnotes")
     if comments is not None:
         parts["comments"] = (f"{ct}.comments+xml", f"{rel}/comments")
+    if styles is not None:
+        parts["styles"] = (f"{ct}.styles+xml", f"{rel}/styles")
     types = "".join(
         f'<Override PartName="/word/{name}.xml" ContentType="{t}"/>'
         for name, (t, _) in parts.items()
@@ -131,6 +134,8 @@ def docx_xml(path, body, footnotes=None, comments=None):
             z.writestr("word/footnotes.xml", f"<w:footnotes {ns}>{footnotes}</w:footnotes>")
         if comments is not None:
             z.writestr("word/comments.xml", f"<w:comments {ns}>{comments}</w:comments>")
+        if styles is not None:
+            z.writestr("word/styles.xml", f"<w:styles {ns}>{styles}</w:styles>")
     return path
 
 

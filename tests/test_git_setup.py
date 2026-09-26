@@ -1,5 +1,5 @@
 """prosediff --setup-git, --to-markdown and --open: git's own commands
-showing documents as prose, and the page opened in the browser."""
+showing documents as prose, and the HTML report opened in the browser."""
 
 import re
 import subprocess
@@ -84,7 +84,7 @@ def test_to_markdown(tmp_path, capsysbinary):
 
 def test_setup_git_makes_git_diff_and_difftool_show_documents(two_documents, browser, capsys):
     """After --setup-git, git diff shows documents as text and git difftool -d
-    writes a page and opens it."""
+    writes an HTML report and opens it."""
     b = two_documents
     assert "\n+The cat slept.\n" not in git(b.path, "diff", "HEAD~1", "HEAD")
     assert main(["--setup-git", str(b.path)]) == 0

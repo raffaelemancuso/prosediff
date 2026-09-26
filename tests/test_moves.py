@@ -97,9 +97,34 @@ def test_move_similarity_validated(tmp_path):
 
 def test_where_a_moved_line_went_is_printed(tmp_path):
     """On screen a moved line's tooltip says where it went; on paper, a note
-    under it (hidden on screen by the page's style)."""
+    under it (hidden on screen by the HTML report's style)."""
     (tmp_path / "a.md").write_text(f"{EDITED}\na\nb\nc\n")
     (tmp_path / "b.md").write_text(f"a\nb\nc\n{EDITED.replace('almost', 'nearly')}\n")
     html = render(compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None))
     assert '<span class="print-note" aria-hidden="true">moved to line 4</span>' in html
     assert '<span class="print-note" aria-hidden="true">moved from line 1</span>' in html
+
+
+def test_a_move_beats_a_weak_pairing():
+    """A sentence moved next to an unrelated one is shown as moved, not as a
+    rewrite of the unrelated sentence, which shares little more than its
+    punctuation and a year in brackets; the text formats pair it alike."""
+    from prosediff.diff import align, difflib_opcodes, line_pairs
+
+    moved = (
+        "We chose not to use the keyword set of Table A2 in Barbero et al. (2024) for two reasons."
+    )
+    other = (
+        "The first directive dates back to 1975, and the current one was adopted "
+        "in 2008 (Grosso et al., 2010)."
+    )
+    old = [moved, "A line that stays where it is.", "Another line that stays too.", other]
+    new = ["A line that stays where it is.", "Another line that stays too.", moved]
+    kinds = [r.kind for r in align(old, new, context=None)[0]]
+    assert kinds == ["moved-out", "equal", "equal", "delete", "moved-in"]
+    pairs = line_pairs(difflib_opcodes(old, new), old, new)
+    assert (3, 2) not in [(i, j) for _, i, j in pairs]
+    # a rewrite in place with nothing moved stays a pair
+    anew = "Something else entirely, written anew."
+    rewrite = align(["kept", other], ["kept", anew], context=None)
+    assert [r.kind for r in rewrite[0]] == ["equal", "replace"]

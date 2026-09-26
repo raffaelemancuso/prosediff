@@ -14,6 +14,8 @@ from prosediff.diff import (
     AUTO_ENCODING,
     CONTEXT,
     MAX_HIDDEN,
+    MOVE_ALGORITHM,
+    MOVE_ALGORITHMS,
     MOVE_SIMILARITY,
     PROSE_CONTEXT,
     FilterError,
@@ -23,7 +25,7 @@ from prosediff.diff import (
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
 from prosediff.language import DEFAULT, normalize_language
-from prosediff.render import ALIGNMENTS, default_output, render
+from prosediff.render import ALIGNMENTS, FORMATS, default_output, format_of, write_output
 from prosediff.sources import (
     DOCX_CHANGES,
     FOLDER_FILES,
@@ -33,6 +35,8 @@ from prosediff.sources import (
 )
 
 PROG = "prosediff"
+# What --comments does with the comments: set apart, compared as text, or none.
+COMMENT_MODES = ("markers", "text", "none")
 
 
 def package_version() -> str:
@@ -45,9 +49,10 @@ def package_version() -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog=PROG,
-        description="Write an HTML page showing the differences between two "
+        description="Write an HTML report showing the differences between two "
         "commits of a git repository (or a commit and the working tree or the "
-        "index), or between two files or two folders, side by side.",
+        "index), or between two files or two folders, side by side; or a "
+        "unified diff of them (--format diff).",
         epilog="Examples: prosediff --git . HEAD~1 HEAD; prosediff --git . HEAD --untracked; "
         "prosediff --files draft_v1.docx draft_v2.docx --open; "
         "prosediff --folders submitted revised; prosediff --setup-git",
@@ -112,10 +117,25 @@ def main(argv: list[str] | None = None) -> int:
         "-o",
         "--output",
         type=Path,
-        help="output file (default: with --open, a new page in the temporary folder; "
-        "otherwise, for two folders, prosediff.html in the new one, else diff.html)",
+        help="output file (default: with --open, a new HTML report in the temporary folder; "
+        "otherwise, for two folders, prosediff.html in the new one, else diff.html; "
+        ".diff or .wdiff for --format diff or wdiff)",
     )
-    ap.add_argument("--open", action="store_true", help="open the page in the browser once written")
+    ap.add_argument(
+        "--format",
+        choices=tuple(FORMATS),
+        default=None,
+        help="html: the HTML report; diff: a unified diff, its lines paired as the HTML "
+        "report pairs them (prose one line per paragraph, formatting in Markdown, comments "
+        "added or "
+        "removed in CriticMarkup); wdiff: the same as git diff --word-diff writes it, "
+        "[-removed-]{+added+} within each line. With -U lines of context (default: 3) "
+        "or --full (default: diff when OUTPUT ends in .diff or .patch, wdiff for .wdiff, "
+        "else html)",
+    )
+    ap.add_argument(
+        "--open", action="store_true", help="open the HTML report in the browser once written"
+    )
     lines = ap.add_mutually_exclusive_group()
     lines.add_argument(
         "-U",
@@ -125,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         metavar="N",
         help="unchanged lines shown around each change, in every file (default: "
         f"{PROSE_CONTEXT} in Markdown files and Word documents, whose lines are "
-        f"paragraphs, {CONTEXT} in the others); the page can reveal the rest",
+        f"paragraphs, {CONTEXT} in the others); the HTML report can reveal the rest",
     )
     lines.add_argument("--full", action="store_true", help="show every line of the changed files")
     ap.add_argument(
@@ -133,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=MAX_HIDDEN,
         metavar="N",
-        help="unchanged lines embedded per gap, for the page to reveal; "
+        help="unchanged lines embedded per gap, for the HTML report to reveal; "
         f"longer gaps are left out (default: {MAX_HIDDEN:,})",
     )
     ap.add_argument(
@@ -165,12 +185,18 @@ def main(argv: list[str] | None = None) -> int:
         help="ignore whitespace when comparing lines",
     )
     ap.add_argument(
-        "--fold-comments",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="in Markdown files and Word documents, show each comment "
-        "as a marker whose tooltip is the comment, and list them in a panel "
-        "(default: on; --no-fold-comments compares the comment markup as text)",
+        "--comments",
+        choices=COMMENT_MODES,
+        default=None,
+        help="the comments of Markdown files and Word and OpenDocument documents, in every "
+        "format: markers (default), set apart from the text, only those added or removed "
+        "shown (in the HTML report a marker with the comment on hover, and a panel; in "
+        "the diffs, CriticMarkup); text, compared as part of the text, as pandoc writes "
+        "them; none, left out altogether",
+    )
+    # the older spelling of --comments markers / text
+    ap.add_argument(
+        "--fold-comments", action=argparse.BooleanOptionalAction, help=argparse.SUPPRESS
     )
     ap.add_argument(
         "--empty-comments",
@@ -190,8 +216,18 @@ def main(argv: list[str] | None = None) -> int:
         default=MOVE_SIMILARITY,
         metavar="X",
         help="how alike, above 0 and at most 1, an edited line must be to where it "
-        "reappears to count as moved: the share of its words and punctuation in "
-        f"common, in order (default: {MOVE_SIMILARITY}; 1: only lines moved unchanged)",
+        "reappears to count as moved, by --move-algorithm "
+        f"(default: {MOVE_SIMILARITY}; 1: only lines moved unchanged)",
+    )
+    ap.add_argument(
+        "--move-algorithm",
+        choices=tuple(MOVE_ALGORITHMS),
+        default=MOVE_ALGORITHM,
+        help="how --move-similarity measures two lines: tokens, the share of their words "
+        "and punctuation in common, in order; chars, of their characters; levenshtein, "
+        "1 - the words inserted, deleted or replaced / the longer line's; token-sort, "
+        "words in common whatever their order; token-set, the words both share against "
+        f"the rest of each (default: {MOVE_ALGORITHM})",
     )
     ap.add_argument(
         "--by-sentence",
@@ -224,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         "--setup-git",
         action="store_true",
         help="make git diff, git log -p and git show show Word and OpenDocument files as "
-        "text, and add a difftool: git difftool -t prosediff (-d: one page for all files); "
+        "text, and add a difftool: git difftool -t prosediff (-d: one HTML report for all files); "
         "for the repository REPO (default: the current folder) or, with --global, for all",
     )
     git_group.add_argument(
@@ -299,16 +335,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.untracked and (args.target or args.cached):
         ap.error("--untracked needs the working tree: give no TARGET and no --cached")
 
+    if args.comments and args.fold_comments is not None:
+        ap.error("give --comments or --fold-comments, not both")
+    comments = args.comments or ("text" if args.fold_comments is False else "markers")
     options = dict(
         paths=args.paths,
         context=None if args.full else ("auto" if args.context is None else args.context),
         md_filter=args.md_filter,
         ignore_whitespace=args.ignore_whitespace,
-        fold_comments_md=args.fold_comments,
+        fold_comments_md=comments != "text",
+        drop_comments=comments == "none",
         empty_comments=args.empty_comments,
         max_hidden=args.max_hidden,
         docx_changes=args.docx_changes,
         move_similarity=args.move_similarity,
+        move_algorithm=args.move_algorithm,
         by_sentence=args.by_sentence,
         language=args.language,
         encoding=args.encoding,
@@ -343,18 +384,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{PROG}: {e}", file=sys.stderr)
         return 1
 
-    # newline="\n" keeps the page LF on Windows too.
-    # With --open, a page in the temporary folder: git difftool -d gives
+    # With --open, an HTML report in the temporary folder: git difftool -d gives
     # two temporary folders, gone once prosediff returns.
+    fmt = args.format or format_of(args.output)
     output = args.output
     if output is None and args.open:
-        output = default_output()
+        output = default_output(fmt)
     if output is None and args.folders:
         output = default_page(Path(args.repo), Path(args.base))
+        if output is not None:
+            output = output.with_suffix(FORMATS[fmt])
     if output is None:
-        output = Path("diff.html")
-    with open(output, "w", encoding="utf-8", newline="\n") as f:
-        f.write(render(comparison, args.paths, align=args.align))
+        output = Path("diff").with_suffix(FORMATS[fmt])
+    write_output(
+        comparison,
+        output,
+        fmt,
+        args.paths,
+        align=args.align,
+        context=None if args.full else (CONTEXT if args.context is None else args.context),
+    )
 
     c = comparison
     files = "file" if len(c.files) == 1 else "files"
@@ -376,7 +425,7 @@ def _setup_git(repo: Path | None) -> int:
     print("\n".join(done))
     print(
         "git diff now shows Word and OpenDocument files as text; "
-        "git difftool -d -t prosediff opens a prosediff page."
+        "git difftool -d -t prosediff opens a prosediff HTML report."
     )
     return 0
 
