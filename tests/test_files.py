@@ -4,6 +4,7 @@ import pytest
 from helpers import docx, docx_xml
 
 from prosediff import compare_paths, render
+from prosediff.cli import main
 from prosediff.sources import SourceError, docx_to_markdown
 
 
@@ -157,3 +158,65 @@ def test_broken_docx_is_listed_as_binary(tmp_path):
     b.write_bytes(b"not a zip either")
     (f,) = compare_paths(a, b).files
     assert f.binary and "not a readable Word document" in f.note
+
+
+def test_folders_compare_prose_files_by_default(tmp_path):
+    """Two folders are compared only in the files that match the include
+    patterns: by default Word, OpenDocument, Markdown, Typst and text files,
+    whatever the case of their names."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    for d in (old, new):
+        (d / "sub").mkdir(parents=True)
+    for name in ("paper.md", "notes.TXT", "slides.typ", "sub/data.csv", "sub/run.py", "sub/a.md"):
+        (old / name).write_text("a\n")
+        (new / name).write_text("b\n")
+    # the lock files of open documents are never compared
+    (new / "~$paper.docx").write_bytes(b"\x00lock")
+    (new / ".~lock.paper.odt#").write_text("lock")
+    c = compare_paths(old, new)
+    assert [f.path for f in c.files] == ["notes.TXT", "paper.md", "slides.typ", "sub/a.md"]
+    c = compare_paths(old, new, include="*.py|sub/*.csv")
+    assert [f.path for f in c.files] == ["sub/data.csv", "sub/run.py"]
+    assert len(compare_paths(old, new, include="").files) == 6
+    assert len(compare_paths(old, new, include=None).files) == 6
+    # two files are compared whatever their names
+    assert len(compare_paths(old / "sub" / "run.py", new / "sub" / "run.py").files) == 1
+
+
+def test_cli_include(tmp_path, capsys):
+    old, new = tmp_path / "old", tmp_path / "new"
+    for d in (old, new):
+        d.mkdir()
+    for name in ("paper.md", "run.py"):
+        (old / name).write_text("a\n")
+        (new / name).write_text("b\n")
+    out = tmp_path / "page.html"
+    assert main(["--files", str(old), str(new), "-o", str(out)]) == 0
+    assert "run.py" not in out.read_text(encoding="utf-8")
+    assert main(["--files", str(old), str(new), "-o", str(out), "--include", "*.py"]) == 0
+    page = out.read_text(encoding="utf-8")
+    assert "run.py" in page and "paper.md" not in page
+    with pytest.raises(SystemExit):
+        main([str(tmp_path), "HEAD", "--include", "*.md"])
+    assert "--include picks the files of two folders" in capsys.readouterr().err
+
+
+def test_git_runs_without_a_console_window(tmp_path, monkeypatch):
+    """git and filters are started with CREATE_NO_WINDOW (0 off Windows), so
+    no terminal flashes up when the window of prosediff-gui compares."""
+    import subprocess
+
+    from prosediff import diff
+
+    seen = []
+    real = subprocess.run
+
+    def run(*args, **kwargs):
+        seen.append(kwargs.get("creationflags"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(diff.subprocess, "run", run)
+    (tmp_path / "a.md").write_text("Hello world.\n")
+    (tmp_path / "b.md").write_text("Hello there.\n")
+    compare_paths(tmp_path / "a.md", tmp_path / "b.md", md_filter="sort")
+    assert seen and set(seen) == {getattr(subprocess, "CREATE_NO_WINDOW", 0)}

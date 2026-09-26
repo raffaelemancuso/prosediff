@@ -9,6 +9,11 @@
 [![Python](https://img.shields.io/pypi/pyversions/prosediff)](https://pypi.org/project/prosediff/)
 [![Tests](https://github.com/raffaelemancuso/prosediff/actions/workflows/tests.yml/badge.svg)](https://github.com/raffaelemancuso/prosediff/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/pypi/l/prosediff)](LICENSE)
+[![Downloads](https://img.shields.io/pypi/dm/prosediff)](https://pypistats.org/packages/prosediff)
+[![Stars](https://img.shields.io/github/stars/raffaelemancuso/prosediff)](https://github.com/raffaelemancuso/prosediff/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/raffaelemancuso/prosediff)](https://github.com/raffaelemancuso/prosediff/commits/master)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
 **Side-by-side comparison of prose, not code: Word documents (.docx) first,
 OpenDocument (.odt) and Markdown too.**
@@ -31,7 +36,7 @@ changes) or working tree. Paragraphs wrap and are numbered, changes are
 described in plain English, and the new and removed comments of Word
 documents are shown and listed.
 
-![prosediff in use: a comment's tooltip, the changes one after the other, one column instead of two](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/demo.gif)
+![A page made by prosediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 ## Why prosediff
 
@@ -105,6 +110,7 @@ read, with that advice.
 | `BASE`                     | the older commit: hash, branch, tag, `HEAD~2`, ...            |
 | `TARGET`                   | the newer commit; without it, BASE is compared with the working tree (tracked files), as `git diff BASE` does |
 | `--files OLD NEW`          | compare two files (whatever their names) or two folders, outside git |
+| `--include PATTERNS`       | with `--files` and two folders, compare only the files matching these glob patterns, separated by `\|` (quote them), e.g. `"*.docx\|*.md"`; a pattern is matched against each file's name, or its path within the folder when it has a `/`, ignoring case. Default `*.docx\|*.odt\|*.md\|*.typ\|*.txt`; `""` compares every file. The lock files an open document leaves beside it (Word's `~$name.docx`, LibreOffice's `.~lock.name.odt#`) are always left out. In the GUI, the "Folders: only" box |
 | `--cached`                 | compare BASE with the index instead, as `git diff --cached BASE` does |
 | `--untracked`              | with the working tree, also show the untracked files `.gitignore` does not exclude |
 | `-w`, `--ignore-whitespace`| compare lines ignoring whitespace, as `git diff -w`           |
@@ -119,7 +125,7 @@ read, with that advice.
 | `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or keep them all, shown as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
 | `--by-sentence`            | compare the prose of Markdown files and Word documents sentence by sentence instead of paragraph by paragraph: a sentence moved between paragraphs is recognised, and each sentence is labelled with its line and its place in it (`12.3`) |
-| `--language CODE`          | the language of the prose, e.g. `en`, `it`, `de`, `fr`: its rules split sentences with `--by-sentence` (about forty languages are known; others fall back to a simple rule), and the page hyphenates wrapped lines by it. Default `auto`: guessed from each file's text (py3langid); a file too short or too mixed to tell is split by English rules and not hyphenated |
+| `--language CODE`          | the language of the prose: its rules split sentences with `--by-sentence` (about forty languages are known; others fall back to a simple rule), and the page hyphenates wrapped lines by it. A code, e.g. `en`, `it`, `de`, `fr`, `pt-br`; `document`, the languages Word and OpenDocument files mark their text with, in the runs' and the styles' settings: each paragraph is split and hyphenated by its own, and the file's language is the one most of its letters are marked with, for the paragraphs that mark none (an error for Markdown and text files); or `guess`, guessed from each file's text (py3langid). Default: `document` for Word and OpenDocument files, `guess` for the others and for a document that marks no language. A file whose language is unknown (too short or too mixed to guess) is split by English rules and not hyphenated |
 | `--encoding NAME`          | the encoding of text and Markdown files, e.g. `utf-8`, `cp1252`, `latin-1` (Word and OpenDocument files carry their own). Default `auto`: UTF-8, unless a file cannot be read as UTF-8 or reads with control characters; then the encoding is guessed with [charset-normalizer](https://pypi.org/project/charset-normalizer/), Windows-1252 preferred among equally likely ones, and the file header says which was used. In the GUI, the "Text encoding" box |
 | `--move-similarity X`      | how alike, above 0 and at most 1, an edited line must be to where it reappears to count as moved (default 0.8; 1: only lines moved unchanged) |
 | `--open`                   | open the page in the browser once it is written |
@@ -135,7 +141,9 @@ Examples:
 - `prosediff . HEAD --cached`: what the next commit would record;
 - `prosediff --files draft_v1.docx draft_v2_returned.docx`: what a co-author
   changed and commented, from the two Word files;
-- `prosediff --files submitted/ revised/`: two folders, file by file;
+- `prosediff --files submitted/ revised/`: two folders, file by file (their
+  Word, OpenDocument, Markdown, Typst and text files; `--include` picks
+  others);
 - `prosediff --files draft.odt draft_returned.odt --open`: two LibreOffice
   documents, the page opened in the browser.
 
@@ -195,11 +203,13 @@ console for a moment.
   the uncommitted changes when there are any, otherwise from the last
   commit. Optionally, untracked files and a list of paths (separated by `;`).
 - **Files or folders**: two files (whatever their names, Word documents
-  included) or two folders.
+  included) or two folders, of which only the files matching the patterns
+  of "Folders: only" (`--include`) are compared.
 - **Options**: besides those below, comparing sentence by sentence, the
   similarity at which an edited line counts as moved, and the document
-  language (`auto`, guessed from each file, or a code such as `it`), which
-  splits sentences and hyphenates lines.
+  language (`default`: the one Word and OpenDocument files mark, the others
+  guessed; `document`; `guess`, guessed from each file; or a code such as
+  `it`), which splits sentences and hyphenates lines.
 
 Below, the options that matter when reading a diff (comment markers, Word
 tracked changes, alignment, context lines or whole files, whitespace) and
@@ -209,8 +219,6 @@ comparison runs in the background, and the window remembers the choices for
 the next time (`%APPDATA%\prosediff\gui.json`).
 
 ## The page
-
-![A page made by prosediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 - The two sides (hash or file name, subject, author, date) and, for
   commits, the commits in between (reachable from the target, or from HEAD
@@ -253,10 +261,18 @@ the next time (`%APPDATA%\prosediff\gui.json`).
   Word documents; and a checkbox for the comment tooltips (on by default).
   The browser remembers the views, the spacing and the checkbox.
 - The prose of Markdown files and Word documents is hyphenated by the rules
-  of its language (`--language`, guessed from each file's text by default):
+  of its language (`--language`: by default the one a Word or OpenDocument
+  file marks each paragraph with, otherwise guessed from the file's text):
   soft hyphens placed by [pyphen](https://pypi.org/project/Pyphen/), so every
   browser breaks words the same way, on screen and on paper, without
   dictionaries of its own; copying text leaves them behind.
+- A flag shows the language: one in the file header when all of a file's
+  paragraphs are in the same language, or one before each paragraph's
+  number when a Word or OpenDocument file marks some paragraphs with another
+  language. Its tooltip names the language and how it was found: marked in
+  the document, guessed from the text, or given with `--language`. The
+  flags are SVGs of [flag-icons](https://github.com/lipis/flag-icons) (MIT),
+  embedded in the page, so they show on Windows too, which has no flag emoji.
 - Printing (or saving as PDF from the browser's Print dialog) opens every
   file, drops the toolbar and buttons, keeps the colours (the light ones,
   even from a browser in dark mode), lets a long paragraph continue on the
@@ -359,7 +375,7 @@ html = render(compare_paths("v1.docx", "v2.docx", fold_comments_md=True))
 uv run pytest                            # the tests
 uv run playwright install chromium       # once, for the browser tests
 uv run ruff check && uv run ruff format --check
-uv run --with pillow python docs/make_screenshots.py   # the README screenshots and demo.gif
+uv run --with pillow python docs/make_screenshots.py   # the README screenshots
 uv run --with pillow python docs/make_icon.py          # the window icons, from docs/logo.svg
 ```
 

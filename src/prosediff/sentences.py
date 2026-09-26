@@ -53,11 +53,14 @@ class SimpleDetector:
 
 @cache
 def detector(language: str):
-    """yasbd's detector for the language, or the stand-in rule."""
-    try:
-        return BoundaryDetector(lang=language, preserve_quote_and_paren=False)
-    except UnsupportedLanguageError:
-        return SimpleDetector()
+    """yasbd's detector for the language (or, for a regional variant such
+    as pt-br, for its language), or the stand-in rule."""
+    for lang in dict.fromkeys((language, language.split("-")[0])):
+        try:
+            return BoundaryDetector(lang=lang, preserve_quote_and_paren=False)
+        except UnsupportedLanguageError:
+            pass
+    return SimpleDetector()
 
 
 def is_supported(language: str) -> bool:
@@ -134,10 +137,14 @@ def _rule_block_end(lines: list[str], start: int) -> int:
     return last_rule + 1
 
 
-def split_sentences(lines: list[str], language: str = "en") -> tuple[list[str], list[str]]:
+def split_sentences(
+    lines: list[str], language: str = "en", line_languages: list[str | None] | None = None
+) -> tuple[list[str], list[str]]:
     """The lines with their prose split into sentences, and each new line's
     label: the number of the line it came from, plus its place among the
-    sentences of that line when there are several ("12.3")."""
+    sentences of that line when there are several ("12.3"). Each line is
+    split by the rules of its language in line_languages, when it has one,
+    else by those of language."""
     out: list[str] = []
     labels: list[str] = []
 
@@ -173,7 +180,8 @@ def split_sentences(lines: list[str], language: str = "en") -> tuple[list[str], 
             item = LIST_ITEM.match(line)
             prefix = item.group(0) if item else ""
             indent = " " * len(prefix)
-            parts = sentences(line[len(prefix) :], language)
+            rules = (line_languages[i] if line_languages else None) or language
+            parts = sentences(line[len(prefix) :], rules)
             if len(parts) == 1:
                 keep(i)
             else:

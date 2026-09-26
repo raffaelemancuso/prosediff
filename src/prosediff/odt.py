@@ -23,10 +23,12 @@ image is written [image], with its description when it has one.
 """
 
 import re
+from collections import Counter
 from io import BytesIO
 
 from odfdo import Document, Element
 
+from prosediff.language import OdtLanguages, line_languages, most_letters
 from prosediff.word import CHANGES, COMMENTS_ONLY, Piece, render_pieces
 
 # Whitespace in ODF text collapses to one space; text:s stands for the rest.
@@ -71,9 +73,18 @@ Tagged = tuple[Piece, str | None]
 
 
 class Reader:
-    def __init__(self, document: Document, changes: str) -> None:
+    def __init__(
+        self, document: Document, changes: str, languages: OdtLanguages | None = None
+    ) -> None:
         self.document = document
         self.changes = changes
+        # The languages the text is marked with, when asked for: that of
+        # each block of the body (as body() returns them) and of each note,
+        # and the letters of the whole in each language.
+        self.languages = languages
+        self.block_languages: list[str | None] = []
+        self.note_languages: list[str | None] = []
+        self.letters: Counter[str] = Counter()
         # change id -> ("insertion" | "deletion", author, date, region element)
         self.regions: dict[str, tuple[str, str, str, Element]] = {}
         self.open: list[str] = []  # the insertions the walk is inside
@@ -82,6 +93,13 @@ class Reader:
         self.styles: dict[str, tuple[bool, bool]] = {}
         # comments of a paragraph deleted as a whole, for the next paragraph
         self.carried = ""
+
+    def language_of(self, paragraphs: list[Element]) -> str | None:
+        if self.languages is None:
+            return None
+        language, counts = self.languages.of(p._xml_element for p in paragraphs)
+        self.letters += counts
+        return language
 
     # Styles ------------------------------------------------------------------------
 
@@ -243,6 +261,7 @@ class Reader:
                     ]
                     self.open = saved
                     self.notes.append(" ".join(t for t in texts if t))
+                    self.note_languages.append(self.language_of(paragraphs))
                     out.append((Piece(f"[^{len(self.notes)}]", raw=True), where))
             elif tag == "office:annotation":
                 out.append((self.comment(child), None))
@@ -321,11 +340,15 @@ class Reader:
                 line = self.paragraph(child, prefix)
                 if line:
                     out.append(line)
+                    self.block_languages.append(self.language_of([child]))
             elif tag == "text:list":
                 for item in child.get_elements("text:list-item|text:list-header"):
                     out += self.blocks(item, "- ")
             elif tag == "table:table":
                 out.append(self.table(child))
+                self.block_languages.append(
+                    self.language_of(child.get_elements(".//text:p|.//text:h"))
+                )
             elif tag not in SKIPPED_BLOCKS:
                 out += self.blocks(child, prefix)  # sections and the like
         return out
@@ -341,6 +364,7 @@ class Reader:
                 out[-1] += self.carried
             else:
                 out.append(self.carried)
+                self.block_languages.append(None)
             self.carried = ""
         return out
 
@@ -348,19 +372,28 @@ class Reader:
 def odt_to_markdown(data: bytes, changes: str = "accept") -> str:
     """An OpenDocument text's body as Markdown, its tracked changes settled
     ("accept", "reject") or kept as markup ("all"), its comments kept."""
+    return read_odt(data, changes)[0]
+
+
+def read_odt(data: bytes, changes: str = "accept") -> tuple[str, list[str | None], str | None]:
+    """An OpenDocument text's body as Markdown (odt_to_markdown), the
+    language each line of it is marked with (None: unmarked, or a blank
+    line), and the language most of its letters are marked with."""
     if changes not in CHANGES:
         raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")
     try:
         document = Document(BytesIO(data))
         if document.get_type() not in ("text", "text-template"):
             raise OdtError(f"an OpenDocument {document.get_type()}, not a text")
-        reader = Reader(document, changes)
+        reader = Reader(document, changes, OdtLanguages(data))
         lines = reader.body()
     except OdtError:
         raise
     except Exception as e:  # not a zip, not an OpenDocument, broken XML
         raise OdtError(f"{type(e).__name__}: {e}") from None
+    notes = [f"[^{k}]: {t}" for k, t in enumerate(reader.notes, 1)]
     text = "\n\n".join(lines)
-    if reader.notes:
-        text += "\n\n" + "\n\n".join(f"[^{k}]: {t}" for k, t in enumerate(reader.notes, 1))
-    return text + "\n"
+    if notes:
+        text += "\n\n" + "\n\n".join(notes)
+    blocks = zip(lines + notes, reader.block_languages + reader.note_languages, strict=True)
+    return text + "\n", line_languages(list(blocks)), most_letters(reader.letters)

@@ -22,6 +22,8 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
+from prosediff.diff import NO_WINDOW
+
 DRIVER = "prosediff"
 ATTRIBUTES = ("*.docx diff=prosediff", "*.odt diff=prosediff")
 
@@ -39,7 +41,12 @@ def command() -> str:
 def git(*args: str, cwd: Path | None = None) -> str:
     try:
         done = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8"
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            creationflags=NO_WINDOW,
         )
     except FileNotFoundError:
         raise SetupError("git is not on PATH") from None

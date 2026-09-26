@@ -81,6 +81,13 @@ details.file[open] > summary { border-bottom: 1px solid var(--border); }
   overflow-wrap: anywhere; }
 .note { padding: 12px; color: var(--muted); }
 .file-note { color: var(--muted); font-style: italic; }
+/* A language's flag: in the file header, or before each paragraph's number;
+   the flags the page shows follow, each an SVG of flag-icons. */
+.flag { display: inline-block; width: 1.33em; height: 1em; vertical-align: -.12em;
+  background: center / cover no-repeat; box-shadow: 0 0 0 1px rgba(0, 0, 0, .15);
+  font-style: normal; line-height: 1; cursor: help; }
+.flag.globe { width: auto; box-shadow: none; }
+td.no .flag { float: left; font-size: .8em; margin-top: .3em; }
 .images { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
 .images figure { margin: 0; text-align: center; }
 .images img { max-width: 100%; height: auto; background:
@@ -297,12 +304,17 @@ thead.print, .print-note { display: none; }
   tr.skip { break-inside: avoid; }
   tr.current td, tr.target td { box-shadow: none; }
 }
+{{ flag_css }}
 </style>
 </head>
 <body>
 <main>
 <h1>{{ c.repo_name }}</h1>
 
+{# A paragraph's language in the gutter, when the file's paragraphs differ. #}
+{% macro gutter_flag(f, no, lang) -%}
+{% if f.mixed_languages and no is not none %}{{ flag(lang or f.language, paragraph_language_note(lang, f.language, f.language_source)) }}{% endif %}
+{%- endmacro %}
 {% macro side(r) -%}
 {{ r.subject }}{% if r.author or r.date %} <span class="role">— {{ r.author }}{% if r.author and r.date %}, {% endif %}{{ r.date }}</span>{% endif %}
 {%- endmacro %}
@@ -379,7 +391,7 @@ thead.print, .print-note { display: none; }
     <span class="role">{{ f.change }}</span>
     {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}
     {% if f.note %}<span class="file-note">{{ f.note }}</span>{% endif %}
-    {% if f.language %}<span class="file-note" title="the language its sentences are split and its lines hyphenated by">language: {{ f.language }}{% if f.language_guessed %} (guessed){% endif %}</span>{% endif %}
+    {% if f.language %}<span class="file-note" title="{{ file_language_note(f.language, f.language_source) }}; its sentences are split and its lines hyphenated by it{% if f.mixed_languages %}, where a paragraph is marked with none of its own{% endif %}">{% if not f.mixed_languages %}{{ flag(f.language) }} {% endif %}language: {{ f.language }}{% if f.language_source == "guessed" %} (guessed){% elif f.language_source == "document" %} (from the document){% endif %}</span>{% endif %}
   </summary>
   {% if f.old_image or f.new_image %}
   <div class="images">
@@ -408,7 +420,7 @@ thead.print, .print-note { display: none; }
     <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
     <tbody hidden>
     {% for h in r.hidden %}
-    <tr class="equal"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ h.left_label or h.left_no }}</td><td class="code left">{{ h.left | hyphenate(f.language) }}</td><td class="no r">{{ h.right_label or h.right_no }}</td><td class="code right">{{ h.right | hyphenate(f.language) }}</td></tr>
+    <tr class="equal"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ gutter_flag(f, h.left_no, h.left_lang) }}{{ h.left_label or h.left_no }}</td><td class="code left"{% if h.left_lang and h.left_lang != f.language %} lang="{{ h.left_lang }}"{% endif %}>{{ h.left | hyphenate(h.left_lang or f.language) }}</td><td class="no r">{{ gutter_flag(f, h.right_no, h.right_lang) }}{{ h.right_label or h.right_no }}</td><td class="code right"{% if h.right_lang and h.right_lang != f.language %} lang="{{ h.right_lang }}"{% endif %}>{{ h.right | hyphenate(h.right_lang or f.language) }}</td></tr>
     {% endfor %}
     </tbody>
     {% endif %}
@@ -416,10 +428,10 @@ thead.print, .print-note { display: none; }
     {% else %}
     {% set sign = signs.get(r.kind, ("", "")) %}
     <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>
-      <td class="no l">{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
-      <td class="code left">{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left | hyphenate(f.language) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
-      <td class="no r">{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
-      <td class="code right">{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right | hyphenate(f.language) }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
+      <td class="no l">{{ gutter_flag(f, r.left_no, r.left_lang) }}{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
+      <td class="code left"{% if r.left_lang and r.left_lang != f.language %} lang="{{ r.left_lang }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left | hyphenate(r.left_lang or f.language) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
+      <td class="no r">{{ gutter_flag(f, r.right_no, r.right_lang) }}{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
+      <td class="code right"{% if r.right_lang and r.right_lang != f.language %} lang="{{ r.right_lang }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right | hyphenate(r.right_lang or f.language) }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
     </tr>
     {% endif %}
     {% endfor %}

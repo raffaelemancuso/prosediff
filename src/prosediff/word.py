@@ -23,6 +23,7 @@ when it has one, and an equation as its text.
 """
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from io import BytesIO
 
@@ -33,6 +34,8 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
+
+from prosediff.language import WordLanguages, line_languages, most_letters
 
 CHANGES = ("accept", "reject", "all")
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
@@ -102,6 +105,20 @@ class Reader:
     shown_comments: set = field(default_factory=set)
     # comments of a paragraph deleted as a whole, for the next paragraph
     carried: str = ""
+    # The languages the text is marked with, when asked for: that of each
+    # block of the body (as body() returns them) and of each note, and the
+    # letters of the whole in each language.
+    languages: WordLanguages | None = None
+    block_languages: list = field(default_factory=list)
+    note_languages: list = field(default_factory=list)
+    letters: Counter = field(default_factory=Counter)
+
+    def language_of(self, paragraphs) -> str | None:
+        if self.languages is None:
+            return None
+        language, counts = self.languages.of(paragraphs)
+        self.letters += counts
+        return language
 
     # Paragraph content ----------------------------------------------------------
 
@@ -252,6 +269,7 @@ class Reader:
                 out[-1] += self.carried
             else:
                 out.append(self.carried)
+                self.block_languages.append(None)
             self.carried = ""
         return out
 
@@ -262,8 +280,10 @@ class Reader:
                 line = self.paragraph(child)
                 if line:
                     out.append(line)
+                    self.block_languages.append(self.language_of([child]))
             elif child.tag == qn("w:tbl"):
                 out.append("\n".join(self.table(child)))
+                self.block_languages.append(self.language_of(child.iter(qn("w:p"))))
             elif child.tag == qn("w:sdt"):
                 content = child.find(qn("w:sdtContent"))
                 if content is not None:
@@ -285,6 +305,7 @@ class Reader:
             el, part = found
             texts = [self.paragraph_text(p, part) for p in el.iter(qn("w:p"))]
             out.append(f"[^{k}]: " + " ".join(t for t in texts if t))
+            self.note_languages.append(self.language_of(el.iter(qn("w:p"))))
         return out
 
 
@@ -401,6 +422,13 @@ def _notes(document: Document) -> dict:
 def docx_to_markdown(data: bytes, changes: str = "accept") -> str:
     """A Word document's body as Markdown, its tracked changes settled
     ("accept", "reject") or kept as markup ("all"), its comments kept."""
+    return read_docx(data, changes)[0]
+
+
+def read_docx(data: bytes, changes: str = "accept") -> tuple[str, list[str | None], str | None]:
+    """A Word document's body as Markdown (docx_to_markdown), the language
+    each line of it is marked with (None: unmarked, or a blank line), and
+    the language most of its letters are marked with."""
     if changes not in CHANGES:
         raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")
     try:
@@ -409,7 +437,7 @@ def docx_to_markdown(data: bytes, changes: str = "accept") -> str:
         raise WordError(str(e) or type(e).__name__) from None
     except Exception as e:  # a zip that is not a Word package, broken XML
         raise WordError(f"{type(e).__name__}: {e}") from None
-    reader = Reader(document, changes)
+    reader = Reader(document, changes, languages=WordLanguages(data))
     try:
         reader.comments = {str(c.comment_id): c for c in document.comments}
     except (KeyError, ValueError):
@@ -420,4 +448,5 @@ def docx_to_markdown(data: bytes, changes: str = "accept") -> str:
     text = "\n\n".join(lines)
     if notes:
         text += "\n\n" + "\n\n".join(notes)
-    return text + "\n"
+    blocks = zip(lines + notes, reader.block_languages + reader.note_languages, strict=True)
+    return text + "\n", line_languages(list(blocks)), most_letters(reader.letters)

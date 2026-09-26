@@ -21,9 +21,9 @@ from prosediff.diff import (
     compare_paths,
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
-from prosediff.language import AUTO, normalize_language
+from prosediff.language import DEFAULT, normalize_language
 from prosediff.render import ALIGNMENTS, default_output, render
-from prosediff.sources import DOCX_CHANGES, SourceError, document_to_markdown
+from prosediff.sources import DOCX_CHANGES, FOLDER_FILES, SourceError, document_to_markdown
 
 PROG = "prosediff"
 
@@ -66,6 +66,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--files", action="store_true", help="compare two files or two folders, outside git"
+    )
+    ap.add_argument(
+        "--include",
+        metavar="PATTERNS",
+        help="with --files and two folders, compare only the files matching these glob "
+        'patterns, separated by | (quote them), e.g. "*.docx|*.md", matched against '
+        "each file's name (its path within the folder for a pattern with a /), ignoring "
+        f'case; "" for every file (default: "{FOLDER_FILES}")',
     )
     ap.add_argument(
         "-p",
@@ -169,11 +177,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--language",
-        default=AUTO,
+        default=DEFAULT,
         metavar="CODE",
         help="the language of the documents' prose: its rules split sentences with "
-        "--by-sentence and hyphenate wrapped lines (default: auto, guessed from "
-        "each file's text; e.g. en, it, de, fr)",
+        "--by-sentence and hyphenate wrapped lines. A code (e.g. en, it, de, fr); "
+        "document: the language Word and OpenDocument files mark their text with "
+        "(an error for Markdown and text files); guess: guessed from each file's text. "
+        "Default: document for Word and OpenDocument files (guess when they mark "
+        "none), guess for the others",
     )
     ap.add_argument(
         "--encoding",
@@ -239,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
             ap.error("--files compares OLD with NEW: give no TARGET")
         if args.cached or args.untracked:
             ap.error("--cached and --untracked need a git repository, not --files")
+    elif args.include is not None:
+        ap.error("--include picks the files of two folders: it goes with --files")
     if args.cached and args.target:
         ap.error("--cached compares BASE with the index: give no TARGET")
     if args.untracked and (args.target or args.cached):
@@ -260,7 +273,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         if args.files:
-            comparison = compare_paths(args.repo, args.base, **options)
+            include = FOLDER_FILES if args.include is None else args.include
+            comparison = compare_paths(args.repo, args.base, include=include, **options)
         else:
             comparison = compare(
                 Path(args.repo),

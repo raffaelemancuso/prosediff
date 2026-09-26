@@ -31,13 +31,15 @@ from prosediff.diff import (
     compare,
     compare_paths,
 )
-from prosediff.language import AUTO, normalize_language
+from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
 from prosediff.render import ALIGNMENTS, default_output, render
-from prosediff.sources import DOCX_CHANGES, SourceError
+from prosediff.sources import DOCX_CHANGES, FOLDER_FILES, SourceError
 
 MAX_COMMITS = 200
 ENCODINGS = (AUTO_ENCODING, "utf-8", "cp1252", "latin-1", "utf-16", "cp1250", "cp1251")
-LANGUAGES = (AUTO, "en", "it", "de", "fr", "es", "pt", "nl", "pl", "sv", "da", "fi", "cs", "el")
+# The choices, then the common codes; any code can be typed.
+LANGUAGES = (DEFAULT, DOCUMENT, GUESS)
+LANGUAGES += ("en", "it", "de", "fr", "es", "pt", "nl", "pl", "sv", "da", "fi", "cs", "el")
 WORKTREE = "Working tree (uncommitted changes)"
 INDEX = "Index (staged changes)"
 
@@ -83,6 +85,8 @@ class Settings:
     paths: list[str] = field(default_factory=list)
     old: str = ""
     new: str = ""
+    # the files of two folders compared: glob patterns separated by "|"
+    include: str = FOLDER_FILES
     fold_comments: bool = True
     empty_comments: bool = False
     docx_changes: str = "accept"
@@ -94,8 +98,9 @@ class Settings:
     ignore_whitespace: bool = False
     move_similarity: float = MOVE_SIMILARITY
     by_sentence: bool = False
-    # a language code, or "auto": guessed from each file's text
-    language: str = AUTO
+    # a language code; "document": marked in Word and OpenDocument files;
+    # "guess": guessed from each file's text; "default": document, else guess
+    language: str = DEFAULT
     # a codec's name, or "auto": UTF-8 unless a file shows it is not
     encoding: str = AUTO_ENCODING
     output: str = ""
@@ -225,13 +230,13 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         docx_changes=s.docx_changes,
         move_similarity=s.move_similarity,
         by_sentence=s.by_sentence,
-        language=s.language or AUTO,
+        language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
     if s.mode == "files":
         if not s.old or not s.new:
             raise ValueError("choose the old and the new file or folder")
-        comparison = compare_paths(s.old, s.new, **options)
+        comparison = compare_paths(s.old, s.new, include=s.include, **options)
     else:
         if not s.repo or not s.base:
             raise ValueError("choose a repository and a base")
@@ -321,6 +326,14 @@ class App:
         ttk.Button(files_tab, text="⇅ Swap", command=self.swap_files).grid(
             row=2, column=2, columnspan=2, sticky="ew", **pad
         )
+        ttk.Label(files_tab, text="Folders: only").grid(row=3, column=0, sticky="w", **pad)
+        self.include = tk.StringVar(value=self.s.include)
+        ttk.Entry(files_tab, textvariable=self.include).grid(row=3, column=1, sticky="ew", **pad)
+        ttk.Label(
+            files_tab,
+            text="patterns separated by |; empty: every file",
+            foreground="grey",
+        ).grid(row=4, column=1, sticky="w", padx=6)
 
         # Options
         opts = ttk.LabelFrame(root, text="Options", padding=8)
@@ -385,7 +398,8 @@ class App:
         )
         ttk.Label(
             opts,
-            text="splits sentences and hyphenates lines; auto: guessed from each file",
+            text="splits sentences and hyphenates lines; default: marked in Word and "
+            "OpenDocument files, else guessed",
             foreground="grey",
         ).grid(row=6, column=2, columnspan=2, sticky="w", **pad)
         ttk.Label(opts, text="Text encoding").grid(row=7, column=0, sticky="w", **pad)
@@ -516,7 +530,7 @@ class App:
         try:
             language = normalize_language(self.language.get())
         except ValueError:
-            language = AUTO
+            language = DEFAULT
         try:
             encoding = check_encoding(self.encoding.get())
         except ValueError:
@@ -530,6 +544,7 @@ class App:
             paths=[p.strip() for p in self.paths.get().split(";") if p.strip()],
             old=self.old.get().strip(),
             new=self.new.get().strip(),
+            include=self.include.get().strip(),
             fold_comments=self.fold.get(),
             empty_comments=self.empty_comments.get(),
             docx_changes=self.docx.get(),

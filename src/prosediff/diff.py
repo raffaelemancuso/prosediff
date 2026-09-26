@@ -36,18 +36,28 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
     plain,
     show_comments,
 )
-from prosediff.language import AUTO, normalize_language, resolve_language
+from prosediff.language import (
+    DEFAULT,
+    DOCUMENT,
+    normalize_language,
+    resolve_language,
+)
 from prosediff.mdstyle import md_styles, styled
 from prosediff.sentences import split_sentences
 from prosediff.sources import (
     DOCUMENT_SUFFIXES,
+    FOLDER_FILES,
     SourceError,
     describe_side,
-    document_to_markdown,
     is_document,
+    read_document,
     read_side,
 )
 
+# Windows opens a console for a console program (git, cmd.exe) started from
+# a process without one, such as the window of prosediff-gui: a terminal
+# that flashes up while it runs. This flag starts it without.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # How many leading bytes are inspected to decide whether a file is binary,
 # as git itself does.
 BINARY_SNIFF = 8000
@@ -177,6 +187,10 @@ class Row:
     # sentence-by-sentence comparison the line and the sentence ("12.3").
     left_label: str = ""
     right_label: str = ""
+    # The language a Word or OpenDocument file marks each side's paragraph
+    # with, if any.
+    left_lang: str = ""
+    right_lang: str = ""
 
     @property
     def skipped(self) -> int:
@@ -206,9 +220,13 @@ class FileDiff:
     note: str = ""
     markdown: bool = False
     # The language of its prose (a BCP 47 tag, e.g. "it"), when known, and
-    # whether it was guessed from the text.
+    # where it came from: "given", "document" (marked in the Word or
+    # OpenDocument file) or "guessed" (from the text).
     language: str = ""
-    language_guessed: bool = False
+    language_source: str = ""
+    # Whether some of its paragraphs are marked with another language than
+    # the file's: the page then shows each paragraph's.
+    mixed_languages: bool = False
 
     @property
     def path(self) -> str:
@@ -381,7 +399,13 @@ def image_uri(path: str, data: bytes) -> str | None:
 
 def run_filter(command: str, text: str, path: str) -> str:
     """Pipe text through a shell command (cmd.exe on Windows, sh elsewhere)."""
-    proc = subprocess.run(command, shell=True, input=text.encode("utf-8"), capture_output=True)
+    proc = subprocess.run(
+        command,
+        shell=True,
+        input=text.encode("utf-8"),
+        capture_output=True,
+        creationflags=NO_WINDOW,
+    )
     if proc.returncode != 0:
         raise FilterError(
             f"filter failed on {path} (exit {proc.returncode}): "
@@ -724,7 +748,9 @@ def git_opcodes(
         ]
         if ignore_whitespace:
             cmd.append("--ignore-all-space")
-        proc = subprocess.run([*cmd, "a", "b"], cwd=tmp, capture_output=True)
+        proc = subprocess.run(
+            [*cmd, "a", "b"], cwd=tmp, capture_output=True, creationflags=NO_WINDOW
+        )
     # git diff --no-index exits 1 when the trees differ.
     if proc.returncode not in (0, 1):
         raise RuntimeError(
@@ -975,6 +1001,37 @@ def paragraph_numbers(labels: list[str]) -> list[str]:
     return out
 
 
+def paragraph_languages(
+    line_labels: list[str], paragraph_labels: list[str], languages: list[str | None] | None
+) -> dict[str, str]:
+    """The language of each paragraph, by its number, from the language of
+    each line of the text (languages) and the labels of its lines before
+    and after paragraph_numbers()."""
+    if not languages:
+        return {}
+    out = {}
+    for line, paragraph in zip(line_labels, paragraph_labels, strict=True):
+        if found := languages[int(line.partition(".")[0]) - 1]:
+            out[paragraph.partition(".")[0]] = found
+    return out
+
+
+def set_row_languages(
+    rows: list[Row], old: dict[str, str], new: dict[str, str], language: str
+) -> bool:
+    """Each row's language, on each side: that its paragraph is marked with.
+    Whether any is not the file's language."""
+    mixed = False
+    for r in rows:
+        for row in [r, *r.hidden]:
+            if row.left_no is not None:
+                row.left_lang = old.get(row.left_label.partition(".")[0], "")
+            if row.right_no is not None:
+                row.right_lang = new.get(row.right_label.partition(".")[0], "")
+            mixed = mixed or any(x and x != language for x in (row.left_lang, row.right_lang))
+    return mixed
+
+
 def without_shared_comments(
     old: list[str],
     new: list[str],
@@ -1027,7 +1084,7 @@ def build_files(
     docx_changes: str,
     move_similarity: float = MOVE_SIMILARITY,
     by_sentence: bool = False,
-    language: str = AUTO,
+    language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
 ) -> list[CommentEntry]:
     """Fill in the rows of every file; returns the comments for the panel.
@@ -1036,18 +1093,44 @@ def build_files(
     prosediff.odt); a document that cannot be read is listed as a binary
     file, with the reason.
     """
+    if language == DOCUMENT:
+        for fd, old_bytes, new_bytes in entries:
+            if not (is_document(fd.old_path) or is_document(fd.new_path)) and not (
+                is_binary(old_bytes) or is_binary(new_bytes)
+            ):
+                raise SourceError(
+                    f"language document: {fd.path} is not a Word or OpenDocument file, "
+                    "the kind that records the language of its text; give a language "
+                    "code (en, it, ...) or guess"
+                )
     comments = Comments()
     texts: list[tuple[FileDiff, list[str], list[str]]] = []
     labels: dict[int, tuple[list[str] | None, list[str] | None]] = {}
+    # The language of each paragraph, by its number, of the Word and
+    # OpenDocument files whose paragraphs are marked with one.
+    paragraph_langs: dict[int, tuple[dict[str, str], dict[str, str]]] = {}
     notes: dict[int, footnotes.Footnotes] = {}
     for fd, old_bytes, new_bytes in entries:
         from_word = is_document(fd.old_path) or is_document(fd.new_path)
+        # The languages the document marks: the one most of its letters are
+        # in (the new side's, unless it is gone or marks none), and that of
+        # each line of each side.
+        marked = old_langs = new_langs = None
         if from_word:
             try:
+                old_marked = new_marked = None
                 if old_bytes:
-                    old_bytes = document_to_markdown(old_bytes, fd.old_path or "", docx_changes)
+                    old_bytes, old_langs, old_marked = read_document(
+                        old_bytes, fd.old_path or "", docx_changes
+                    )
                 if new_bytes:
-                    new_bytes = document_to_markdown(new_bytes, fd.new_path or "", docx_changes)
+                    new_bytes, new_langs, new_marked = read_document(
+                        new_bytes, fd.new_path or "", docx_changes
+                    )
+                if language in (DOCUMENT, DEFAULT):
+                    marked = new_marked or old_marked
+                else:
+                    old_langs = new_langs = None
                 fd.markdown = True
                 kinds = {
                     DOCUMENT_SUFFIXES[Path(p).suffix.lower()]
@@ -1087,22 +1170,34 @@ def build_files(
                 new_text = run_filter(md_filter, new_text, fd.path)
         if fd.markdown:
             # One language for both sides: the new one's, unless it is gone.
-            known, fd.language_guessed = resolve_language(language, new_text or old_text)
-            fd.language = known or ""
+            fd.language, fd.language_source = resolve_language(
+                language, new_text or old_text, marked
+            )
         old_lines, new_lines = split_lines(old_text), split_lines(new_text)
+        # Lines the filter or the folding of comments added or took away
+        # leave the languages of the lines unknown.
+        if old_langs is not None and len(old_langs) != len(old_lines):
+            old_langs = None
+        if new_langs is not None and len(new_langs) != len(new_lines):
+            new_langs = None
         old_labels = new_labels = None
         if by_sentence and fd.markdown:
             rules = fd.language or "en"
-            old_lines, old_labels = split_sentences(old_lines, rules)
-            new_lines, new_labels = split_sentences(new_lines, rules)
+            old_lines, old_labels = split_sentences(old_lines, rules, old_langs)
+            new_lines, new_labels = split_sentences(new_lines, rules, new_langs)
         if fd.markdown:
             old_lines, old_labels = without_blank_lines(old_lines, old_labels)
             new_lines, new_labels = without_blank_lines(new_lines, new_labels)
             if from_word:
                 # No one sees the Markdown a Word document was read into:
                 # its paragraphs are numbered instead of its lines.
-                old_labels = paragraph_numbers(old_labels)
-                new_labels = paragraph_numbers(new_labels)
+                old_numbers = paragraph_numbers(old_labels)
+                new_numbers = paragraph_numbers(new_labels)
+                paragraph_langs[id(fd)] = (
+                    paragraph_languages(old_labels, old_numbers, old_langs),
+                    paragraph_languages(new_labels, new_numbers, new_langs),
+                )
+                old_labels, new_labels = old_numbers, new_numbers
             if fold:
                 old_lines, new_lines, old_labels, new_labels = without_shared_comments(
                     old_lines, new_lines, old_labels, new_labels
@@ -1130,6 +1225,8 @@ def build_files(
             new_labels=labels[id(fd)][1],
         )
         footnotes.reset_tooltips(token)
+        if id(fd) in paragraph_langs:
+            fd.mixed_languages = set_row_languages(fd.rows, *paragraph_langs[id(fd)], fd.language)
         if fn is not None and (fn.old or fn.new):
             for r in fd.rows:
                 for row in [r, *r.hidden]:
@@ -1226,7 +1323,7 @@ def compare(
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
     by_sentence: bool = False,
-    language: str = AUTO,
+    language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
 ) -> Comparison:
     """Compare two versions of the repository at repo_path.
@@ -1254,8 +1351,11 @@ def compare(
     by_sentence compares the prose of Markdown files (and Word documents)
     sentence by sentence instead of line by line; each sentence is labelled
     with its line and its place in it ("12.3"). language is that of their
-    prose (en, it, ...), whose rules split sentences and hyphenate lines, or
-    "auto" (the default) to guess it from each file's text. encoding is that
+    prose, whose rules split sentences and hyphenate lines: a code (en, it,
+    ...); "document", the language Word and OpenDocument files mark their
+    text with (SourceError when another text file is compared); "guess", to
+    guess it from each file's text; or "default" (the default), a Word or
+    OpenDocument file's own, the others guessed. encoding is that
     of the text files (Word and OpenDocument files carry their own): a
     codec's name, or "auto" (the default), UTF-8 unless the file shows it is
     not, then guessed (decode_text).
@@ -1362,16 +1462,20 @@ def compare_paths(
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
     by_sentence: bool = False,
-    language: str = AUTO,
+    language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
+    include: str | None = FOLDER_FILES,
 ) -> Comparison:
     """Compare two files, or two folders, outside git.
 
     Two files are compared with each other whatever their names. Two folders
     are compared file by file, by path; a file removed from one place and
     added, identical, in another is a rename. paths restricts the comparison
-    to those paths within the folders. The other options are those of
-    compare().
+    to those paths within the folders, include to the files matching its
+    glob patterns, separated by "|" (by default Word, OpenDocument, Markdown,
+    Typst and text files; None or "" for every file), matched against each
+    file's name, or its path within the folder for a pattern with a "/",
+    ignoring case. The other options are those of compare().
     """
     check_move_similarity(move_similarity)
     language = normalize_language(language)
@@ -1384,7 +1488,7 @@ def compare_paths(
             change = "modified" if old.name == new.name else "renamed"
             entries.append((FileDiff(change, old.name, new.name), a, b))
     elif old.is_dir() and new.is_dir():
-        a_files, b_files = read_side(old), read_side(new)
+        a_files, b_files = read_side(old, include), read_side(new, include)
         gone = {p: a_files[p] for p in a_files.keys() - b_files.keys() if in_paths(p, paths)}
         came = {p: b_files[p] for p in b_files.keys() - a_files.keys() if in_paths(p, paths)}
         for p in sorted(a_files.keys() & b_files.keys()):
