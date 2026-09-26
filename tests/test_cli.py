@@ -15,11 +15,7 @@ def test_cli_writes_report(two_commits, tmp_path, capsys):
     assert ">world</del>" in html and "text-align: justify" in html
     assert b"\r\n" not in out.read_bytes()
     assert "+2 -1" in capsys.readouterr().out
-
-
-def test_cli_paths(two_commits, tmp_path):
-    b, base, target = two_commits
-    out = tmp_path / "r.html"
+    # -p restricts the comparison, and can be given more than once
     assert main([str(b.path), base, target, "-p", "nothing_here", "-o", str(out)]) == 0
     assert "No differences" in out.read_text(encoding="utf-8")
     assert main([str(b.path), base, target, "-p", "nothing", "-p", "doc.md", "-o", str(out)]) == 0
@@ -35,15 +31,12 @@ def test_cli_worktree_index_and_untracked(two_commits, tmp_path, capsys):
     html = out.read_text(encoding="utf-8")
     assert "working tree" in html and "disk" in html and "u.txt" in html
     assert f"{target[:7]}..working tree" in capsys.readouterr().out
+    # a re-indented line staged: the index differs, but not when -w ignores it
+    b.write("doc.md", "Hello there.\n  Second line.\n<script>x</script>\n")
+    assert main([str(b.path), "HEAD", "--cached", "-o", str(out)]) == 0
+    assert f"{target[:7]}..index: 1 file, +1 -1" in capsys.readouterr().out
     assert main([str(b.path), "HEAD", "--cached", "-w", "-o", str(out)]) == 0
-
-
-def test_cli_files(tmp_path, capsys):
-    (tmp_path / "a.md").write_text("one\n")
-    (tmp_path / "b.md").write_text("two\n")
-    out = tmp_path / "r.html"
-    assert main(["--files", str(tmp_path / "a.md"), str(tmp_path / "b.md"), "-o", str(out)]) == 0
-    assert "a.md..b.md" in capsys.readouterr().out
+    assert "index: 1 file, +0 -0" in capsys.readouterr().out
 
 
 def test_cli_errors(two_commits, tmp_path, capsys):
@@ -67,25 +60,45 @@ def test_cli_errors(two_commits, tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
-    "extra",
+    "args",
     [
-        ["HEAD", "HEAD", "--align", "center"],
-        ["HEAD", "HEAD", "-U", "-1"],
-        ["HEAD", "HEAD", "--move-similarity", "0"],
-        ["HEAD", "HEAD", "--move-similarity", "1.5"],
-        ["HEAD", "HEAD", "--cached"],
-        ["HEAD", "--cached", "--untracked"],
+        [".", "HEAD", "HEAD", "--align", "center"],
+        [".", "HEAD", "HEAD", "-U", "-1"],
+        [".", "HEAD", "HEAD", "--move-similarity", "0"],
+        [".", "HEAD", "HEAD", "--move-similarity", "1.5"],
+        [".", "HEAD", "HEAD", "--encoding", "no-such-codec"],
+        [".", "HEAD", "HEAD", "--cached"],
+        [".", "HEAD", "--cached", "--untracked"],
         ["--files", "HEAD", "b", "c"],
         ["--files", "a", "b", "--cached"],
         ["--files", "a", "b", "--untracked"],
+        ["--global"],
+        ["--setup-git", "a", "b"],
+        ["--setup-git", "--global", "a"],
+        ["--to-markdown", "x.docx", "a"],
+        ["a"],
     ],
 )
-def test_cli_rejects_bad_arguments(extra):
-    with pytest.raises(SystemExit):
-        main([".", *extra] if extra[0] != "--files" else extra)
+def test_cli_rejects_bad_arguments(args):
+    """Arguments that do not go together stop argparse, with its exit code 2."""
+    with pytest.raises(SystemExit) as stop:
+        main(args)
+    assert stop.value.code == 2
 
 
 def test_cli_version(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
     assert capsys.readouterr().out.startswith("prosediff ")
+
+
+def test_cli_encoding(tmp_path, capsys):
+    """A given encoding is used as it is; auto reads a Latin-1 file right."""
+    old, new, out = tmp_path / "a.txt", tmp_path / "b.txt", tmp_path / "page.html"
+    old.write_bytes("caf\xe9\n".encode("latin-1"))
+    new.write_bytes("caff\xe8\n".encode("latin-1"))
+    assert main(["--files", str(old), str(new), "-o", str(out), "--encoding", "latin-1"]) == 0
+    page = out.read_text(encoding="utf-8")
+    assert "\xe8" in page and "read as iso8859-1" in page
+    assert main(["--files", str(old), str(new), "-o", str(out)]) == 0
+    assert "read as cp1252" in out.read_text(encoding="utf-8")

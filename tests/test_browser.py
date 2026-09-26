@@ -5,8 +5,9 @@ Skipped when Playwright's Chromium is not installed
 """
 
 import pytest
+from conftest import RepoBuilder
 
-from prosediff import compare, render
+from prosediff import compare, compare_paths, render
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -24,11 +25,13 @@ def browser():
         b.close()
 
 
-@pytest.fixture
-def page_file(builder, tmp_path):
+@pytest.fixture(scope="module")
+def page_file(tmp_path_factory):
     """A page with two changes far apart in a Markdown file (so unchanged
     lines are folded between them), bold text, and a new comment between
-    them."""
+    them; built once, as no test changes it."""
+    tmp_path = tmp_path_factory.mktemp("page")
+    builder = RepoBuilder(tmp_path / "repo")
     lines = [f"Line {i} of the text." for i in range(40)]
     builder.write("doc.md", "\n".join(lines) + "\n")
     base = builder.commit("first")
@@ -96,50 +99,67 @@ def test_next_and_previous_change(page):
     assert counter.inner_text() == "2 / 3"
 
 
-def test_show_unchanged_lines(page):
+def test_unchanged_lines_and_files_open_and_close(page):
+    """A fold opens on its own; the files close and open all at once, and
+    jumping to a change opens its file."""
     hidden = page.locator("tbody[hidden]").first
     assert not hidden.is_visible()
     folds = page.locator("tbody[hidden]").count()
     page.locator(".expand").first.click()
     assert page.locator("tbody[hidden]").count() == folds - 1
     assert page.get_by_text("Line 10 of the text.").first.is_visible()
-
-
-def test_collapse_and_expand_all(page):
     page.click('[data-files="close"]')
     assert page.evaluate("[...document.querySelectorAll('details.file')].every(d => !d.open)")
-    page.keyboard.press("n")  # jumping to a change opens its file
+    page.keyboard.press("n")
     assert page.evaluate("document.querySelector('details.file').open")
     page.click('[data-files="close"]')
     page.click('[data-files="open"]')
     assert page.evaluate("[...document.querySelectorAll('details.file')].every(d => d.open)")
 
 
-def test_one_column_view_is_remembered(page):
-    page.keyboard.press("u")
-    assert "unified" in page.evaluate("document.body.className")
-    assert page.get_attribute('[data-toggle="unified"]', "aria-pressed") == "true"
+def test_views_are_remembered(page):
+    """One column (u), raw Markdown (f), tinted edits (t) and comments
+    written out (i): each switched on by its key, remembered across a
+    reload, switched off by its button."""
+    background = "e => getComputedStyle(e).backgroundImage"
+    after = "e => getComputedStyle(e, '::after').content"
+
+    def tint():
+        return page.locator("tr.replace td.right").first.evaluate(background)
+
+    def comment():
+        return page.locator(".comment").first.evaluate(after)
+
+    # the defaults: two columns, formatted, untinted, comments as markers
+    assert "unified" not in page.evaluate("document.body.className")
+    assert not page.locator(".s-syn").first.is_visible()
+    assert page.get_attribute('[data-toggle="formatted"]', "aria-pressed") == "true"
+    assert page.locator(".s-strong").first.evaluate("e => getComputedStyle(e).fontWeight") == "700"
+    untinted = tint()
+    assert comment() in ("none", "normal")
+    for key in "ufti":
+        page.keyboard.press(key)
     # an unchanged row shows its new side only
     left = page.locator("tr.equal td.left").first
     assert left.evaluate("e => getComputedStyle(e).display") == "none"
+    assert page.locator(".s-syn").first.is_visible()
+    assert tint() != untinted
+    # the tint stops above the space between paragraphs
+    cell = page.locator("tr.replace td.right").first
+    assert "calc" in cell.evaluate("e => getComputedStyle(e).backgroundSize")
+    assert "Anna" in comment() and "Old remark." in comment()
+    for name in ("unified", "tint", "inline"):
+        assert page.get_attribute(f'[data-toggle="{name}"]', "aria-pressed") == "true"
     page.reload()
     assert "unified" in page.evaluate("document.body.className")
-    page.click('[data-toggle="unified"]')
-    assert "unified" not in page.evaluate("document.body.className")
-
-
-def test_formatted_view_is_on_by_default(page):
-    # the Markdown syntax hidden, what it marks styled
-    syntax = page.locator(".s-syn").first
-    assert not syntax.is_visible()
-    assert page.get_attribute('[data-toggle="formatted"]', "aria-pressed") == "true"
-    bold = page.locator(".s-strong").first
-    assert bold.evaluate("e => getComputedStyle(e).fontWeight") == "700"
-    # raw on request, remembered
-    page.keyboard.press("f")
-    assert syntax.is_visible()
-    page.reload()
     assert page.locator(".s-syn").first.is_visible()
+    assert tint() != untinted
+    assert "Anna" in comment()
+    for name in ("unified", "tint", "inline"):
+        page.click(f'[data-toggle="{name}"]')
+    assert "unified" not in page.evaluate("document.body.className")
+    assert tint() == untinted
+    assert comment() in ("none", "normal")
 
 
 def test_toolbar_help_tooltips(page):
@@ -149,25 +169,10 @@ def test_toolbar_help_tooltips(page):
     assert tip.is_visible()
     assert tip.locator("b").inner_text() == "Formatted"
     assert tip.locator(".when").inner_text() == "key: f"
-    page.hover('[data-tips="changes"]')  # shown even with change tooltips off
-    assert tip.locator("b").inner_text() == "Change tooltips"
+    page.hover('[data-tips="comments"]')
+    assert tip.locator("b").inner_text() == "Comment tooltips"
     page.mouse.move(0, 0)
     assert not tip.is_visible()
-
-
-def test_edited_lines_untinted_unless_asked(page):
-    cell = page.locator("tr.replace td.right").first
-    background = "e => getComputedStyle(e).backgroundImage"
-    untinted = cell.evaluate(background)
-    page.keyboard.press("t")
-    assert cell.evaluate(background) != untinted
-    # the tint stops above the space between paragraphs
-    assert "calc" in cell.evaluate("e => getComputedStyle(e).backgroundSize")
-    assert page.get_attribute('[data-toggle="tint"]', "aria-pressed") == "true"
-    page.reload()
-    assert page.locator("tr.replace td.right").first.evaluate(background) != untinted
-    page.click('[data-toggle="tint"]')
-    assert page.locator("tr.replace td.right").first.evaluate(background) == untinted
 
 
 def test_space_between_paragraphs(page):
@@ -199,13 +204,6 @@ def test_space_between_paragraphs(page):
     assert page.locator("tr.current").count() == 1
 
 
-def test_colour_blind_palette(page):
-    before = page.evaluate("getComputedStyle(document.body).getPropertyValue('--ins-line')")
-    page.keyboard.press("c")
-    after = page.evaluate("getComputedStyle(document.body).getPropertyValue('--ins-line')")
-    assert before.strip() != after.strip()
-
-
 def test_comment_link_goes_to_its_row(page):
     page.locator(".comments-panel a").first.click()
     # the page reacts to the hash change, which the browser fires afterwards
@@ -216,6 +214,8 @@ def test_comment_link_goes_to_its_row(page):
 
 
 def test_comment_tooltip(page):
+    """Hovering a comment shows it; hovering a change, or the row it is in,
+    shows nothing; the comment tooltips can be switched off, remembered."""
     marker = page.locator(".comment").first
     marker.hover()
     tip = page.locator("#tip")
@@ -232,60 +232,37 @@ def test_comment_tooltip(page):
     assert tops == sorted(tops) and len(set(tops)) == 3
     page.mouse.move(0, 0)
     assert not tip.is_visible()
-
-
-def test_one_tooltip_at_a_time(browser, builder, tmp_path):
-    """A comment inside a changed word, on a line with many changes: hovering
-    the comment shows the comment only, not the change nor the line's list."""
-    note = '[Why?]{.comment-start id="1" author="Anna" date="2026-09-23T10:15:00Z"}'
-    words = [f"w{i}" for i in range(30)]
-    builder.write("doc.md", "This " + " ".join(words) + " end.\n")
-    base = builder.commit("first")
-    changed = [f"W{i}" if i % 2 else w for i, w in enumerate(words)]
-    builder.write("doc.md", f"{note}These " + " ".join(changed) + " end.\n")
-    target = builder.commit("second")
-    out = tmp_path / "page.html"
-    out.write_text(render(compare(builder.path, base, target)), encoding="utf-8")
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(out.as_uri())
-    tip = page.locator("#tip")
-    # no browser tooltip is left in the tables: they would overlap ours
+    # changes carry no tooltip, neither on the word nor on the line
     assert page.locator("table [title]").count() == 0
-    # the change tooltips are off by default: a changed word shows nothing
-    assert not page.is_checked('[data-tips="changes"]')
-    page.locator("ins").nth(3).hover()
+    page.locator("ins").first.hover()
     assert not tip.is_visible()
-    page.check('[data-tips="changes"]')
-    page.locator(".comment").first.hover()
-    assert tip.locator("b").inner_text() == "Anna" and "Why?" in tip.inner_text()
-    assert "changed" not in tip.inner_text()
-    # a changed word shows its own change
-    page.locator("ins").nth(3).hover()
-    assert tip.inner_text().startswith("changed")
-    assert tip.locator(".line").count() == 1
-    # the line lists its changes, at most 12, then how many more
-    cell = page.locator("td.code.right").first
-    box = cell.bounding_box()
+    box = page.locator("tr.replace td.code.right").first.bounding_box()
     page.mouse.move(box["x"] + box["width"] - 3, box["y"] + box["height"] - 3)
-    assert tip.locator(".line").count() == 12
-    assert tip.locator(".more").inner_text().startswith("… and ")
-
-    # the change tooltips switched off: changes show nothing, comments still do
-    page.uncheck('[data-tips="changes"]')
-    page.locator("ins").nth(3).hover()
     assert not tip.is_visible()
-    page.locator(".comment").first.hover()
-    assert tip.locator("b").inner_text() == "Anna"
-    # the comment tooltips off too, after a reload: the choice is remembered
     page.uncheck('[data-tips="comments"]')
     page.reload()
-    assert not page.is_checked('[data-tips="changes"]')
     assert not page.is_checked('[data-tips="comments"]')
     page.locator(".comment").first.hover()
     assert not tip.is_visible()
-    # changes back on: a comment inside a changed word shows the change
-    page.check('[data-tips="changes"]')
-    page.locator(".comment").first.hover()
-    assert tip.is_visible() and tip.inner_text().startswith(("changed", "added"))
+
+
+def test_tracked_change_tooltip(browser, tmp_path):
+    """A tracked change kept as markup says who made it and when."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("The cat sat on the mat.\n", encoding="utf-8")
+    new.write_text(
+        'The cat [slept]{.insertion author="Riccardo" date="2026-09-25T10:15:00Z"} on the mat.\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "page.html"
+    out.write_text(render(compare_paths(old, new)), encoding="utf-8")
+    context = browser.new_context()
+    page = context.new_page()
+    page.goto(out.as_uri())
+    tracked = page.locator(".s-tc-ins").first
+    assert "underline" in tracked.evaluate("e => getComputedStyle(e).textDecorationLine")
+    tracked.hover()
+    tip = page.locator("#tip")
+    assert tip.locator("b").inner_text() == "Tracked insertion"
+    assert "by Riccardo" in tip.inner_text() and "2026-09-25 10:15" in tip.inner_text()
     context.close()

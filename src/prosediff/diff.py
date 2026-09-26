@@ -10,6 +10,7 @@ or lightly edited, is shown as moved.
 """
 
 import base64
+import codecs
 import difflib
 import re
 import subprocess
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 import git
+from charset_normalizer import from_bytes
 from markupsafe import Markup
 from rapidfuzz.distance import Indel
 
@@ -34,6 +36,7 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
     plain,
     show_comments,
 )
+from prosediff.language import AUTO, normalize_language, resolve_language
 from prosediff.mdstyle import md_styles, styled
 from prosediff.sentences import split_sentences
 from prosediff.sources import (
@@ -48,6 +51,11 @@ from prosediff.sources import (
 # How many leading bytes are inspected to decide whether a file is binary,
 # as git itself does.
 BINARY_SNIFF = 8000
+# The legacy encoding a file is read in when others fit it as well.
+WESTERN = "cp1252"
+# The encoding option that guesses it; C1 controls betray a text misread.
+AUTO_ENCODING = "auto"
+C1_CONTROLS = re.compile("[\x80-\x9f]")
 # Changed words, spaces and punctuation are compared as separate tokens, so a
 # changed word is highlighted alone and not the whole run it sits in.
 TOKEN = re.compile(r"\w+|\s+|[^\w\s]", re.UNICODE)
@@ -197,6 +205,10 @@ class FileDiff:
     # How the file was read, when not as text (e.g. converted from Word).
     note: str = ""
     markdown: bool = False
+    # The language of its prose (a BCP 47 tag, e.g. "it"), when known, and
+    # whether it was guessed from the text.
+    language: str = ""
+    language_guessed: bool = False
 
     @property
     def path(self) -> str:
@@ -297,6 +309,61 @@ def blob_bytes(blob: git.Blob | None) -> bytes:
     return b"" if blob is None else blob.data_stream.read()
 
 
+def check_encoding(encoding: str) -> str:
+    """The encoding option in a canonical form: "auto", or a codec's name;
+    ValueError when Python knows no such codec."""
+    encoding = (encoding or AUTO_ENCODING).strip().lower()
+    if encoding == AUTO_ENCODING:
+        return encoding
+    try:
+        return codecs.lookup(encoding).name
+    except LookupError:
+        raise ValueError(
+            f"unknown encoding: {encoding!r} (e.g. utf-8, cp1252, latin-1, or auto)"
+        ) from None
+
+
+def decode_text(data: bytes, encoding: str = AUTO_ENCODING) -> tuple[str, str]:
+    """The text of a file, and the encoding it was read in ("" for UTF-8).
+
+    Given an encoding, the file is read in it, a byte it cannot read standing
+    in as U+FFFD. With "auto", UTF-8 is assumed, unless the file cannot be
+    read in it, or reads with C1 control characters (U+0080 to U+009F),
+    which text never holds. Such a file is read in the encoding charset-normalizer
+    finds likeliest. UTF-16 and UTF-32 need their byte-order mark, since a
+    few bytes of Latin text otherwise read as UTF-16 too. When encodings fit
+    equally well (a short Italian text is as good in Central European
+    cp1250, "caffč", as in cp1252; "café" as good in Urdu), Windows-1252
+    wins if it reads the text as one of them does: the usual encoding of
+    Western European text, and a superset of Latin-1. (charset-normalizer
+    lists one of the encodings that read a text alike, not necessarily it.)
+    """
+    if encoding != AUTO_ENCODING:
+        text = data.decode(encoding, errors="replace")
+        return text, "" if codecs.lookup(encoding).name == "utf-8" else encoding
+    try:
+        text = data.decode("utf-8")
+        if not C1_CONTROLS.search(text):
+            return text, ""
+    except UnicodeDecodeError:
+        pass
+    try:
+        western = data.decode(WESTERN)
+    except UnicodeDecodeError:
+        western = None
+    matches = list(from_bytes(data))
+    fits = [m for m in matches if m.bom or not m.encoding.startswith(("utf_16", "utf_32"))]
+    if not fits:
+        return data.decode(WESTERN, errors="replace"), WESTERN
+    best = fits[0]
+    tied = (m for m in matches if (m.chaos, m.coherence) == (best.chaos, best.coherence))
+    if western is not None and any(
+        str(m) == western or WESTERN in m.could_be_from_charset for m in tied
+    ):
+        return western, WESTERN
+    return str(best), best.encoding
+
+
 def split_lines(text: str) -> list[str]:
     """Lines as git counts them: split on LF only (CRLF counts as LF)."""
     lines = text.replace("\r\n", "\n").split("\n")
@@ -382,17 +449,16 @@ class WordDiff:
 
     left: Markup
     right: Markup
-    # The changes in plain English, in order; each <del> and <ins> carries
-    # its own as a tooltip (title).
+    # The changes in plain English, in order.
     changes: list[str]
     words_added: int
     words_removed: int
 
 
-DEL = Markup('<del title="{}">{}</del>')
-INS = Markup('<ins title="{}">{}</ins>')
-PARTIAL_DEL = Markup('<del class="partial" title="{}">{}</del>')
-PARTIAL_INS = Markup('<ins class="partial" title="{}">{}</ins>')
+DEL = Markup("<del>{}</del>")
+INS = Markup("<ins>{}</ins>")
+PARTIAL_DEL = Markup('<del class="partial">{}</del>')
+PARTIAL_INS = Markup('<ins class="partial">{}</ins>')
 
 
 def _offsets(tokens: list[str]) -> list[int]:
@@ -466,8 +532,7 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
             continue
         removed += len(WORD.findall(old_part))
         added += len(WORD.findall(new_part))
-        change = describe(old_part, new_part)
-        changes.append(change)
+        changes.append(describe(old_part, new_part))
         marks = None
         if (
             op == "replace"
@@ -478,13 +543,13 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
         ):
             marks = char_marks(old_part, new_part, old_st, new_st)
         if marks:
-            left.append(PARTIAL_DEL.format(change, marks[0]))
-            right.append(PARTIAL_INS.format(change, marks[1]))
+            left.append(PARTIAL_DEL.format(marks[0]))
+            right.append(PARTIAL_INS.format(marks[1]))
             continue
         if old_part:
-            left.append(DEL.format(change, styled(old_part, old_st)))
+            left.append(DEL.format(styled(old_part, old_st)))
         if new_part:
-            right.append(INS.format(change, styled(new_part, new_st)))
+            right.append(INS.format(styled(new_part, new_st)))
     return WordDiff(Markup("").join(left), Markup("").join(right), changes, added, removed)
 
 
@@ -962,7 +1027,8 @@ def build_files(
     docx_changes: str,
     move_similarity: float = MOVE_SIMILARITY,
     by_sentence: bool = False,
-    sentence_language: str = "en",
+    language: str = AUTO,
+    encoding: str = AUTO_ENCODING,
 ) -> list[CommentEntry]:
     """Fill in the rows of every file; returns the comments for the panel.
 
@@ -1006,8 +1072,10 @@ def build_files(
                 fd.new_image = image_uri(fd.new_path, new_bytes)
             continue
         fd.markdown = fd.markdown or fd.path.lower().endswith(".md")
-        old_text = old_bytes.decode("utf-8", errors="replace")
-        new_text = new_bytes.decode("utf-8", errors="replace")
+        old_text, old_encoding = decode_text(old_bytes, encoding)
+        new_text, new_encoding = decode_text(new_bytes, encoding)
+        if read_as := " and ".join(dict.fromkeys(e for e in (old_encoding, new_encoding) if e)):
+            fd.note = "; ".join(filter(None, (fd.note, f"read as {read_as}")))
         # Folded before filtering, so a filter cannot cut a comment in two.
         if fold and fd.markdown:
             old_text = fold_comments(old_text, comments, empty_comments)
@@ -1017,11 +1085,16 @@ def build_files(
                 old_text = run_filter(md_filter, old_text, fd.path)
             if new_text:
                 new_text = run_filter(md_filter, new_text, fd.path)
+        if fd.markdown:
+            # One language for both sides: the new one's, unless it is gone.
+            known, fd.language_guessed = resolve_language(language, new_text or old_text)
+            fd.language = known or ""
         old_lines, new_lines = split_lines(old_text), split_lines(new_text)
         old_labels = new_labels = None
         if by_sentence and fd.markdown:
-            old_lines, old_labels = split_sentences(old_lines, sentence_language)
-            new_lines, new_labels = split_sentences(new_lines, sentence_language)
+            rules = fd.language or "en"
+            old_lines, old_labels = split_sentences(old_lines, rules)
+            new_lines, new_labels = split_sentences(new_lines, rules)
         if fd.markdown:
             old_lines, old_labels = without_blank_lines(old_lines, old_labels)
             new_lines, new_labels = without_blank_lines(new_lines, new_labels)
@@ -1153,7 +1226,8 @@ def compare(
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
     by_sentence: bool = False,
-    sentence_language: str = "en",
+    language: str = AUTO,
+    encoding: str = AUTO_ENCODING,
 ) -> Comparison:
     """Compare two versions of the repository at repo_path.
 
@@ -1178,11 +1252,17 @@ def compare(
     move_similarity is how alike, from 0 to 1, an edited line must be to
     where it reappears to count as moved (1: only lines moved unchanged).
     by_sentence compares the prose of Markdown files (and Word documents)
-    sentence by sentence instead of line by line, split by the rules of
-    sentence_language; each sentence is labelled with its line and its place
-    in it ("12.3").
+    sentence by sentence instead of line by line; each sentence is labelled
+    with its line and its place in it ("12.3"). language is that of their
+    prose (en, it, ...), whose rules split sentences and hyphenate lines, or
+    "auto" (the default) to guess it from each file's text. encoding is that
+    of the text files (Word and OpenDocument files carry their own): a
+    codec's name, or "auto" (the default), UTF-8 unless the file shows it is
+    not, then guessed (decode_text).
     """
     check_move_similarity(move_similarity)
+    language = normalize_language(language)
+    encoding = check_encoding(encoding)
     if cached and target is not None:
         raise ValueError("cached compares a commit with the index: give no target")
     if untracked and (target is not None or cached):
@@ -1228,7 +1308,8 @@ def compare(
         docx_changes=docx_changes,
         move_similarity=move_similarity,
         by_sentence=by_sentence,
-        sentence_language=sentence_language,
+        language=language,
+        encoding=encoding,
     )
     files = sorted((fd for fd, _, _ in entries), key=lambda f: f.path)
 
@@ -1281,7 +1362,8 @@ def compare_paths(
     docx_changes: str = "accept",
     move_similarity: float = MOVE_SIMILARITY,
     by_sentence: bool = False,
-    sentence_language: str = "en",
+    language: str = AUTO,
+    encoding: str = AUTO_ENCODING,
 ) -> Comparison:
     """Compare two files, or two folders, outside git.
 
@@ -1292,6 +1374,8 @@ def compare_paths(
     compare().
     """
     check_move_similarity(move_similarity)
+    language = normalize_language(language)
+    encoding = check_encoding(encoding)
     old, new = Path(old), Path(new)
     entries: list[tuple[FileDiff, bytes, bytes]] = []
     if old.is_file() and new.is_file():
@@ -1335,7 +1419,8 @@ def compare_paths(
         docx_changes=docx_changes,
         move_similarity=move_similarity,
         by_sentence=by_sentence,
-        sentence_language=sentence_language,
+        language=language,
+        encoding=encoding,
     )
     return Comparison(
         repo_name=old.name if old.name == new.name else f"{old.name} → {new.name}",

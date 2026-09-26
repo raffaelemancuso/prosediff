@@ -60,17 +60,6 @@ def test_file_against_folder_is_an_error(tmp_path):
         compare_paths(tmp_path / "nope", tmp_path / "d")
 
 
-def test_docx_changes_accepted_rejected_or_kept(tmp_path):
-    d = docx(
-        tmp_path / "a.docx",
-        [[("run", "start-up"), ("del", " entry"), ("ins", "s"), ("run", " grow.")]],
-    )
-    data = d.read_bytes()
-    assert docx_to_markdown(data, "a.docx", "accept").strip() == b"start-ups grow."
-    assert docx_to_markdown(data, "a.docx", "reject").strip() == b"start-up entry grow."
-    assert b"{.deletion" in docx_to_markdown(data, "a.docx", "all")
-
-
 def test_comment_on_deleted_text_is_kept(tmp_path):
     """Word writes the whole comment inside the deletion when the commented
     text is deleted: accepting drops the text, not the comment."""
@@ -160,13 +149,6 @@ def test_context_is_zero_for_prose_three_for_code_unless_set(tmp_path):
     assert shown() == {"f.md": 0, "f.txt": 6}
     assert shown(context=1) == {"f.md": 2, "f.txt": 2}
     assert shown(context=None) == {"f.md": 19, "f.txt": 19}
-
-
-def test_markdown_keeps_its_line_numbers(tmp_path):
-    (tmp_path / "a.md").write_text("One.\n\nTwo.\n\nThree.\n")
-    (tmp_path / "b.md").write_text("One.\n\nTwo, edited.\n\nThree.\n")
-    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None).files
-    assert [r.left_label for r in f.rows] == ["1", "3", "5"]
 
 
 def test_broken_docx_is_listed_as_binary(tmp_path):

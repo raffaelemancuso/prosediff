@@ -8,7 +8,7 @@ import sys
 from helpers import docx
 
 from prosediff import compare, render
-from prosediff.diff import MAX_IMAGE_BYTES, image_uri, is_binary
+from prosediff.diff import MAX_IMAGE_BYTES, image_uri
 
 PNG_1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -16,11 +16,6 @@ PNG_1 = base64.b64decode(
 
 
 PNG_2 = PNG_1 + b"\x00trailer"
-
-
-def test_is_binary():
-    assert is_binary(b"abc\0def")
-    assert not is_binary("città".encode())
 
 
 def test_compare_modified_added_deleted(builder):
@@ -59,18 +54,9 @@ def test_compare_detects_rename(builder):
     assert f.rows == []
 
 
-def test_compare_binary(builder):
-    builder.write("img.bin", b"\x89PNG\0\0\x01")
-    base = builder.commit("first")
-    builder.write("img.bin", b"\x89PNG\0\0\x02")
-    target = builder.commit("second")
-
-    (f,) = compare(builder.path, base, target).files
-    assert f.binary
-    assert f.rows == []
-
-
-def test_compare_path_filter(builder):
+def test_compare_path_filter_refs_and_subfolder(builder):
+    """paths restricts the comparison; refs name commits; a subfolder finds
+    its repository and compares all of it."""
     builder.write("a/one.txt", "1\n")
     builder.write("b/two.txt", "2\n")
     base = builder.commit("first")
@@ -80,25 +66,8 @@ def test_compare_path_filter(builder):
 
     c = compare(builder.path, base, target, paths=["a"])
     assert [f.path for f in c.files] == ["a/one.txt"]
-
-
-def test_compare_no_differences(builder):
-    builder.write("f.txt", "x\n")
-    sha = builder.commit("only")
-    c = compare(builder.path, sha, sha)
-    assert c.files == []
-    html = render(c)
-    assert "No differences between the two sides." in html and "<table" not in html
-    assert compare(builder.path, "HEAD").files == []  # a clean working tree
-
-
-def test_compare_accepts_refs_and_subfolder(builder):
-    builder.write("sub/f.txt", "x\n")
-    builder.commit("first")
-    builder.write("sub/f.txt", "y\n")
-    builder.commit("second")
-    c = compare(builder.path / "sub", "HEAD~1", "HEAD")
-    assert [f.path for f in c.files] == ["sub/f.txt"]
+    c = compare(builder.path / "a", "HEAD~1", "HEAD")
+    assert [f.path for f in c.files] == ["a/one.txt", "b/two.txt"]
 
 
 def test_compare_non_utf8_and_crlf(builder):
@@ -109,7 +78,10 @@ def test_compare_non_utf8_and_crlf(builder):
     builder.write("w.txt", "a\r\nc\r\n")
     target = builder.commit("second")
     latin1, crlf = compare(builder.path, base, target).files
-    assert latin1.rows  # no crash
+    # not UTF-8: read in the likeliest encoding, and said so
+    assert "caf" in latin1.rows[0].left and "\xe9" in latin1.rows[0].left
+    assert "\xe8" in latin1.rows[0].right
+    assert latin1.note == "read as cp1252"
     assert (crlf.additions, crlf.deletions) == (1, 1)
     assert "\r" not in "".join(r.left + r.right for r in crlf.rows)
 
@@ -167,11 +139,15 @@ def test_compare_cached(builder):
     assert "disk" in c.files[0].rows[0].right
 
 
-def test_compare_untracked(builder):
+def test_compare_untracked_and_no_differences(builder):
     builder.write("f.txt", "one\n")
     (builder.path / ".gitignore").write_text("*.log\n")
     builder.repo.index.add([".gitignore"])
-    builder.commit("first")
+    sha = builder.commit("first")
+    c = compare(builder.path, sha, sha)
+    assert c.files == []
+    html = render(c)
+    assert "No differences between the two sides." in html and "<table" not in html
     (builder.path / "new.txt").write_text("hello\n")
     (builder.path / "debug.log").write_text("ignored\n")
     (builder.path / "sub").mkdir()
@@ -204,19 +180,22 @@ def test_image_uri():
     assert image_uri("a.png", b"x" * (MAX_IMAGE_BYTES + 1)) is None
 
 
-def test_images_are_shown_side_by_side(builder):
+def test_images_side_by_side_other_binaries_not_shown(builder):
     builder.write("pic.png", PNG_1)
+    builder.write("img.bin", b"\x89PNG\0\0\x01")
     base = builder.commit("first")
     builder.write("pic.png", PNG_2)
     builder.write("added.png", PNG_1)
+    builder.write("img.bin", b"\x89PNG\0\0\x02")
     target = builder.commit("second")
     c = compare(builder.path, base, target)
-    added, changed = c.files
+    added, other, changed = c.files
     assert added.old_image is None and added.new_image
     assert changed.binary and changed.old_image and changed.new_image
+    assert other.binary and other.rows == [] and other.old_image is None
     html = render(c)
     assert html.count('<img src="data:image/png;base64,') == 3
-    assert "Binary file, not shown" not in html
+    assert html.count("Binary file, not shown") == 1
 
 
 def test_commits_in_between(builder, monkeypatch):
@@ -235,15 +214,9 @@ def test_commits_in_between(builder, monkeypatch):
     c = compare(builder.path, shas[0], shas[4])
     assert len(c.commits) == 2 and c.commits_total == 4
     assert "and 2 older" in render(c)
-
-
-def test_commits_in_between_worktree_up_to_head(builder):
-    builder.write("f.txt", "0\n")
-    base = builder.commit("first")
-    builder.write("f.txt", "1\n")
-    builder.commit("second")
-    c = compare(builder.path, base)
-    assert [r.subject for r in c.commits] == ["second"]
+    # against the working tree: the commits up to HEAD
+    c = compare(builder.path, shas[3])
+    assert [r.subject for r in c.commits] == ["commit 4"]
     assert "up to HEAD" in render(c)
 
 

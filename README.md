@@ -31,7 +31,7 @@ changes) or working tree. Paragraphs wrap and are numbered, changes are
 described in plain English, and the new and removed comments of Word
 documents are shown and listed.
 
-![prosediff in use: a comment's tooltip, the changes one after the other, one column instead of two, the colour-blind colours](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/demo.gif)
+![prosediff in use: a comment's tooltip, the changes one after the other, one column instead of two](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/demo.gif)
 
 ## Why prosediff
 
@@ -92,7 +92,12 @@ prosediff --setup-git [REPO | --global]
 prosediff --to-markdown FILE
 ```
 
-(from a checkout: `uv run prosediff ...`; installed: `uv tool install .`)
+(installed: `uv tool install prosediff`; from a checkout: `uv run prosediff ...`)
+
+OpenDocument texts (.odt) need an optional dependency, odfdo: install
+`"prosediff[odt]"` instead (`uv tool install "prosediff[odt]"`, or
+`pip install "prosediff[odt]"`). Without it, an .odt file is listed as not
+read, with that advice.
 
 | Argument / option          | Meaning                                                       |
 |----------------------------|---------------------------------------------------------------|
@@ -100,7 +105,7 @@ prosediff --to-markdown FILE
 | `BASE`                     | the older commit: hash, branch, tag, `HEAD~2`, ...            |
 | `TARGET`                   | the newer commit; without it, BASE is compared with the working tree (tracked files), as `git diff BASE` does |
 | `--files OLD NEW`          | compare two files (whatever their names) or two folders, outside git |
-| `--cached`, `--staged`     | compare BASE with the index instead, as `git diff --cached BASE` does |
+| `--cached`                 | compare BASE with the index instead, as `git diff --cached BASE` does |
 | `--untracked`              | with the working tree, also show the untracked files `.gitignore` does not exclude |
 | `-w`, `--ignore-whitespace`| compare lines ignoring whitespace, as `git diff -w`           |
 | `-p`, `--path PATH`        | restrict the diff to this file or folder (repeatable)         |
@@ -111,10 +116,11 @@ prosediff --to-markdown FILE
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
 | `--no-fold-comments`       | compare the comment markup of Markdown and Word documents as text; by default each comment added or removed since the base is shown as a 💬 marker (🆕 when added), with the author, the comment and its date on hover, and listed in a panel, while the comments both sides have are left out |
 | `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
-| `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or show them as markup |
+| `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or keep them all, shown as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
 | `--by-sentence`            | compare the prose of Markdown files and Word documents sentence by sentence instead of paragraph by paragraph: a sentence moved between paragraphs is recognised, and each sentence is labelled with its line and its place in it (`12.3`) |
-| `--sentence-language CODE` | the language whose rules split sentences (default `en`; about forty are known, e.g. `it`, `de`, `fr`; others fall back to a simple rule) |
+| `--language CODE`          | the language of the prose, e.g. `en`, `it`, `de`, `fr`: its rules split sentences with `--by-sentence` (about forty languages are known; others fall back to a simple rule), and the page hyphenates wrapped lines by it. Default `auto`: guessed from each file's text (py3langid); a file too short or too mixed to tell is split by English rules and not hyphenated |
+| `--encoding NAME`          | the encoding of text and Markdown files, e.g. `utf-8`, `cp1252`, `latin-1` (Word and OpenDocument files carry their own). Default `auto`: UTF-8, unless a file cannot be read as UTF-8 or reads with control characters; then the encoding is guessed with [charset-normalizer](https://pypi.org/project/charset-normalizer/), Windows-1252 preferred among equally likely ones, and the file header says which was used. In the GUI, the "Text encoding" box |
 | `--move-similarity X`      | how alike, above 0 and at most 1, an edited line must be to where it reappears to count as moved (default 0.8; 1: only lines moved unchanged) |
 | `--open`                   | open the page in the browser once it is written |
 | `--setup-git`              | set git up to show Word and OpenDocument files as text and to open prosediff pages from `git difftool` (see below), for the repository REPO (default: the current folder) |
@@ -170,6 +176,8 @@ To have it at hand, install it once:
 uv tool install --editable C:\path\to\prosediff
 ```
 
+(`--editable "C:\path\to\prosediff[odt]"` to read OpenDocument texts too.)
+
 This puts `prosediff` and `prosediff-gui` on `PATH` (editable: they always run
 the project's current code; `uv tool uninstall prosediff` removes them). On
 Windows, `prosediff-gui.exe` is a windowed program: double-clicked, pinned,
@@ -188,9 +196,10 @@ console for a moment.
   commit. Optionally, untracked files and a list of paths (separated by `;`).
 - **Files or folders**: two files (whatever their names, Word documents
   included) or two folders.
-- **Options**: besides those below, comparing sentence by sentence (with the
-  language of the text) and the similarity at which an edited line counts as
-  moved.
+- **Options**: besides those below, comparing sentence by sentence, the
+  similarity at which an edited line counts as moved, and the document
+  language (`auto`, guessed from each file, or a code such as `it`), which
+  splits sentences and hyphenates lines.
 
 Below, the options that matter when reading a diff (comment markers, Word
 tracked changes, alignment, context lines or whole files, whitespace) and
@@ -221,9 +230,7 @@ the next time (`%APPDATA%\prosediff\gui.json`).
   "show N unchanged lines" link that reveals them.
 - Changed words highlighted within changed lines; a word changed into a
   similar one ("repeat" to "repeated") has only its changed letters
-  highlighted. Hovering a change shows it in plain English (`changed
-  "repeat" to "repeated"`, `added "Furthermore,"`), hovering a changed line
-  lists all of its changes.
+  highlighted.
 - A removed line that reappears elsewhere in the file (at least 20 non-space
   characters) is shown as moved, in its own colour, with "moved to line N" /
   "moved from line N": as it was (spacing aside), or lightly edited (at
@@ -236,22 +243,28 @@ the next time (`%APPDATA%\prosediff\gui.json`).
   of two (each changed line shows its old version above its new one); `f` for
   Markdown formatted, on by default, or raw (formatted: the syntax hidden,
   emphasis, headings, links and citations styled, prose in a proportional
-  font); `c` for colour-blind
-  colours (orange and blue instead of red and green); `t` to tint the whole
+  font); `i` for comments inline, each written out after its marker (its
+  author and text), as on paper; `t` to tint the whole
   of an edited line, as most diff tools do (by default only its changed
   words are coloured, and its gutter; the tint stops short of the space
   between paragraphs); a spacing stepper, − and + either side of the value
   (or `[` and `]`, or the arrow keys on the value, an ARIA spinbutton), for
   less or more space between the paragraphs of Markdown and
-  Word documents; and two checkboxes for the comment tooltips (on by default)
-  and the change tooltips (off by default; with both on, a comment inside a
-  changed word shows the comment, and with only the change ones on, the change).
-  The browser remembers the views, the spacing and the checkboxes.
+  Word documents; and a checkbox for the comment tooltips (on by default).
+  The browser remembers the views, the spacing and the checkbox.
+- The prose of Markdown files and Word documents is hyphenated by the rules
+  of its language (`--language`, guessed from each file's text by default):
+  soft hyphens placed by [pyphen](https://pypi.org/project/Pyphen/), so every
+  browser breaks words the same way, on screen and on paper, without
+  dictionaries of its own; copying text leaves them behind.
 - Printing (or saving as PDF from the browser's Print dialog) opens every
   file, drops the toolbar and buttons, keeps the colours (the light ones,
-  even from a browser in dark mode) and does not split a line across pages.
-  What the screen shows on hover is written out: each comment's author and
-  text after its marker, and where a moved line went. A file running over
+  even from a browser in dark mode), lets a long paragraph continue on the
+  next page (never leaving a lone line either side) rather than leave the
+  rest of a page blank, and narrows the line-number gutters so the text
+  columns fit a portrait page. What the screen shows on hover is written
+  out: each comment's author and text after its marker, and where a moved
+  line went. A file running over
   several pages repeats its column headings (its name, old and new) at the
   top of each, and folded unchanged lines print as a quiet "⋯ N unchanged
   lines".

@@ -10,36 +10,24 @@ MOVED = "This sentence travels to the end of the file."
 
 
 def test_render_side_by_side(two_commits):
-    """A self-contained page, its content and commit subjects escaped."""
+    """A self-contained page, its content and commit subjects escaped, the
+    changes without tooltips (the highlighting says it), and a footer that
+    names the program."""
     b, base, target = two_commits
     html = render(compare(b.path, base, target))
     assert html.startswith("<!DOCTYPE html>")
     assert '<tr class="replace' in html
-    assert ">world</del>" in html and ">there</ins>" in html
+    assert "<ins>there</ins>" in html and "<del>world</del>" in html
+    assert '<td class="code right">' in html
+    tables = re.findall(r"<table\b.*?</table>", html, re.S)
+    assert tables and not any("title=" in t for t in tables)
     assert 'href="#file-doc-md"' in html and 'id="file-doc-md"' in html
     assert not re.search(r'<(script|link)\b[^>]*(src|href)="http', html)
     assert "<script>x</script>" not in html
     assert "&lt;script&gt;x&lt;/script&gt;" in html
     assert "first &lt;draft&gt;" in html
-
-
-def test_render_credits_prosediff(two_commits):
-    """The footer names the program, linking to its repository."""
-    b, base, target = two_commits
-    html = render(compare(b.path, base, target))
     footer = re.search(r"<footer>(.*?)</footer>", html, re.S).group(1)
     assert 'by <a href="https://github.com/raffaelemancuso/prosediff">prosediff</a>' in footer
-
-
-def test_render_tooltips(two_commits):
-    b, base, target = two_commits
-    html = render(compare(b.path, base, target))
-    change = "changed &#34;world&#34; to &#34;there&#34;"
-    # on the changed word, and on the whole line (both cells)
-    assert f'<ins title="{change}">there</ins>' in html
-    assert html.count(f'<td class="code right" title="{change}">') == 1
-    assert html.count(f'<td class="code left" title="{change}">') == 1
-    assert 'title="added this line"' in html
 
 
 def test_render_thousand_separators(builder):
@@ -83,6 +71,6 @@ def test_signs_screen_reader_text_and_print_styles(builder):
     html = render(compare(builder.path, base, target))
     assert '<span class="sign" aria-hidden="true">~</span>' in html
     assert '<span class="sr">changed line, old: </span>' in html
-    assert '<caption class="sr">Changes in f.txt' in html
+    assert '<caption class="sr" lang="en">Changes in f.txt' in html
     assert 'aria-live="polite"' in html and 'aria-pressed="false"' in html
     assert "@media print" in html and "beforeprint" in html

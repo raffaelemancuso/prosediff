@@ -1,6 +1,5 @@
 """Helpers shared by several test files."""
 
-import re
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -137,11 +136,6 @@ def docx_xml(path, body, footnotes=None, comments=None):
 
 def kinds(rows):
     return [r.kind for r in rows]
-
-
-def untitled(html) -> str:
-    """The markup without the tooltips, to check the highlighting alone."""
-    return re.sub(r' title="[^"]*"', "", str(html))
 
 
 def odt_xml(path, body, styles=""):

@@ -22,17 +22,22 @@ from tkinter import filedialog, messagebox, ttk
 import git
 
 from prosediff.diff import (
+    AUTO_ENCODING,
     MOVE_SIMILARITY,
     Comparison,
     Context,
     FilterError,
+    check_encoding,
     compare,
     compare_paths,
 )
+from prosediff.language import AUTO, normalize_language
 from prosediff.render import ALIGNMENTS, default_output, render
 from prosediff.sources import DOCX_CHANGES, SourceError
 
 MAX_COMMITS = 200
+ENCODINGS = (AUTO_ENCODING, "utf-8", "cp1252", "latin-1", "utf-16", "cp1250", "cp1251")
+LANGUAGES = (AUTO, "en", "it", "de", "fr", "es", "pt", "nl", "pl", "sv", "da", "fi", "cs", "el")
 WORKTREE = "Working tree (uncommitted changes)"
 INDEX = "Index (staged changes)"
 
@@ -89,7 +94,10 @@ class Settings:
     ignore_whitespace: bool = False
     move_similarity: float = MOVE_SIMILARITY
     by_sentence: bool = False
-    sentence_language: str = "en"
+    # a language code, or "auto": guessed from each file's text
+    language: str = AUTO
+    # a codec's name, or "auto": UTF-8 unless a file shows it is not
+    encoding: str = AUTO_ENCODING
     output: str = ""
     open_page: bool = True
 
@@ -217,7 +225,8 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         docx_changes=s.docx_changes,
         move_similarity=s.move_similarity,
         by_sentence=s.by_sentence,
-        sentence_language=s.sentence_language or "en",
+        language=s.language or AUTO,
+        encoding=s.encoding or AUTO_ENCODING,
     )
     if s.mode == "files":
         if not s.old or not s.new:
@@ -368,12 +377,27 @@ class App:
         ttk.Checkbutton(opts, text="Show comments without text", variable=self.empty_comments).grid(
             row=5, column=0, columnspan=2, sticky="w", **pad
         )
-        language = ttk.Frame(opts)
-        language.grid(row=4, column=2, columnspan=2, sticky="w", **pad)
-        ttk.Label(language, text="Language").pack(side="left")
-        self.sentence_language = tk.StringVar(value=self.s.sentence_language)
-        ttk.Entry(language, textvariable=self.sentence_language, width=6).pack(side="left", padx=6)
-        ttk.Label(language, text="en, it, de, fr, ...", foreground="grey").pack(side="left")
+        ttk.Label(opts, text="Document language").grid(row=6, column=0, sticky="w", **pad)
+        self.language = tk.StringVar(value=self.s.language)
+        # Any code can be typed; the list holds the common ones.
+        ttk.Combobox(opts, textvariable=self.language, values=LANGUAGES, width=10).grid(
+            row=6, column=1, sticky="w", **pad
+        )
+        ttk.Label(
+            opts,
+            text="splits sentences and hyphenates lines; auto: guessed from each file",
+            foreground="grey",
+        ).grid(row=6, column=2, columnspan=2, sticky="w", **pad)
+        ttk.Label(opts, text="Text encoding").grid(row=7, column=0, sticky="w", **pad)
+        self.encoding = tk.StringVar(value=self.s.encoding)
+        ttk.Combobox(opts, textvariable=self.encoding, values=ENCODINGS, width=10).grid(
+            row=7, column=1, sticky="w", **pad
+        )
+        ttk.Label(
+            opts,
+            text="of text and Markdown files; auto: UTF-8 unless a file is not, then guessed",
+            foreground="grey",
+        ).grid(row=7, column=2, columnspan=2, sticky="w", **pad)
 
         # Output
         out = ttk.LabelFrame(root, text="Page", padding=8)
@@ -489,6 +513,14 @@ class App:
             move_similarity = min(1.0, max(0.05, float(self.move_similarity.get())))
         except (tk.TclError, ValueError):
             move_similarity = MOVE_SIMILARITY
+        try:
+            language = normalize_language(self.language.get())
+        except ValueError:
+            language = AUTO
+        try:
+            encoding = check_encoding(self.encoding.get())
+        except ValueError:
+            encoding = AUTO_ENCODING
         return Settings(
             mode="files" if self.tabs.index("current") == 1 else "git",
             repo=self.repo.get().strip(),
@@ -507,7 +539,8 @@ class App:
             ignore_whitespace=self.ignore_ws.get(),
             move_similarity=move_similarity,
             by_sentence=self.by_sentence.get(),
-            sentence_language=self.sentence_language.get().strip().lower() or "en",
+            language=language,
+            encoding=encoding,
             output=self.output.get().strip(),
             open_page=self.open_page.get(),
         )

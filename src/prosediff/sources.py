@@ -1,14 +1,14 @@
 """Sides outside git: two files or two folders, and word-processor documents.
 
 A .docx is read into Markdown by prosediff.word (python-docx), an .odt by
-prosediff.odt (odfdo), their tracked changes settled and their comments kept,
-so they can be folded and listed like those of a Markdown file.
+prosediff.odt (odfdo, an optional dependency: the odt extra), their tracked
+changes settled and their comments kept, so they can be folded and listed
+like those of a Markdown file.
 """
 
 from datetime import datetime
 from pathlib import Path
 
-from prosediff.odt import OdtError, odt_to_markdown
 from prosediff.word import CHANGES as DOCX_CHANGES
 from prosediff.word import WordError
 from prosediff.word import docx_to_markdown as _docx_to_markdown
@@ -53,6 +53,14 @@ def document_to_markdown(data: bytes, name: str, changes: str = "accept") -> byt
     """A Word document or an OpenDocument text as Markdown, by its name's
     extension; changes as in docx_to_markdown."""
     if Path(name).suffix.lower() == ".odt":
+        try:
+            from prosediff.odt import OdtError, odt_to_markdown
+        except ImportError:
+            raise SourceError(
+                f"{name} is an OpenDocument text, which needs odfdo: install prosediff "
+                'with its odt extra (uv tool install "prosediff[odt]", or '
+                'pip install "prosediff[odt]")'
+            ) from None
         try:
             return odt_to_markdown(data, changes).encode("utf-8")
         except OdtError as e:

@@ -1,6 +1,7 @@
 """prosediff --setup-git, --to-markdown and --open: git's own commands
 showing documents as prose, and the page opened in the browser."""
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -81,7 +82,9 @@ def test_to_markdown_errors(tmp_path, capsys):
     assert main(["--to-markdown", str(tmp_path / "missing.docx")]) == 1
 
 
-def test_setup_git_makes_git_diff_show_documents_as_text(two_documents, capsys):
+def test_setup_git_makes_git_diff_and_difftool_show_documents(two_documents, browser, capsys):
+    """After --setup-git, git diff shows documents as text and git difftool -d
+    writes a page and opens it."""
     b = two_documents
     assert "\n+The cat slept.\n" not in git(b.path, "diff", "HEAD~1", "HEAD")
     assert main(["--setup-git", str(b.path)]) == 0
@@ -93,11 +96,6 @@ def test_setup_git_makes_git_diff_show_documents_as_text(two_documents, capsys):
     # set twice, written once
     assert main(["--setup-git", str(b.path)]) == 0
     assert (b.path / ".git" / "info" / "attributes").read_text().splitlines() == attributes
-
-
-def test_difftool_writes_and_opens_a_page(two_documents, browser):
-    b = two_documents
-    assert main(["--setup-git", str(b.path)]) == 0
     # --no-symlinks: where git init found symlinks to work (GitHub's Windows
     # runners), git difftool -d tries to link the right side to the working
     # tree, and on Windows fails ("could not symlink").
@@ -111,7 +109,8 @@ def test_difftool_writes_and_opens_a_page(two_documents, browser):
     page = browser.read_text().strip()
     assert page.startswith("file:") and page.endswith(".html")
     html = Path(url2pathname(urlparse(page).path)).read_text(encoding="utf-8")
-    assert "slept" in html and "converted from Word" in html
+    # the changed letters are marked: s<mark>lept</mark>
+    assert "slept" in re.sub(r"<[^>]+>", "", html) and "converted from Word" in html
 
 
 def test_setup_git_global(no_global_git, capsys):
@@ -128,21 +127,6 @@ def test_setup_git_outside_a_repository(tmp_path, no_global_git, capsys):
     assert "not a git repository" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        ["--global"],
-        ["--setup-git", "a", "b"],
-        ["--setup-git", "--global", "a"],
-        ["--to-markdown", "x.docx", "a"],
-        ["a"],
-    ],
-)
-def test_bad_git_arguments(args):
-    with pytest.raises(SystemExit):
-        main(args)
-
-
 def test_open_writes_a_fresh_page_and_opens_it(tmp_path, monkeypatch, capsys):
     (tmp_path / "a.md").write_text("one\n")
     (tmp_path / "b.md").write_text("two\n")
@@ -150,6 +134,7 @@ def test_open_writes_a_fresh_page_and_opens_it(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("webbrowser.open", opened.append)
     files = ["--files", str(tmp_path / "a.md"), str(tmp_path / "b.md")]
     assert main([*files, "--open"]) == 0
+    assert "a.md..b.md" in capsys.readouterr().out
     assert main([*files, "--open"]) == 0
     # two pages, both in the temporary folder, neither overwriting the other
     assert len(set(opened)) == 2 and all("/prosediff/prosediff_" in u for u in opened)

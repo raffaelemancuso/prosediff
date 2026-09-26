@@ -12,6 +12,12 @@ No Markdown parser reports where in the source each inline element starts
 and ends, so the common inline syntax is recognised with regular
 expressions: headings, block quotes, code spans, strong and emphasis, links,
 images, citations and pandoc bracketed spans with attributes.
+
+A Word or OpenDocument text read with its tracked changes kept ("all") has
+them as [text]{.insertion author=... date=...} and [text]{.deletion ...}
+spans: their text is styled as Word shows it, and carries the change's
+author and date for the page's tooltip. A style starting with "@" is such
+a value, name=value, written as a data- attribute instead of a class.
 """
 
 import re
@@ -25,6 +31,9 @@ STRONG = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1")
 EMPH = re.compile(r"(?<![*\w])([*_])(?=[^\s*_])(.+?)(?<=[^\s*_])\1(?![*\w])")
 IMAGE_OR_LINK = re.compile(r"(!?\[)((?:[^\[\]]|\[[^\]]*\])*)(\]\([^)\s]*(?:\s+\"[^\"]*\")?\))")
 ATTR_SPAN = re.compile(r"(\[)((?:[^\[\]]|\[[^\]]*\])*)(\]\{[^}]*\})")
+TRACKED = re.compile(r"\{\.(insertion|deletion)\b")
+AUTHOR = re.compile(r'\bauthor="([^"]*)"')
+DATE = re.compile(r'\bdate="(\d{4}-\d\d-\d\d)(?:T(\d\d:\d\d))?')
 CITATION = re.compile(r"\[-?@[^\]]+\]|(?<![\w\[])-?@[\w:.#$%&+?<>~/-]+")
 
 
@@ -61,6 +70,12 @@ def md_styles(line: str) -> list[set[str]]:
             continue  # already a link
         mark(m.start(1), m.end(1), "syn")
         mark(m.start(3), m.end(3), "syn")
+        if tracked := TRACKED.match(m[3], 1):
+            mark(m.start(2), m.end(2), "tc-ins" if tracked[1] == "insertion" else "tc-del")
+            if author := AUTHOR.search(m[3]):
+                mark(m.start(2), m.end(2), f"@author={author[1]}")
+            if date := DATE.search(m[3]):
+                mark(m.start(2), m.end(2), "@date=" + " ".join(filter(None, date.groups())))
     for m in CITATION.finditer(line):
         mark(m.start(), m.end(), "cite")
     for pattern, cls in ((STRONG, "strong"), (EMPH, "em")):
@@ -74,7 +89,8 @@ def md_styles(line: str) -> list[set[str]]:
 
 
 def styled(text: str, styles: list[set[str]] | None) -> Markup:
-    """text, escaped, cut into runs of equal style, each in a <span>."""
+    """text, escaped, cut into runs of equal style, each in a <span>: its
+    classes, and its values ("@name=value") as data- attributes."""
     if not styles:
         return escape(text)
     out = []
@@ -83,8 +99,13 @@ def styled(text: str, styles: list[set[str]] | None) -> Markup:
         if k == len(text) or styles[k] != styles[start]:
             piece = escape(text[start:k])
             if styles[start]:
-                cls = " ".join(f"s-{c}" for c in sorted(styles[start]))
-                out.append(Markup('<span class="{}">{}</span>').format(cls, piece))
+                cls = " ".join(f"s-{c}" for c in sorted(styles[start]) if c[0] != "@")
+                data = Markup("").join(
+                    Markup(' data-{}="{}"').format(*c[1:].split("=", 1))
+                    for c in sorted(styles[start])
+                    if c[0] == "@"
+                )
+                out.append(Markup('<span class="{}"{}>{}</span>').format(cls, data, piece))
             else:
                 out.append(piece)
             start = k

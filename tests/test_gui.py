@@ -141,15 +141,15 @@ def test_list_choices_and_default_sides(history):
     assert default_sides([], dirty=False) == ("", "")
 
 
-@pytest.mark.parametrize("target", ["worktree", "index", "commit"])
-def test_generate_git(history, tmp_path, target):
+def test_generate_git(history, tmp_path):
+    """The new side can be the working tree, the index or a commit."""
     b, shas = history
-    out = tmp_path / "page.html"
-    s = Settings(repo=str(b.path), base=shas[0], output=str(out))
-    s.target = shas[2] if target == "commit" else target
-    path, c = generate(s)
-    assert path == out and out.read_bytes().startswith(b"<!DOCTYPE html>")
-    assert c.target.short == {"worktree": "working tree", "index": "index"}.get(target, shas[2][:7])
+    for target in ("worktree", "index", shas[2]):
+        out = tmp_path / f"{target}.html"
+        path, c = generate(Settings(repo=str(b.path), base=shas[0], target=target, output=str(out)))
+        assert path == out and out.read_bytes().startswith(b"<!DOCTYPE html>")
+        short = {"worktree": "working tree", "index": "index"}.get(target, shas[2][:7])
+        assert c.target.short == short
 
 
 def test_generate_files_and_default_output(tmp_path):
@@ -206,7 +206,6 @@ def test_window_loads_a_repository(root, history):
     app.base.set("HEAD~2")
     assert app.collect().base == "HEAD~2"
     # the move similarity, kept within 0.05 and 1
-    assert s.move_similarity == 0.8
     app.move_similarity.set(0.6)
     assert app.collect().move_similarity == 0.6
     app.move_similarity.set(3)

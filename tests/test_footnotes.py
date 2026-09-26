@@ -34,7 +34,8 @@ def versions(tmp_path, edit_third=""):
 
 
 def test_renumbered_footnotes_are_no_change(tmp_path):
-    (f,) = versions(tmp_path).files
+    c = versions(tmp_path)
+    (f,) = c.files
     rows = [r for r in f.rows if r.kind != "skip"]
     kinds = [(r.kind, r.left_label, r.right_label) for r in rows]
     # the body line lost "Body B.[^2]"; footnote 2 is deleted; 3 and 4 are
@@ -52,6 +53,10 @@ def test_renumbered_footnotes_are_no_change(tmp_path):
     assert text(rows, "left")[3].startswith("[^3]: The third note")
     assert text(rows, "right")[3].startswith("[^2]: The third note")
     assert "Body C.[^3]" in text(rows, "left")[0] and "Body C.[^2]" in text(rows, "right")[0]
+    # and so does the page, with no stand-in left in it
+    html = render(c)
+    assert not STAND_IN.search(html)
+    assert "[^3]: The third note" in html and "[^2]: The third note" in html
 
 
 def test_real_edits_to_a_renumbered_footnote_are_shown(tmp_path):
@@ -60,12 +65,6 @@ def test_real_edits_to_a_renumbered_footnote_are_shown(tmp_path):
     assert third.kind == "replace"
     assert third.changes == ['added "Two more words."']
     assert (third.left_label, third.right_label) == ("7", "5")
-
-
-def test_no_stand_in_reaches_the_page(tmp_path):
-    html = render(versions(tmp_path))
-    assert not STAND_IN.search(html)
-    assert "[^3]: The third note" in html and "[^2]: The third note" in html
 
 
 def test_matching_by_text():

@@ -2,12 +2,17 @@
 out gaps, change stops.
 """
 
-import itertools
-
 import pytest
 from helpers import kinds
 
-from prosediff.diff import PAIRING_MAX_CELLS, align, git_opcodes, pair_lines, split_lines
+from prosediff.diff import (
+    PAIRING_MAX_CELLS,
+    align,
+    decode_text,
+    git_opcodes,
+    pair_lines,
+    split_lines,
+)
 
 
 def test_rows_carry_the_changes():
@@ -18,6 +23,14 @@ def test_rows_carry_the_changes():
     assert deleted.changes == ["removed this line"]
     rows, _, _ = align([], ["new"], context=None)
     assert rows[0].changes == ["added this line"]
+    # a replaced line faces its new version, the changed words highlighted
+    rows, add, rem = align(["x", "one two", "y"], ["x", "one three", "y"], context=None)
+    replaced = rows[1]
+    assert replaced.kind == "replace"
+    assert (replaced.left_no, replaced.right_no) == (2, 2)
+    assert ">two</del>" in str(replaced.left)
+    assert ">three</ins>" in str(replaced.right)
+    assert (add, rem) == (1, 1)
 
 
 def test_align_equal_files():
@@ -35,16 +48,6 @@ def test_align_insert_and_delete():
     assert (deleted.left_no, deleted.right_no) == (2, None)
     inserted = rows[3]
     assert (inserted.left_no, inserted.right_no) == (None, 3)
-
-
-def test_align_replace_pairs_lines_side_by_side():
-    rows, add, rem = align(["x", "one two", "y"], ["x", "one three", "y"], context=None)
-    replaced = rows[1]
-    assert replaced.kind == "replace"
-    assert (replaced.left_no, replaced.right_no) == (2, 2)
-    assert ">two</del>" in str(replaced.left)
-    assert ">three</ins>" in str(replaced.right)
-    assert (add, rem) == (1, 1)
 
 
 def test_align_context_skips_unchanged_lines():
@@ -85,12 +88,11 @@ def test_pairing_unrelated_lines_stand_alone():
 
 
 def test_pairing_reordered_keeps_order():
-    # pairs never cross: a moved line is shown as deleted and inserted
+    # pairs never cross: each line faces the one in its place, not its
+    # closer match further down
     old = ["first line of text", "second line of text"]
     new = ["second line of text!", "first line of text!"]
-    pairs = pair_lines(old, new)
-    paired = [(i, j) for i, j in pairs if i is not None and j is not None]
-    assert all(a[0] < b[0] and a[1] < b[1] for a, b in itertools.pairwise(paired))
+    assert pair_lines(old, new) == [(0, 0), (1, 1)]
 
 
 def test_pairing_large_block_falls_back_to_order():
@@ -107,6 +109,38 @@ def test_align_uses_pairing():
     rows, add, rem = align(old, new, context=None)
     assert kinds(rows) == ["equal", "replace", "insert", "replace", "equal"]
     assert (add, rem) == (3, 2)
+
+
+@pytest.mark.parametrize(
+    ("text", "encoding", "read_as"),
+    [
+        ("Un caff\xe8, grazie.", "latin-1", "cp1252"),  # not cp1250's "caff\u010d"
+        ("caff\xe8", "latin-1", "cp1252"),  # too short for anything but a tie
+        ("He said \u201cyes\u201d \u2013 and left.", "cp1252", "cp1252"),
+        ("Die Gr\xf6\xdfe der St\xe4dte w\xe4chst.", "latin-1", "cp1252"),
+        ("Un caff\xe8, grazie.", "utf-16", "utf_16"),  # with its byte-order mark
+        (
+            "\u0420\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u044b "
+            "\u043e\u0431\u043d\u0430\u0434\u0451\u0436\u0438\u0432\u0430\u044e\u0442.",
+            "cp1251",
+            "cp1251",
+        ),
+    ],
+)
+def test_decode_text(text, encoding, read_as):
+    assert decode_text(text.encode(encoding)) == (text, read_as)
+    assert decode_text(text.encode("utf-8")) == (text, "")
+
+
+def test_decode_text_given_or_betrayed():
+    """A given encoding is used; valid UTF-8 whose C1 controls betray another
+    encoding is guessed again."""
+    data = "caff\xe8".encode("latin-1")
+    assert decode_text(data, "cp1250") == ("caff\u010d", "cp1250")
+    assert decode_text("caff\xe8".encode(), "utf-8") == ("caff\xe8", "")
+    # "\u201cyes\u201d" in cp1252 bytes, which happen to be valid UTF-8 as C1 controls
+    c1 = "\u0093yes\u0094".encode()
+    assert decode_text(c1)[1] != ""
 
 
 def test_split_lines_counts_like_git():

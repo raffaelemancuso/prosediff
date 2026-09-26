@@ -2,11 +2,19 @@
 
 from helpers import END, NOTE
 
-from prosediff import compare, render
+from prosediff import compare, compare_paths, render
 from prosediff.comments import NEW_COMMENT_MARK
 from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
 
 MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
+
+
+def versions(tmp_path, old, new):
+    """Two folders holding the old and the new p.md."""
+    for side, text in (("a", old), ("b", new)):
+        (tmp_path / side).mkdir()
+        (tmp_path / side / "p.md").write_text(text, encoding="utf-8")
+    return tmp_path / "a", tmp_path / "b"
 
 
 def test_fold_comments_replaces_span_with_one_placeholder():
@@ -48,20 +56,18 @@ def test_comments_without_text_are_left_out():
     assert 'aria-label="comment by A, 2026-09-23 10:00: (no text)"' in html
 
 
-def test_empty_comments_switch(builder, tmp_path, capsys):
+def test_empty_comments_switch(tmp_path):
     from prosediff.cli import main
 
     empty = '[]{.comment-start id="4" author="Anna" date="2026-09-23T10:00:00Z"}'
-    builder.write("p.md", "Text.\n")
-    base = builder.commit("first")
-    builder.write("p.md", f"Text.{empty}\n")
-    target = builder.commit("second")
-    assert compare(builder.path, base, target).comments == []
-    c = compare(builder.path, base, target, empty_comments=True)
+    a, b = versions(tmp_path, "Text.\n", f"Text.{empty}\n")
+    assert compare_paths(a, b).comments == []
+    c = compare_paths(a, b, empty_comments=True)
     assert [(e.author, e.text, e.status) for e in c.comments] == [("Anna", "", "new")]
     assert ">(no text)</a>" in render(c)
+    # the command line passes the switch on
     out = tmp_path / "r.html"
-    assert main([str(builder.path), base, target, "--empty-comments", "-o", str(out)]) == 0
+    assert main(["--files", str(a), str(b), "--empty-comments", "-o", str(out)]) == 0
     assert ">(no text)</a>" in out.read_text(encoding="utf-8")
 
 
@@ -84,14 +90,15 @@ def test_plain_and_show_comments():
     assert 'aria-label="new comment by Anna' in new
 
 
-def test_a_comment_on_both_sides_is_not_shown(builder):
+def test_a_comment_on_both_sides_is_not_shown(tmp_path):
     """A comment whose paragraph was deleted lands on the next one: a
     comment both sides have is left out, moved or not."""
-    builder.write("p.md", f"First paragraph here.{NOTE}\n\nSecond paragraph here.\n")
-    base = builder.commit("first")
-    builder.write("p.md", f"{NOTE}Second paragraph here, edited.\n")
-    target = builder.commit("second")
-    c = compare(builder.path, base, target)
+    a, b = versions(
+        tmp_path,
+        f"First paragraph here.{NOTE}\n\nSecond paragraph here.\n",
+        f"{NOTE}Second paragraph here, edited.\n",
+    )
+    c = compare_paths(a, b)
     (f,) = c.files
     row = next(r for r in f.rows if r.right_no is not None and "Second" in str(r.right))
     assert row.changes == ['added ", edited"']
@@ -110,35 +117,33 @@ def test_a_shared_comment_leaves_one_space():
     assert lines == ["a b", "c.", "d"] and labels == ["1", "2", "3"]
 
 
-def test_a_paragraph_a_comment_only_moved_into_is_not_shown(builder):
+def test_a_paragraph_a_comment_only_moved_into_is_not_shown(tmp_path):
     """The comment was already there, on the paragraph before: its moving
     to the next paragraph is no reason to show either of them."""
     lines = [f"Paragraph {k} of the text." for k in range(40)]
     old = list(lines)
     old[19] += NOTE
-    builder.write("p.md", "\n\n".join([*old, "The end."]) + "\n")
-    base = builder.commit("first")
     new = list(lines)
     new[20] = NOTE + new[20]
-    builder.write("p.md", "\n\n".join([*new, "The end, edited."]) + "\n")
-    target = builder.commit("second")
-    (f,) = compare(builder.path, base, target).files
+    a, b = versions(
+        tmp_path,
+        "\n\n".join([*old, "The end."]) + "\n",
+        "\n\n".join([*new, "The end, edited."]) + "\n",
+    )
+    (f,) = compare_paths(a, b).files
     shown = [r for r in f.rows if r.kind != "skip"]
     assert [r.kind for r in shown if r.changed] == ["replace"]
     assert not any("Paragraph 20" in str(r.right) for r in shown)
 
 
-def test_a_paragraph_with_only_a_new_comment_is_shown(builder):
+def test_a_paragraph_with_only_a_new_comment_is_shown(tmp_path):
     """Its text is unchanged, so it is no edit, but it is not folded away
     with the unchanged lines: the new comment shows, marked new, and the
     navigation stops there."""
     lines = [f"Paragraph {k} of the text." for k in range(40)]
-    builder.write("p.md", "\n\n".join(lines) + "\n")
-    base = builder.commit("first")
+    old = "\n\n".join(lines) + "\n"
     lines[20] += NOTE
-    builder.write("p.md", "\n\n".join(lines) + "\n")
-    target = builder.commit("second")
-    c = compare(builder.path, base, target)
+    c = compare_paths(*versions(tmp_path, old, "\n\n".join(lines) + "\n"))
     (f,) = c.files
     shown = [r for r in f.rows if r.kind != "skip"]
     row = next(r for r in shown if "Paragraph 20" in str(r.right))
@@ -172,7 +177,7 @@ def test_compare_fold_comments(builder, tmp_path):
     assert c.comments == [] and '<section class="comments-panel"' not in html
 
 
-def test_comments_panel_statuses_and_links(builder):
+def test_comments_panel_statuses_and_links(tmp_path):
     kept = NOTE
     gone = NOTE.replace("Too long.", "Old remark.")
     new = NOTE.replace("Too long.", "New remark.")
@@ -180,14 +185,11 @@ def test_comments_panel_statuses_and_links(builder):
     old = list(lines)
     old[2] += kept
     old[20] += gone
-    builder.write("p.md", "\n".join(old) + "\n")
-    base = builder.commit("first")
     cur = list(lines)
     cur[2] += kept
     cur[21] = "Line 21 edited." + new
-    builder.write("p.md", "\n".join(cur) + "\n")
-    target = builder.commit("second")
-    c = compare(builder.path, base, target, fold_comments_md=True)
+    a, b = versions(tmp_path, "\n".join(old) + "\n", "\n".join(cur) + "\n")
+    c = compare_paths(a, b, fold_comments_md=True)
     status = {e.text: e.status for e in c.comments}
     # the comment both sides have is left out
     assert status == {"Old remark.": "removed", "New remark.": "new"}

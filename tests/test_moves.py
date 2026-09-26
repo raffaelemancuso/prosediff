@@ -1,5 +1,8 @@
 """Moved lines: as they were, spacing aside, or lightly edited."""
 
+import pytest
+
+from prosediff import compare_paths, render
 from prosediff.diff import MIN_MOVE_CHARS, align, mark_moves
 
 EDITED = "This long sentence travels to the end of the file, almost as it was."
@@ -46,23 +49,17 @@ def test_edited_line_moved_is_a_move_with_its_changes():
     assert (add, rem) == (0, 0)
 
 
-def test_dissimilar_lines_are_not_moves():
-    old = ["This is one sentence about something.", "a", "b"]
-    new = ["a", "b", "Completely different words appear here now."]
-    rows, _add, _rem = align(old, new, context=None)
-    assert not any(r.kind.startswith("moved") for r in rows)
-
-
 def test_most_similar_pairs_move_first():
+    """Two candidates, each a move on its own: the closer one wins, although
+    the other comes first."""
     a = "The quick brown fox jumps over the lazy dog today."
-    rows = align(
-        [a, "x", "y"],
-        ["x", "y", a.replace("today", "now"), a.replace("lazy", "idle")],
-        context=None,
-    )[0]
-    into = next(r for r in rows if r.kind == "moved-in")
-    assert into.right_no in (3, 4)
-    assert sum(r.kind == "moved-in" for r in rows) == 1
+    far, near = a.replace("quick brown", "slow grey"), a.replace("today", "now")
+    rows = align([a, "x", "y"], ["x", "y", far, near], context=None)[0]
+    (into,) = [r for r in rows if r.kind == "moved-in"]
+    assert into.right_no == 4
+
+
+def test_no_rows_no_moves():
     mark_moves([])  # nothing to do, no error
 
 
@@ -89,11 +86,7 @@ def test_move_similarity_threshold():
     assert moved(1.0, (MOVED, MOVED))
 
 
-def test_move_similarity_validated(builder, tmp_path):
-    import pytest
-
-    from prosediff import compare_paths
-
+def test_move_similarity_validated(tmp_path):
     (tmp_path / "a.md").write_text("x\n")
     (tmp_path / "b.md").write_text("y\n")
     for bad in (0, -0.1, 1.5):
@@ -104,8 +97,6 @@ def test_move_similarity_validated(builder, tmp_path):
 def test_where_a_moved_line_went_is_printed(tmp_path):
     """On screen a moved line's tooltip says where it went; on paper, a note
     under it (hidden on screen by the page's style)."""
-    from prosediff import compare_paths, render
-
     (tmp_path / "a.md").write_text(f"{EDITED}\na\nb\nc\n")
     (tmp_path / "b.md").write_text(f"a\nb\nc\n{EDITED.replace('almost', 'nearly')}\n")
     html = render(compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None))

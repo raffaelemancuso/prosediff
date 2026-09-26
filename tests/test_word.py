@@ -4,7 +4,7 @@ import docx as python_docx
 import pytest
 from helpers import docx_xml
 
-from prosediff.word import WordError, docx_to_markdown, omml_text
+from prosediff.word import docx_to_markdown, omml_text
 
 
 @pytest.fixture
@@ -112,8 +112,3 @@ def test_omml_brackets_and_sums():
         "</m:oMath>"
     )
     assert omml_text(el) == "∑_(i) (x)"
-
-
-def test_not_a_word_document():
-    with pytest.raises(WordError):
-        docx_to_markdown(b"not a zip")

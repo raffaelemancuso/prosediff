@@ -10,15 +10,18 @@ from pathlib import Path
 import git
 
 from prosediff.diff import (
+    AUTO_ENCODING,
     CONTEXT,
     MAX_HIDDEN,
     MOVE_SIMILARITY,
     PROSE_CONTEXT,
     FilterError,
+    check_encoding,
     compare,
     compare_paths,
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
+from prosediff.language import AUTO, normalize_language
 from prosediff.render import ALIGNMENTS, default_output, render
 from prosediff.sources import DOCX_CHANGES, SourceError, document_to_markdown
 
@@ -114,7 +117,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--cached",
-        "--staged",
         action="store_true",
         help="compare BASE with the index (the staged changes) instead of the working tree",
     )
@@ -166,11 +168,20 @@ def main(argv: list[str] | None = None) -> int:
         "lines are labelled 12.1, 12.2, ...",
     )
     ap.add_argument(
-        "--sentence-language",
-        default="en",
+        "--language",
+        default=AUTO,
         metavar="CODE",
-        help="the language whose rules split sentences with --by-sentence "
-        "(default: en; e.g. it, de, fr; others fall back to a simple rule)",
+        help="the language of the documents' prose: its rules split sentences with "
+        "--by-sentence and hyphenate wrapped lines (default: auto, guessed from "
+        "each file's text; e.g. en, it, de, fr)",
+    )
+    ap.add_argument(
+        "--encoding",
+        default=AUTO_ENCODING,
+        metavar="NAME",
+        help="the encoding of text and Markdown files, e.g. utf-8, cp1252, latin-1 "
+        "(default: auto, UTF-8 unless a file cannot be read in it or reads with "
+        "control characters, then guessed with charset-normalizer)",
     )
     git_group = ap.add_argument_group("git's own commands")
     git_group.add_argument(
@@ -215,6 +226,14 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--max-hidden must be 0 or more")
     if not 0 < args.move_similarity <= 1:
         ap.error("--move-similarity must be above 0 and at most 1")
+    try:
+        args.language = normalize_language(args.language)
+    except ValueError as e:
+        ap.error(f"--language: {e}")
+    try:
+        args.encoding = check_encoding(args.encoding)
+    except ValueError as e:
+        ap.error(f"--encoding: {e}")
     if args.files:
         if args.target:
             ap.error("--files compares OLD with NEW: give no TARGET")
@@ -236,7 +255,8 @@ def main(argv: list[str] | None = None) -> int:
         docx_changes=args.docx_changes,
         move_similarity=args.move_similarity,
         by_sentence=args.by_sentence,
-        sentence_language=args.sentence_language,
+        language=args.language,
+        encoding=args.encoding,
     )
     try:
         if args.files:

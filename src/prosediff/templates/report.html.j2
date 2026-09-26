@@ -21,18 +21,6 @@
     --move-line: #ab7df826; --move: #ab7df8; --current: #d29922;
   }
 }
-/* Colour-blind palette: orange for removed, blue for added, which stay
-   apart for every common colour-vision deficiency. */
-body.cb {
-  --del-line: #fff1e5; --del-word: #fb8f4499; --ins-line: #ddf4ff;
-  --ins-word: #54aeff88; --add: #0969da; --rem: #bc4c00;
-}
-@media (prefers-color-scheme: dark) {
-  body.cb {
-    --del-line: #db6d2826; --del-word: #db6d2866; --ins-line: #388bfd26;
-    --ins-word: #388bfd66; --add: #58a6ff; --rem: #f0883e;
-  }
-}
 /* On paper, the light colours even when the browser is in dark mode: no
    page printed dark. */
 @media print {
@@ -42,10 +30,6 @@ body.cb {
     --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
     --add: #1a7f37; --rem: #cf222e; --link: #0969da;
     --move-line: #fbefff; --move: #8250df; --current: #bf8700;
-  }
-  body.cb {
-    --del-line: #fff1e5; --del-word: #fb8f4499; --ins-line: #ddf4ff;
-    --ins-word: #54aeff88; --add: #0969da; --rem: #bc4c00;
   }
 }
 * { box-sizing: border-box; }
@@ -124,6 +108,10 @@ tr.moved-out .sign, tr.moved-in .sign { color: var(--move); }
    Justified, the last line of each wrapped line stays ragged. */
 td.code { white-space: pre-wrap; overflow-wrap: anywhere;
   text-align: {{ align }}; text-align-last: start; }
+/* Prose collapses its spaces: one at the end of a wrapped line is dropped,
+   so a highlighted one neither hangs past the edge (into the next column)
+   nor sticks out of the justified text. Code keeps every space. */
+table.prose td.code { white-space: pre-line; }
 td.code.left { border-right: 1px solid var(--border); }
 /* Wholly removed and added lines are tinted; an edited line is not, only its
    changed words are (its gutter keeps the tint and the ~ sign), so the
@@ -148,8 +136,7 @@ del.partial { background: var(--del-line); }
 ins.partial { background: var(--ins-line); }
 del.partial mark { background: var(--del-word); color: inherit; }
 ins.partial mark { background: var(--ins-word); color: inherit; }
-/* Every change carries a plain-English description as its tooltip. */
-del[title], ins[title], td.code[title], [data-tip], .comment { cursor: help; }
+.comment { cursor: help; }
 tr.moved-out td.left, tr.moved-in td.right,
 tr.moved-out td.no.l, tr.moved-in td.no.r { --tint: var(--move-line); }
 tr.moved-out td.no.l, tr.moved-in td.no.r { color: var(--move); font-weight: 600; }
@@ -158,9 +145,8 @@ tr.moved-out td.no.l, tr.moved-in td.no.r { color: var(--move); font-weight: 600
 /* A new comment's icon says it all: no box around it. */
 .comment.new { background: none; padding: 0; }
 /* The one tooltip of the page, for comments (the author in bold, the
-   comment below, its date in grey) and for changes (one per line). The
-   script places it next to what is hovered or focused, so no file box clips
-   it and two tooltips never overlap. */
+   comment below, its date in grey) and the toolbar's help. The script
+   places it next to what is hovered or focused, so no file box clips it. */
 #tip { position: fixed; z-index: 3; max-width: 32em; padding: 6px 10px;
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   border-radius: 6px; box-shadow: 0 2px 8px #0003; pointer-events: none;
@@ -182,6 +168,13 @@ body.formatted .s-code { font-family: ui-monospace, Consolas, monospace; font-si
   background: var(--panel); }
 body.formatted .s-link { color: var(--link); text-decoration: underline; }
 body.formatted .s-cite { color: var(--move); }
+/* Tracked changes kept as markup (--docx-changes all), as Word shows them:
+   insertions underlined, deletions struck through; hovering one says who
+   made it and when. */
+body.formatted .s-tc-ins { text-decoration: underline 2px var(--add);
+  text-underline-offset: 2px; cursor: help; }
+body.formatted .s-tc-del { text-decoration: line-through var(--rem);
+  color: var(--muted); cursor: help; }
 body.formatted .s-quote { font-style: italic; color: var(--muted); }
 body.formatted .s-h1, body.formatted .s-h2, body.formatted .s-h3,
 body.formatted .s-h4, body.formatted .s-h5, body.formatted .s-h6 { font-weight: 700; }
@@ -229,8 +222,15 @@ footer a { color: inherit; }
 .stepper .gap-value { min-width: 2.6em; text-align: center; padding: 3px 4px;
   font-size: 12px; font-variant-numeric: tabular-nums;
   border-inline: 1px solid var(--border); }
+/* Comments inline: each written out after its marker, its author and text,
+   as on paper. */
+body.inline .comment::after { content: " " attr(data-author) ": " attr(data-text);
+  font-family: -apple-system, "Segoe UI", sans-serif; font-style: italic;
+  color: var(--muted); }
+body.inline .comment, body.inline .comment.new { background: var(--panel);
+  border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
 /* No help cursor where the tooltip is switched off. */
-body.no-changes-tips [data-tip], body.no-comments-tips .comment { cursor: auto; }
+body.no-comments-tips .comment { cursor: auto; }
 /* Single column: each row shows the old line above the new one; unchanged
    and added lines show their new side only, removed lines their old side. */
 body.unified colgroup { display: none; }
@@ -277,7 +277,24 @@ thead.print, .print-note { display: none; }
   .print-note { display: block; font-family: -apple-system, "Segoe UI", sans-serif;
     font-size: 0.85em; color: var(--move); }
   details.file > summary { position: static; }
-  tr { break-inside: avoid; }
+  /* Nothing clipped: a clipping box makes the browser cut through the line
+     at the foot of a page. */
+  details.file { overflow: visible; }
+  /* The spaces of code at the end of a wrapped line take room on it instead
+     of hanging past the edge, where a highlighted one would run into the
+     next column. */
+  td.code { white-space: break-spaces; }
+  table.prose td.code { white-space: pre-line; }
+  /* A narrow gutter leaves the text columns as wide as a portrait page
+     allows. */
+  col.no { width: 3.6em; }
+  body.unified tr { grid-template-columns: 3.6em 1fr; }
+  td.no { padding: 0 4px; }
+  /* A long paragraph continues on the next page rather than leaving the
+     rest of this one blank, never with a lone line either side. */
+  tr { break-inside: auto; }
+  td { orphans: 3; widows: 3; }
+  tr.skip { break-inside: avoid; }
   tr.current td, tr.target td { box-shadow: none; }
 }
 </style>
@@ -362,6 +379,7 @@ thead.print, .print-note { display: none; }
     <span class="role">{{ f.change }}</span>
     {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}
     {% if f.note %}<span class="file-note">{{ f.note }}</span>{% endif %}
+    {% if f.language %}<span class="file-note" title="the language its sentences are split and its lines hyphenated by">language: {{ f.language }}{% if f.language_guessed %} (guessed){% endif %}</span>{% endif %}
   </summary>
   {% if f.old_image or f.new_image %}
   <div class="images">
@@ -373,10 +391,10 @@ thead.print, .print-note { display: none; }
   {% elif not f.rows %}
   <div class="note">Content unchanged{% if f.change == "renamed" %} (renamed only){% endif %}.</div>
   {% else %}
-  <table{% if f.markdown %} class="prose"{% endif %}>
-    <caption class="sr">Changes in {{ f.path }}: old version on the left, new version on the right</caption>
+  <table{% if f.markdown %} class="prose"{% endif %}{% if f.language %} lang="{{ f.language }}"{% endif %}>
+    <caption class="sr" lang="en">Changes in {{ f.path }}: old version on the left, new version on the right</caption>
     <colgroup><col class="no"><col><col class="no"><col></colgroup>
-    <thead class="print" aria-hidden="true"><tr>
+    <thead class="print" aria-hidden="true" lang="en"><tr>
       <th colspan="2"><span class="path">{{ f.old_path or f.path }}</span>{% if c.base.short != (f.old_path or f.path) %} · {{ c.base.short }}{% endif %}</th>
       <th colspan="2"><span class="path">{{ f.path }}</span>{% if c.target.short != f.path %} · {{ c.target.short }}{% endif %}</th>
     </tr></thead>
@@ -390,19 +408,18 @@ thead.print, .print-note { display: none; }
     <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
     <tbody hidden>
     {% for h in r.hidden %}
-    <tr class="equal"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ h.left_label or h.left_no }}</td><td class="code left">{{ h.left }}</td><td class="no r">{{ h.right_label or h.right_no }}</td><td class="code right">{{ h.right }}</td></tr>
+    <tr class="equal"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ h.left_label or h.left_no }}</td><td class="code left">{{ h.left | hyphenate(f.language) }}</td><td class="no r">{{ h.right_label or h.right_no }}</td><td class="code right">{{ h.right | hyphenate(f.language) }}</td></tr>
     {% endfor %}
     </tbody>
     {% endif %}
     <tbody>
     {% else %}
-    {% set tip = r.changes | join("\n") %}
     {% set sign = signs.get(r.kind, ("", "")) %}
     <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>
       <td class="no l">{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
-      <td class="code left"{% if tip and r.left_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
+      <td class="code left">{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left | hyphenate(f.language) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
       <td class="no r">{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
-      <td class="code right"{% if tip and r.right_no is not none %} title="{{ tip }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
+      <td class="code right">{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right | hyphenate(f.language) }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
     </tr>
     {% endif %}
     {% endfor %}
@@ -422,7 +439,7 @@ thead.print, .print-note { display: none; }
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
-  <button type="button" class="icon" data-toggle="cb" aria-pressed="false" aria-label="Colour-blind colours" title="Colour-blind colours: orange and blue instead of red and green (c)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8s2.6-5 7-5 7 5 7 5-2.6 5-7 5-7-5-7-5Z"/><circle cx="8" cy="8" r="2.3"/><path d="M8 5.7a2.3 2.3 0 0 1 0 4.6Z" class="fill"/></svg></button>
+  <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg></button>
   <button type="button" class="icon" data-toggle="tint" aria-pressed="false" aria-label="Tint edited lines" title="Tint edited lines: the whole of an edited line, not only its changed words (t)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="5.5" width="14" height="5" rx="1" class="fill soft"/><path d="M3 8h10M3 3h7M3 13h9"/></svg></button>
   <span class="spacing"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span>
     <span class="stepper">
@@ -433,7 +450,6 @@ thead.print, .print-note { display: none; }
       <button type="button" tabindex="-1" aria-hidden="true" data-gap="1" title="More space between paragraphs (])">+</button>
     </span></span>
   <button type="button" class="icon" role="checkbox" aria-checked="true" data-tips="comments" aria-label="Comment tooltips" title="Comment tooltips: the author, text and date of a comment, on hovering its marker"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4.5 5.5h7M4.5 8.5h5"/></svg></button>
-  <button type="button" class="icon" role="checkbox" aria-checked="false" data-tips="changes" aria-label="Change tooltips" title="Change tooltips: what was inserted, deleted or changed, on hovering a change or a changed line"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4 7h3.5M5.75 5.25v3.5M9 7h3"/></svg></button>
 </div>
 <script>
 (function () {
@@ -458,8 +474,8 @@ thead.print, .print-note { display: none; }
     if (shown === counter) showTip(counter);
   }
 
-  // The views (one column, formatted, colour-blind colours) are classes of
-  // the body, remembered where the browser allows.
+  // The views (one column, formatted, tinted edited lines, comments inline)
+  // are classes of the body, remembered where the browser allows.
   function setView(name, on) {
     document.body.classList.toggle(name, on);
     var b = document.querySelector('[data-toggle="' + name + '"]');
@@ -469,7 +485,7 @@ thead.print, .print-note { display: none; }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
   // Formatted Markdown is on by default, the other views off; a choice the
   // browser remembers wins.
-  var VIEW_DEFAULT = { unified: false, formatted: true, cb: false, tint: false };
+  var VIEW_DEFAULT = { unified: false, formatted: true, tint: false, inline: false };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
     try {
@@ -544,7 +560,7 @@ thead.print, .print-note { display: none; }
     if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
-                 c: function () { toggle("cb"); }, t: function () { toggle("tint"); },
+                 t: function () { toggle("tint"); }, i: function () { toggle("inline"); },
                  "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
   });
@@ -569,22 +585,14 @@ thead.print, .print-note { display: none; }
   window.addEventListener("hashchange", openTarget);
   openTarget();
 
-  // The tooltips. The page is written with the browser's own tooltips
-  // (title) on changed words and lines, which is what a page read without
-  // scripts shows; with the script, they move to data-tip and all tooltips
-  // go through one element, so only one shows at a time: the innermost
-  // under the mouse, a comment before the change it sits in, a changed word
-  // before its line. A comment also lives in its marker's aria-label, for
-  // screen readers.
+  // The tooltips: a comment's author, text and date on hovering its
+  // marker, who made a tracked change and when (formatted view), and the
+  // toolbar's help. One element shows them, placed by the
+  // script so no file box clips it, one at a time. A comment also lives in
+  // its marker's aria-label, for screen readers.
   var tip = document.getElementById("tip");
   var shown = null;
-  var MAX_LINES = 12;
-  document.querySelectorAll("table [title]").forEach(function (el) {
-    el.dataset.tip = el.title;
-    el.removeAttribute("title");
-  });
-  // The toolbar's help goes through the same tooltip, always on: its name,
-  // what it does, and its key.
+  // The toolbar's help, always on: its name, what it does, and its key.
   document.querySelectorAll(".toolbar [title]").forEach(function (el) {
     el.dataset.help = el.title;
     el.removeAttribute("title");
@@ -601,15 +609,15 @@ thead.print, .print-note { display: none; }
       add("b", el.dataset.author || "Comment");
       add("line", el.dataset.text);
       if (el.dataset.date) add("when", el.dataset.date);
-    } else if (el.dataset.help) {
+    } else if (el.matches(".s-tc-ins, .s-tc-del")) {
+      add("b", el.classList.contains("s-tc-ins") ? "Tracked insertion" : "Tracked deletion");
+      if (el.dataset.author) add("line", "by " + el.dataset.author);
+      if (el.dataset.date) add("when", el.dataset.date);
+    } else {
       // "Name: what it does (k)", or a plain text
       var m = /^(.*?)(?:: (.*?))?(?: \((.+)\))?$/.exec(el.dataset.help);
       if (m[2]) { add("b", m[1]); add("line", m[2]); } else add("line", m[1]);
       if (m[3]) add("when", "key: " + m[3]);
-    } else {
-      var lines = el.dataset.tip.split("\n");
-      lines.slice(0, MAX_LINES).forEach(function (l) { add("line", l); });
-      if (lines.length > MAX_LINES) add("more", "… and " + fmt(lines.length - MAX_LINES) + " more");
     }
     tip.hidden = false;
     shown = el;
@@ -619,12 +627,8 @@ thead.print, .print-note { display: none; }
   function placeTip() {
     if (!shown) return;
     var r = shown.getBoundingClientRect(), t = tip.getBoundingClientRect();
-    // A line cell is as tall as its wrapped text: anchor to where the mouse
-    // entered it instead of its bottom.
-    var bottom = shown.tagName === "TD" && anchorY ? anchorY + 12 : r.bottom;
-    var top0 = shown.tagName === "TD" && anchorY ? anchorY - 12 : r.top;
     var left = Math.max(8, Math.min(anchorX || r.left, r.right - 8, window.innerWidth - t.width - 8));
-    var top = bottom + 6 + t.height > window.innerHeight ? top0 - t.height - 6 : bottom + 6;
+    var top = r.bottom + 6 + t.height > window.innerHeight ? r.top - t.height - 6 : r.bottom + 6;
     tip.style.left = Math.max(8, left) + "px";
     tip.style.top = Math.max(8, top) + "px";
   }
@@ -632,62 +636,58 @@ thead.print, .print-note { display: none; }
     tip.hidden = true;
     shown = null;
   }
-  // Each kind of tooltip can be switched off in the toolbar; the choice is
-  // remembered like the views. With one kind off, the other still shows:
-  // a comment inside a changed word then shows the change.
-  // Comment tooltips are on by default, change tooltips off.
-  var TIPS_DEFAULT = { comments: true, changes: false };
-  var tipsOn = { comments: true, changes: true };
-  function tipSelector() {
-    return [".toolbar [data-help]", tipsOn.comments && ".comment", tipsOn.changes && "[data-tip]"]
-      .filter(Boolean).join(", ");
-  }
-  function setTips(kind, on) {
-    tipsOn[kind] = on;
-    document.body.classList.toggle("no-" + kind + "-tips", !on);
-    var box = document.querySelector('[data-tips="' + kind + '"]');
+  // The comment tooltips can be switched off in the toolbar (on by
+  // default); the choice is remembered like the views.
+  var commentTips = true;
+  function setCommentTips(on, remember) {
+    commentTips = on;
+    document.body.classList.toggle("no-comments-tips", !on);
+    var box = document.querySelector('[data-tips="comments"]');
     if (box) box.setAttribute("aria-checked", on ? "true" : "false");
-    try { localStorage.setItem("prosediff-tips-" + kind, on ? "1" : "0"); } catch (e) {}
+    if (remember) {
+      try { localStorage.setItem("prosediff-tips-comments", on ? "1" : "0"); } catch (e) {}
+    }
     hideTip();
   }
-  ["comments", "changes"].forEach(function (kind) {
-    var on = TIPS_DEFAULT[kind];
-    try {
-      var saved = localStorage.getItem("prosediff-tips-" + kind);
-      if (saved !== null) on = saved === "1";
-    } catch (e) {}
-    tipsOn[kind] = on;
-    document.body.classList.toggle("no-" + kind + "-tips", !on);
-    var box = document.querySelector('[data-tips="' + kind + '"]');
-    if (box) box.setAttribute("aria-checked", on ? "true" : "false");
-  });
-  // The two switches are icon buttons acting as checkboxes.
+  try {
+    var savedTips = localStorage.getItem("prosediff-tips-comments");
+    setCommentTips(savedTips === null ? true : savedTips === "1", false);
+  } catch (e) { setCommentTips(true, false); }
+  // The switch is an icon button acting as a checkbox.
   document.addEventListener("click", function (e) {
-    var box = e.target.closest("[data-tips]");
-    if (box) setTips(box.dataset.tips, !tipsOn[box.dataset.tips]);
+    if (e.target.closest('[data-tips="comments"]')) setCommentTips(!commentTips, true);
   });
 
-  var anchorX = 0, anchorY = 0;
+  var anchorX = 0;
+  function tipTarget(el) {
+    return el.closest(".toolbar [data-help]") || (commentTips && el.closest(".comment")) ||
+      (document.body.classList.contains("formatted") && el.closest(".s-tc-ins, .s-tc-del"));
+  }
   document.addEventListener("mouseover", function (e) {
-    var selector = tipSelector();
-    var el = selector && e.target.closest(selector);
+    var el = tipTarget(e.target);
     if (el === shown) return;
     if (!el) { hideTip(); return; }
     anchorX = e.clientX;
-    anchorY = e.clientY;
     showTip(el);
   });
   document.addEventListener("focusin", function (e) {
-    var m = e.target.closest(".toolbar [data-help]") || (tipsOn.comments && e.target.closest(".comment"));
-    if (m) { anchorX = anchorY = 0; showTip(m); }
+    var el = tipTarget(e.target);
+    if (el) { anchorX = 0; showTip(el); }
   });
   document.addEventListener("focusout", hideTip);
   // Scrolling keeps the tooltip where it belongs.
-  window.addEventListener("scroll", function () { anchorX = anchorY = 0; placeTip(); }, { passive: true });
+  window.addEventListener("scroll", function () { anchorX = 0; placeTip(); }, { passive: true });
 
   // Print every file, collapsed or not.
   window.addEventListener("beforeprint", function () {
     document.querySelectorAll("details.file").forEach(function (d) { d.open = true; });
+  });
+  // Copied text leaves the soft hyphens of the prose behind.
+  document.addEventListener("copy", function (e) {
+    var text = String(window.getSelection());
+    if (text.indexOf("\u00ad") < 0 || !e.clipboardData) return;
+    e.clipboardData.setData("text/plain", text.replace(/\u00ad/g, ""));
+    e.preventDefault();
   });
 })();
 </script>

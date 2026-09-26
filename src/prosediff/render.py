@@ -8,6 +8,7 @@ from pathlib import Path
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from prosediff.diff import Comparison
+from prosediff.hyphenate import hyphenate
 
 
 def _version() -> str:
@@ -23,6 +24,7 @@ _env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+_env.filters["hyphenate"] = hyphenate
 
 
 ALIGNMENTS = ("left", "justify")
