@@ -50,7 +50,10 @@ def test_a_text_files_diff_applies(tmp_path):
     c = compare_paths(work / "t.txt", tmp_path / "t.txt")
     patch = tmp_path / "t.diff"
     patch.write_bytes(unified(c).encode())
-    subprocess.run(["git", "apply", str(patch)], cwd=work, check=True, timeout=60)
+    # autocrlf off: git on Windows runners would write the file with CRLF
+    subprocess.run(
+        ["git", "-c", "core.autocrlf=false", "apply", str(patch)], cwd=work, check=True, timeout=60
+    )
     assert (work / "t.txt").read_bytes() == (tmp_path / "t.txt").read_bytes()
 
 
@@ -108,6 +111,4 @@ def test_cli_word_diff(tmp_path):
     assert main([*files, "--comments", "none"]) == 0
     assert "A [-plain-]{+bold+} claim." in out.read_text(encoding="utf-8")
     assert main([*files, "--comments", "text"]) == 0
-    assert ".comment-start" in out.read_text(encoding="utf-8")
-    assert main([*files, "--no-fold-comments"]) == 0  # the older spelling
     assert ".comment-start" in out.read_text(encoding="utf-8")

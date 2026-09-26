@@ -294,3 +294,68 @@ def test_tracked_and_formatting_changes(browser, tmp_path):
     assert mark.evaluate("e => getComputedStyle(e).borderBottomStyle") == "none"
     assert not page.locator(".fmt-count").is_visible()
     context.close()
+
+
+def test_moved_line_numbers_tell_where(browser, tmp_path):
+    """Hovering a moved line's number tells where it went; hovering the
+    number where it arrived, where it came from; and whether it was edited
+    on the way."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    moved = "This paragraph is moved further down in the new version of the text."
+    edited = "This paragraph is moved further down in the new version of this text."
+    old.write_bytes(f"{moved}\n\nFirst kept paragraph.\n\nSecond kept paragraph.\n".encode())
+    new.write_bytes(f"First kept paragraph.\n\nSecond kept paragraph.\n\n{edited}\n".encode())
+    out = tmp_path / "page.html"
+    out.write_text(render(compare_paths(old, new, context=None)), encoding="utf-8")
+    context = browser.new_context()
+    page = context.new_page()
+    page.goto(out.as_uri())
+    tip = page.locator("#tip")
+    page.locator("tr.moved-out td.no.l").hover()
+    # a Markdown file's numbers are its lines, blank ones included
+    assert tip.locator("b").inner_text() == "Moved to line 5"
+    assert "edited on the way" in tip.inner_text()
+    page.locator("tr.moved-in td.no.r").hover()
+    assert tip.locator("b").inner_text() == "Moved from line 1"
+    context.close()
+
+
+def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
+    """A report holding both splits shows one at a time, the toolbar (or s)
+    switching; each tells its counts; a line joins a moved line's ends, and
+    the toggle (l) hides them."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_bytes(
+        b"The first sentence stays here. This sentence moves to the end of the text.\n\n"
+        b"A middle paragraph that stays.\n"
+    )
+    new.write_bytes(
+        b"The first sentence stays here.\n\n"
+        b"A middle paragraph that stays. This sentence moves to the end of the text.\n"
+    )
+    out = tmp_path / "page.html"
+    out.write_text(
+        render(
+            compare_paths(old, new, context=None),
+            sentences=compare_paths(old, new, context=None, by_sentence=True),
+        ),
+        encoding="utf-8",
+    )
+    context = browser.new_context()
+    page = context.new_page()
+    page.goto(out.as_uri())
+    paragraphs = page.locator('.split[data-split="paragraph"]')
+    sentences = page.locator('.split[data-split="sentence"]')
+    assert paragraphs.is_visible() and not sentences.is_visible()
+    assert "Paragraphs: 2 changed" in paragraphs.locator(".units").inner_text()
+    page.keyboard.press("s")
+    assert sentences.is_visible() and not paragraphs.is_visible()
+    assert "1 moved" in sentences.locator(".units").inner_text()
+    assert "Sentences" in page.locator("[data-split-switch]").inner_text()
+    # drawn on the next frame: the assertions wait for it
+    sync_api.expect(sentences.locator("svg.move-links path")).to_have_count(1)
+    page.keyboard.press("l")
+    sync_api.expect(sentences.locator("svg.move-links")).to_have_count(0)
+    page.locator("[data-split-switch]").click()
+    assert paragraphs.is_visible()
+    context.close()

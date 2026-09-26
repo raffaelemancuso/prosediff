@@ -6,7 +6,7 @@ Revisions are simulated on public-domain books from Project Gutenberg (in
 English, Italian and German; fiction, drama, science and an essay), so that
 where every line went is known. The analysis is run twice, on the two kinds
 of line prosediff compares: paragraphs (by default) and sentences (with
---by-sentence, split by prosediff.sentences in each book's language), each
+--split sentence, split by prosediff.sentences in each book's language), each
 with its own suggested default. Each trial takes a stretch of STRETCH
 consecutive lines (short lines of dialogue included, as they come) and
 makes a new version of it:
@@ -45,16 +45,19 @@ of edit.
 Each algorithm is also timed as diff.mark_moves runs it, on its largest
 job: BENCH x BENCH removed and added paragraphs (diff.MOVE_MAX_CELLS pairs),
 half of the added ones edited versions of removed ones; the best of REPEATS
-runs. The suggested default is the fastest of the algorithms whose best F1
+runs, timed alone, once the trials (scored in parallel, in WORKERS
+processes) are done. The suggested default is the fastest of the algorithms whose best F1
 is within F1_TIE points of the best. The report is written next to this
 script, as move_sensitivity.txt, with a part for each kind of line.
 """
 
+import os
 import random
 import re
 import time
 import urllib.request
-from collections import defaultdict
+from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -84,7 +87,7 @@ BOOKS = [
     (45334, "it", "Manzoni, I promessi sposi (it, novel)"),
     (2229, "de", "Goethe, Faust I (de, drama)"),
 ]
-# The kinds of line compared: paragraphs, and sentences (--by-sentence).
+# The kinds of line compared: paragraphs, and sentences (--split sentence).
 UNITS = ("paragraph", "sentence")
 SEED = 20260926
 TRIALS_PER_BOOK = 200
@@ -109,6 +112,8 @@ BENCH = int(MOVE_MAX_CELLS**0.5)  # 500 x 500 pairs
 REPEATS = 3
 F1_TIE = 0.005  # best F1s this close are a tie, broken by speed
 CHECKED_TRIALS = 20  # trials whose replayed matching is checked against diff.align
+WORKERS = os.cpu_count() or 1
+SCORE_TIMEOUT = 1800  # seconds, for all the trials of one kind of line
 FETCH_TIMEOUT = 60  # seconds, per book
 WORD = re.compile(r"\w+", re.UNICODE)
 SENTENCE = re.compile(r"(?<=[.!?;:])\s+")
@@ -298,30 +303,16 @@ def column(values: list[str], width: int) -> str:
     return "".join(f"{v:>{width}}" for v in values)
 
 
-def lines_of(number: int, language: str, unit: str) -> list[str]:
-    """A book's lines of a kind: its paragraphs, or their sentences."""
-    book = paragraphs(book_text(number))
-    return book if unit == "paragraph" else split_sentences(book, language)[0]
-
-
-def analyse(unit: str) -> tuple[list[str], tuple]:
-    """The part of the report on one kind of line, and its suggested default
-    (algorithm, threshold, precision, recall, F1, wrong moves)."""
-    rng = random.Random(SEED)
-    trials, corpus, books, vocabularies = [], [], [], []
-    for number, language, title in BOOKS:
-        book = lines_of(number, language, unit)
-        vocabulary = [w for p in book for w in p.split(" ") if WORD.fullmatch(w)]
-        corpus.append((title, len(book)))
-        books.append(book)
-        vocabularies.append(vocabulary)
-        trials += [trial(book, vocabulary, rng, unit) for _ in range(TRIALS_PER_BOOK)]
-
-    right: dict = defaultdict(int)  # (algorithm, threshold, kind)
-    wrong: dict = defaultdict(int)  # (algorithm, threshold)
-    to_find: dict = defaultdict(int)  # kind
+def score_trials(share: list[tuple[int, tuple]]) -> tuple[Counter, Counter, Counter, int]:
+    """Score a share of the trials, (number, trial): the right moves found,
+    by algorithm, threshold and kind of edit; the wrong ones, by algorithm
+    and threshold; the moves to find, by kind; and how many runs were
+    checked against diff.align (those of the first CHECKED_TRIALS)."""
+    right: Counter = Counter()  # (algorithm, threshold, kind)
+    wrong: Counter = Counter()  # (algorithm, threshold)
+    to_find: Counter = Counter()  # kind
     checked = 0
-    for n, (old, new, source, kinds) in enumerate(trials):
+    for n, (old, new, source, kinds) in share:
         # the pairing before any move gives way: the same at every threshold
         ops = difflib_opcodes(old, new)
         base = line_pairs(ops, old, new, move_similarity=2.0)
@@ -371,6 +362,42 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
                     else:
                         wrong[(algorithm, threshold)] += 1
 
+    return right, wrong, to_find, checked
+
+
+def lines_of(number: int, language: str, unit: str) -> list[str]:
+    """A book's lines of a kind: its paragraphs, or their sentences."""
+    book = paragraphs(book_text(number))
+    return book if unit == "paragraph" else split_sentences(book, language)[0]
+
+
+def analyse(unit: str) -> tuple[list[str], tuple]:
+    """The part of the report on one kind of line, and its suggested default
+    (algorithm, threshold, precision, recall, F1, wrong moves)."""
+    rng = random.Random(SEED)
+    trials, corpus, books, vocabularies = [], [], [], []
+    for number, language, title in BOOKS:
+        book = lines_of(number, language, unit)
+        vocabulary = [w for p in book for w in p.split(" ") if WORD.fullmatch(w)]
+        corpus.append((title, len(book)))
+        books.append(book)
+        vocabularies.append(vocabulary)
+        trials += [trial(book, vocabulary, rng, unit) for _ in range(TRIALS_PER_BOOK)]
+
+    # the trials are scored in parallel, WORKERS processes each taking a
+    # share (the alignment is pure Python: threads would wait on the GIL)
+    shares = [list(enumerate(trials))[k::WORKERS] for k in range(WORKERS)]
+    right: Counter = Counter()  # (algorithm, threshold, kind)
+    wrong: Counter = Counter()  # (algorithm, threshold)
+    to_find: Counter = Counter()  # kind
+    checked = 0
+    with ProcessPoolExecutor(max_workers=WORKERS) as pool:
+        for r, w, f, c in pool.map(score_trials, shares, timeout=SCORE_TIMEOUT):
+            right += r
+            wrong += w
+            to_find += f
+            checked += c
+
     n_find = sum(to_find[k] for k in RECOGNISABLE)
     results = []
     for algorithm in MOVE_ALGORITHMS:
@@ -395,7 +422,7 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
     tied = [a for a in MOVE_ALGORITHMS if best[a][4] >= top - F1_TIE]
     winner = best[min(tied, key=lambda a: timing[a][0])]
 
-    title = f"{unit.capitalize()}s" + (" (--by-sentence)" if unit == "sentence" else "")
+    title = f"{unit.capitalize()}s" + (" (--split sentence)" if unit == "sentence" else "")
     lines = [
         title,
         "=" * len(title),

@@ -74,7 +74,7 @@ nav li { padding: 4px 12px; border-top: 1px solid var(--border);
 nav li:first-child { border-top: 0; }
 nav a { color: inherit; flex: 1; overflow-wrap: anywhere; }
 nav .change { color: var(--muted); min-width: 7em; }
-details.file { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 24px;
+details.file { position: relative; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 24px;
   overflow: hidden; }
 details.file > summary { background: var(--panel); padding: 8px 12px; cursor: pointer;
   display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline;
@@ -150,6 +150,20 @@ ins.partial mark { background: var(--ins-word); color: inherit; }
 tr.moved-out td.left, tr.moved-in td.right,
 tr.moved-out td.no.l, tr.moved-in td.no.r { --tint: var(--move-line); }
 tr.moved-out td.no.l, tr.moved-in td.no.r { color: var(--move); font-weight: 600; }
+.summary .units { margin: 0 0 4px; }
+.toolbar .split-switch { font-weight: 600; white-space: nowrap; }
+/* A line from each moved line to where it went, over the file's table;
+   hovering either end highlights both rows and their line. Hidden in one
+   column, where both ends stand in one column, and on paper. */
+svg.move-links { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+svg.move-links path { fill: none; stroke: var(--move); stroke-width: 1.5; opacity: .5; }
+svg.move-links circle { fill: var(--move); opacity: .7; }
+svg.move-links .hot path, svg.move-links .hot circle { opacity: 1; }
+svg.move-links .hot path { stroke-width: 2.5; }
+body:not(.movelinks) svg.move-links, body.unified svg.move-links { display: none; }
+tr.pair-hot td { outline: 1px solid var(--move); outline-offset: -1px; }
+/* A moved line's number tells, on hover, where the line went or came from. */
+td[data-move] { cursor: help; }
 .comment { font-size: 0.85em; background: var(--panel); border-radius: 3px;
   padding: 0 2px; }
 /* A new comment's icon says it all: no box around it. */
@@ -331,6 +345,13 @@ thead.print, .print-note { display: none; }
 {% macro gutter_flag(f, no, lang) -%}
 {% if f.mixed_languages and no is not none %}{{ flag(lang or f.language, paragraph_language_note(lang, f.language, f.language_source)) }}{% endif %}
 {%- endmacro %}
+{% macro comment_list(items) %}
+  <ul>
+  {% for e in items %}
+    <li><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
+  {% endfor %}
+  </ul>
+{% endmacro %}
 {% macro side(r) -%}
 {{ r.subject }}{% if r.author or r.date %} <span class="role">— {{ r.author }}{% if r.author and r.date %}, {% endif %}{{ r.date }}</span>{% endif %}
 {%- endmacro %}
@@ -357,21 +378,6 @@ thead.print, .print-note { display: none; }
 </details>
 {% endif %}
 
-{% if c.comments %}
-{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
-<section class="comments-panel" aria-labelledby="comments-title">
-  <h2 id="comments-title">Comments: {{ "{:,}".format(new_c | length) }} new, {{ "{:,}".format(gone_c | length) }} removed</h2>
-  {% macro comment_list(items) %}
-  <ul>
-  {% for e in items %}
-    <li><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
-  {% endfor %}
-  </ul>
-  {% endmacro %}
-  {{ comment_list(new_c + gone_c) }}
-</section>
-{% endif %}
-
 {% macro counts(x) -%}
 <span class="add" title="lines added">+{{ "{:,}".format(x.additions) }}</span>
 <span class="rem" title="lines removed">−{{ "{:,}".format(x.deletions) }}</span>
@@ -381,10 +387,36 @@ thead.print, .print-note { display: none; }
 <span class="role">words{% if x.moved %}, {{ "{:,}".format(x.moved) }} moved line{{ "" if x.moved == 1 else "s" }}{% endif %}</span>
 {%- endmacro %}
 
+{# What a line is in a comparison: a paragraph or a sentence of prose, or a
+   line of other files. #}
+{% macro unit_name(c, split) -%}
+{% if c.files and c.files | selectattr("markdown") | list | length == c.files | length %}{{ "sentences" if split == "sentence" else "paragraphs" }}{% else %}lines{% endif %}
+{%- endmacro %}
+
+{# The body of the report for one comparison; prefix sets its ids apart when
+   the report holds two, one per split. #}
+{% macro report_body(c, split, prefix="") %}
+{% if c.comments %}
+{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
+<section class="comments-panel" aria-labelledby="{{ prefix }}comments-title">
+  <h2 id="{{ prefix }}comments-title">Comments: {{ "{:,}".format(new_c | length) }} new, {{ "{:,}".format(gone_c | length) }} removed</h2>
+  {{ comment_list(new_c + gone_c) }}
+</section>
+{% endif %}
+
+
+
 {% if not c.files %}
 <p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
 {% else %}
 <div class="summary">
+  {% if c.changed_lines or c.inserted_lines or c.deleted_lines or c.moved %}
+  <p class="units"><b>{{ unit_name(c, split) | capitalize }}:</b>
+    {{ "{:,}".format(c.changed_lines) }} changed,
+    {{ "{:,}".format(c.inserted_lines) }} inserted,
+    {{ "{:,}".format(c.deleted_lines) }} deleted,
+    {{ "{:,}".format(c.moved) }} moved</p>
+  {% endif %}
   <span>{{ "{:,}".format(c.files | length) }} file{{ "" if c.files | length == 1 else "s" }} changed:
   {{ counts(c) }}{% if paths %}, in {{ paths | join(", ") }}{% endif %}</span>
   <button type="button" data-files="open">Expand all</button>
@@ -444,10 +476,11 @@ thead.print, .print-note { display: none; }
     <tbody>
     {% else %}
     {% set sign = signs.get(r.kind, ("", "")) %}
-    <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}{% if r.format_changes %} fmt-row{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>
-      <td class="no l">{{ gutter_flag(f, r.left_no, r.left_lang) }}{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
+    <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}{% if r.format_changes %} fmt-row{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}{% if r.move_pair %} data-pair="{{ r.move_pair }}"{% endif %}>
+      {% set move = r.changes[0] if r.kind in ("moved-out", "moved-in") and r.changes else "" %}
+      <td class="no l"{% if r.kind == "moved-out" and move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, r.left_no, r.left_lang) }}{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
       <td class="code left"{% if r.left_lang and r.left_lang != f.language %} lang="{{ r.left_lang }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left | hyphenate(r.left_lang or f.language) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
-      <td class="no r">{{ gutter_flag(f, r.right_no, r.right_lang) }}{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
+      <td class="no r"{% if r.kind == "moved-in" and move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, r.right_no, r.right_lang) }}{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
       <td class="code right"{% if r.right_lang and r.right_lang != f.language %} lang="{{ r.right_lang }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right | hyphenate(r.right_lang or f.language) }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
     </tr>
     {% endif %}
@@ -459,6 +492,19 @@ thead.print, .print-note { display: none; }
 {% endfor %}
 {% endif %}
 
+{% endmacro %}
+
+{% if alt %}
+<div class="split" data-split="paragraph" aria-label="Compared paragraph by paragraph">
+{{ report_body(c, "paragraph") }}
+</div>
+<div class="split" data-split="sentence" aria-label="Compared sentence by sentence" hidden>
+{{ report_body(alt, "sentence", "s-") }}
+</div>
+{% else %}
+{{ report_body(c, split) }}
+{% endif %}
+
 <footer>Generated {{ generated }} by <a href="{{ homepage }}">prosediff</a> {{ version }}.</footer>
 </main>
 <div id="tip" role="tooltip" hidden></div>
@@ -466,6 +512,8 @@ thead.print, .print-note { display: none; }
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
   <span class="counter" aria-live="polite" title="{{ "{:,}".format(c.change_count) }} change{{ "" if c.change_count == 1 else "s" }}">{{ "{:,}".format(c.change_count) }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
+  {% if alt %}<button type="button" class="split-switch" data-split-switch aria-pressed="false" title="Sentences: the comparison sentence by sentence instead of paragraph by paragraph (s)">¶ Paragraphs</button>{% endif %}
+  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved line to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
   <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg></button>
@@ -483,11 +531,44 @@ thead.print, .print-note { display: none; }
 </div>
 <script>
 (function () {
-  var changes = Array.prototype.slice.call(document.querySelectorAll("tr.first-change"));
+  var changes = [];
   var counter = document.querySelector(".toolbar .counter");
   var current = -1;
   var fmt = function (n) { return n.toLocaleString("en-US"); };
-  document.querySelectorAll("[data-nav]").forEach(function (b) { b.disabled = !changes.length; });
+  // The changes of what is shown: the whole report, or, when it holds both
+  // splits, the one shown.
+  function refreshChanges() {
+    var root = document.querySelector(".split:not([hidden])") || document;
+    changes = Array.prototype.slice.call(root.querySelectorAll("tr.first-change"));
+    current = -1;
+    counter.textContent = fmt(changes.length);
+    counter.dataset.help = fmt(changes.length) + " change" + (changes.length === 1 ? "" : "s");
+    document.querySelectorAll("[data-nav]").forEach(function (b) { b.disabled = !changes.length; });
+  }
+  // Paragraph by paragraph, or sentence by sentence: remembered like the views.
+  var splitSwitch = document.querySelector("[data-split-switch]");
+  function setSplit(sentences, remember) {
+    if (!splitSwitch) return;
+    document.querySelectorAll(".split").forEach(function (d) {
+      d.hidden = (d.dataset.split === "sentence") !== sentences;
+    });
+    splitSwitch.setAttribute("aria-pressed", sentences ? "true" : "false");
+    splitSwitch.textContent = sentences ? "\u00b6 Sentences" : "\u00b6 Paragraphs";
+    splitSwitch.dataset.help = sentences
+      ? "Paragraphs: the comparison paragraph by paragraph instead of sentence by sentence (s)"
+      : "Sentences: the comparison sentence by sentence instead of paragraph by paragraph (s)";
+    if (remember) {
+      try { localStorage.setItem("prosediff-split", sentences ? "sentence" : "paragraph"); } catch (e) {}
+    }
+    refreshChanges();
+    document.dispatchEvent(new Event("prosediff-layout"));
+  }
+  refreshChanges();
+  if (splitSwitch) {
+    var savedSplit = null;
+    try { savedSplit = localStorage.getItem("prosediff-split"); } catch (e) {}
+    setSplit(savedSplit === "sentence", false);
+  }
 
   // Jump to change k (wrapping around), opening its file if collapsed.
   function go(k) {
@@ -517,7 +598,8 @@ thead.print, .print-note { display: none; }
   // Formatted text and formatting changes are on by default, the other
   // views off; a choice the
   // browser remembers wins.
-  var VIEW_DEFAULT = { unified: false, formatted: true, tint: false, inline: false, formats: true };
+  var VIEW_DEFAULT = { unified: false, formatted: true, tint: false, inline: false, formats: true,
+                       movelinks: true };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
     try {
@@ -553,6 +635,10 @@ thead.print, .print-note { display: none; }
     if (all) {
       var open = all.dataset.files === "open";
       document.querySelectorAll("details.file").forEach(function (d) { d.open = open; });
+      return;
+    }
+    if (e.target.closest("[data-split-switch]")) {
+      setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true);
       return;
     }
     var nav = e.target.closest("[data-nav]");
@@ -604,7 +690,8 @@ thead.print, .print-note { display: none; }
     var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
                  t: function () { toggle("tint"); }, i: function () { toggle("inline"); },
-                 m: function () { toggle("formats"); },
+                 m: function () { toggle("formats"); }, l: function () { toggle("movelinks"); },
+                 s: function () { if (splitSwitch) setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true); },
                  "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
   });
@@ -630,8 +717,8 @@ thead.print, .print-note { display: none; }
   openTarget();
 
   // The tooltips: a comment's author, text and date on hovering its
-  // marker, who made a tracked change and when (formatted view), and the
-  // toolbar's help. One element shows them, placed by the
+  // marker, who made a tracked change and when (formatted view), where a
+  // moved line went or came from (on its number), and the toolbar's help. One element shows them, placed by the
   // script so no file box clips it, one at a time. A comment also lives in
   // its marker's aria-label, for screen readers.
   var tip = document.getElementById("tip");
@@ -656,6 +743,9 @@ thead.print, .print-note { display: none; }
     } else if (el.classList.contains("fmt")) {
       add("b", "Formatting changed");
       add("line", el.dataset.fmt);
+    } else if (el.dataset.move) {
+      add("b", el.dataset.move);
+      if (el.hasAttribute("data-move-edited")) add("line", "edited on the way");
     } else if (el.matches(".s-tc-ins, .s-tc-del")) {
       add("b", el.classList.contains("s-tc-ins") ? "Tracked insertion" : "Tracked deletion");
       if (el.dataset.author) add("line", "by " + el.dataset.author);
@@ -707,7 +797,8 @@ thead.print, .print-note { display: none; }
 
   var anchorX = 0;
   function tipTarget(el) {
-    return el.closest(".toolbar [data-help]") || (commentTips && el.closest(".comment")) ||
+    return el.closest(".toolbar [data-help]") || el.closest("td[data-move]") ||
+      (commentTips && el.closest(".comment")) ||
       (document.body.classList.contains("formats") && el.closest(".fmt")) ||
       (document.body.classList.contains("formatted") && el.closest(".s-tc-ins, .s-tc-del"));
   }
@@ -725,6 +816,83 @@ thead.print, .print-note { display: none; }
   document.addEventListener("focusout", hideTip);
   // Scrolling keeps the tooltip where it belongs.
   window.addEventListener("scroll", function () { anchorX = 0; placeTip(); }, { passive: true });
+
+  // The lines between moved lines: drawn over each file's table, from the
+  // end of a moved line's old text to the number of its new place, and
+  // drawn again whenever the layout may have changed.
+  var SVG = "http://www.w3.org/2000/svg";
+  function drawLinks(file) {
+    var old = file.querySelector(":scope > svg.move-links");
+    if (old) old.remove();
+    var outs = file.querySelectorAll("tr.moved-out[data-pair]");
+    if (!outs.length || !file.open || !document.body.classList.contains("movelinks") ||
+        document.body.classList.contains("unified") || file.closest(".split[hidden]")) return;
+    var box = file.getBoundingClientRect();
+    var svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("class", "move-links");
+    svg.setAttribute("width", box.width);
+    svg.setAttribute("height", box.height);
+    svg.setAttribute("aria-hidden", "true");
+    outs.forEach(function (out) {
+      var into = file.querySelector('tr.moved-in[data-pair="' + out.dataset.pair + '"]');
+      var from = out.querySelector("td.code.left"), to = into && into.querySelector("td.no.r");
+      if (!from || !to) return;
+      var a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+      if (!a.height || !b.height) return;
+      var x1 = a.right - box.left - 3, y1 = a.top + a.height / 2 - box.top;
+      var x2 = b.left - box.left + 3, y2 = b.top + b.height / 2 - box.top;
+      // each pair bends a little further, so lines running side by side part
+      var bend = Math.max(24, (x2 - x1) / 2) + (Number(out.dataset.pair) % 6) * 9;
+      var g = document.createElementNS(SVG, "g");
+      g.dataset.pair = out.dataset.pair;
+      var path = document.createElementNS(SVG, "path");
+      path.setAttribute("d", "M" + x1 + " " + y1 + " C" + (x1 + bend) + " " + y1 + " " +
+        (x2 - bend) + " " + y2 + " " + x2 + " " + y2);
+      g.appendChild(path);
+      [[x1, y1], [x2, y2]].forEach(function (p) {
+        var c = document.createElementNS(SVG, "circle");
+        c.setAttribute("cx", p[0]);
+        c.setAttribute("cy", p[1]);
+        c.setAttribute("r", 2.5);
+        g.appendChild(c);
+      });
+      svg.appendChild(g);
+    });
+    file.appendChild(svg);
+  }
+  var linksPending = false;
+  function drawAllLinks() {
+    if (linksPending) return;
+    linksPending = true;
+    requestAnimationFrame(function () {
+      linksPending = false;
+      document.querySelectorAll("details.file").forEach(drawLinks);
+    });
+  }
+  drawAllLinks();
+  window.addEventListener("resize", drawAllLinks);
+  document.addEventListener("prosediff-layout", drawAllLinks);
+  document.addEventListener("toggle", drawAllLinks, true);
+  document.addEventListener("click", function () { setTimeout(drawAllLinks, 0); });
+  document.addEventListener("keydown", function () { setTimeout(drawAllLinks, 0); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawAllLinks);
+  if (window.ResizeObserver) {
+    var watcher = new ResizeObserver(drawAllLinks);
+    document.querySelectorAll("details.file table").forEach(function (tb) { watcher.observe(tb); });
+  }
+  // Hovering a moved line lights up the other end and the line between.
+  document.addEventListener("mouseover", function (e) {
+    var row = e.target.closest("tr[data-pair]");
+    var hot = document.querySelectorAll(".pair-hot, svg.move-links .hot");
+    hot.forEach(function (el) { el.classList.remove("pair-hot", "hot"); });
+    if (!row) return;
+    var file = row.closest("details.file");
+    file.querySelectorAll('tr[data-pair="' + row.dataset.pair + '"]').forEach(function (r) {
+      r.classList.add("pair-hot");
+    });
+    var g = file.querySelector('svg.move-links g[data-pair="' + row.dataset.pair + '"]');
+    if (g) g.classList.add("hot");
+  });
 
   // Print every file, collapsed or not.
   window.addEventListener("beforeprint", function () {

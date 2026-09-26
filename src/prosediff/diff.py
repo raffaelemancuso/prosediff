@@ -214,6 +214,9 @@ class Row:
     # Its formatting changes, in plain English: text of a document made bold,
     # underlined, ... (the HTML report shows them on demand).
     format_changes: list[str] = field(default_factory=list)
+    # The same number on the two rows of a moved line (0: not moved), for the
+    # HTML report to draw a line between them.
+    move_pair: int = 0
 
     @property
     def skipped(self) -> int:
@@ -258,6 +261,8 @@ class FileDiff:
     new_lines: list[str] = field(default_factory=list)
     # The comments folded out of those lines, behind their placeholders.
     comments: Comments | None = None
+    # Set apart the ids of its rows, when a report holds two comparisons.
+    anchor_prefix: str = ""
 
     @property
     def path(self) -> str:
@@ -276,6 +281,19 @@ class FileDiff:
         return sum(r.kind == "moved-in" for r in self.rows)
 
     @property
+    def changed_lines(self) -> int:
+        """Lines (paragraphs, sentences) edited in place."""
+        return sum(r.kind == "replace" for r in self.rows)
+
+    @property
+    def inserted_lines(self) -> int:
+        return sum(r.kind == "insert" for r in self.rows)
+
+    @property
+    def deleted_lines(self) -> int:
+        return sum(r.kind == "delete" for r in self.rows)
+
+    @property
     def change_count(self) -> int:
         return sum(r.first_of_change for r in self.rows)
 
@@ -286,7 +304,7 @@ class FileDiff:
 
     @property
     def anchor(self) -> str:
-        return "file-" + re.sub(r"[^A-Za-z0-9_-]", "-", self.path)
+        return "file-" + self.anchor_prefix + re.sub(r"[^A-Za-z0-9_-]", "-", self.path)
 
 
 @dataclass
@@ -321,6 +339,18 @@ class Comparison:
     @property
     def moved(self) -> int:
         return sum(f.moved for f in self.files)
+
+    @property
+    def changed_lines(self) -> int:
+        return sum(f.changed_lines for f in self.files)
+
+    @property
+    def inserted_lines(self) -> int:
+        return sum(f.inserted_lines for f in self.files)
+
+    @property
+    def deleted_lines(self) -> int:
+        return sum(f.deleted_lines for f in self.files)
 
     @property
     def change_count(self) -> int:
@@ -1007,8 +1037,9 @@ def move_key(line: str) -> str | None:
     return key if len(key.replace(" ", "")) >= MIN_MOVE_CHARS else None
 
 
-def _make_move(out: Row, into: Row, style: Styler) -> None:
+def _make_move(out: Row, into: Row, style: Styler, pair: int = 0) -> None:
     out.kind, into.kind = "moved-out", "moved-in"
+    out.move_pair = into.move_pair = pair
     to_line = into.right_label or f"{into.right_no:,}"
     from_line = out.left_label or f"{out.left_no:,}"
     if move_key(out.text) == move_key(into.text):
@@ -1065,8 +1096,20 @@ MOVE_ALGORITHMS = {
     ),
 }
 MOVE_ALGORITHM = "token-sort"
+# The defaults when lines are sentences (--by-sentence): shorter lines, whose
+# likeness moves more with each word edited (docs/move_sensitivity.py).
+SENTENCE_MOVE_SIMILARITY = 0.55
+SENTENCE_MOVE_ALGORITHM = "token-sort"
 MOVE_TOLERANCE = 1e-9
 MOVE_MARGIN = 0.01
+
+
+def move_defaults(by_sentence: bool) -> tuple[float, str]:
+    """The moved-line similarity and algorithm prosediff uses unless told
+    otherwise: those for paragraphs, or for sentences (--by-sentence)."""
+    if by_sentence:
+        return SENTENCE_MOVE_SIMILARITY, SENTENCE_MOVE_ALGORITHM
+    return MOVE_SIMILARITY, MOVE_ALGORITHM
 
 
 def check_move_algorithm(name: str) -> None:
@@ -1090,13 +1133,15 @@ def mark_moves(
     most similar pairs first.
     """
     style = style or Styler(False)
+    pairs = 0  # the moves found, numbered for the HTML report
     removed: dict[str, list[Row]] = defaultdict(list)
     for r in rows:
         if r.kind == "delete" and (key := move_key(r.text)):
             removed[key].append(r)
     for r in rows:
         if r.kind == "insert" and (key := move_key(r.text)) and removed.get(key):
-            _make_move(removed[key].pop(0), r, style)
+            pairs += 1
+            _make_move(removed[key].pop(0), r, style, pairs)
 
     outs = [r for r in rows if r.kind == "delete" and move_key(r.text)]
     ins = [r for r in rows if r.kind == "insert" and move_key(r.text)]
@@ -1119,7 +1164,8 @@ def mark_moves(
         if a not in used_out and b not in used_in:
             used_out.add(a)
             used_in.add(b)
-            _make_move(outs[a], ins[b], style)
+            pairs += 1
+            _make_move(outs[a], ins[b], style, pairs)
 
 
 Pairing = list[tuple[str, int | None, int | None]]
@@ -1422,9 +1468,11 @@ def build_files(
     drop_comments: bool = False,
     max_hidden: int | None,
     docx_changes: str,
-    move_similarity: float = MOVE_SIMILARITY,
-    move_algorithm: str = MOVE_ALGORITHM,
+    move_similarity: float | None = None,
+    move_algorithm: str | None = None,
     by_sentence: bool = False,
+    sentence_move_similarity: float | None = None,
+    sentence_move_algorithm: str | None = None,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
 ) -> list[CommentEntry]:
@@ -1563,7 +1611,17 @@ def build_files(
     for (fd, old, new), ops in zip(texts, all_ops, strict=False):
         fn = notes.get(id(fd))
         token = footnotes.use_for_tooltips(fn)
-        pairs = line_pairs(ops, old, new, move_similarity, move_algorithm)
+        # the defaults of how the file is compared: prose sentence by sentence,
+        # or line by line (paragraphs, in prose)
+        # the move settings of how the file is compared: prose sentence by
+        # sentence, or line by line (paragraphs, in prose); None, the default
+        sentences = by_sentence and fd.markdown
+        default_similarity, default_algorithm = move_defaults(sentences)
+        chosen_similarity = sentence_move_similarity if sentences else move_similarity
+        chosen_algorithm = sentence_move_algorithm if sentences else move_algorithm
+        similarity = default_similarity if chosen_similarity is None else chosen_similarity
+        algorithm = chosen_algorithm or default_algorithm
+        pairs = line_pairs(ops, old, new, similarity, algorithm)
         fd.pairs = [(i, j) for _, i, j in pairs]
         if fd.markdown:
             fd.old_lines = [diff_line(x, fn.old if fn else {}) for x in old]
@@ -1578,8 +1636,8 @@ def build_files(
             ops,
             markdown=fd.markdown,
             max_hidden=max_hidden,
-            move_similarity=move_similarity,
-            move_algorithm=move_algorithm,
+            move_similarity=similarity,
+            move_algorithm=algorithm,
             old_labels=labels[id(fd)][0],
             new_labels=labels[id(fd)][1],
             pairs=pairs,
@@ -1697,8 +1755,8 @@ def comment_entries(
 # Repository level -------------------------------------------------------------
 
 
-def check_move_similarity(value: float) -> None:
-    if not 0 < value <= 1:
+def check_move_similarity(value: float | None) -> None:
+    if value is not None and not 0 < value <= 1:
         raise ValueError(f"move similarity must be above 0 and at most 1, not {value}")
 
 
@@ -1724,9 +1782,11 @@ def compare(
     drop_comments: bool = False,
     max_hidden: int | None = MAX_HIDDEN,
     docx_changes: str = "accept",
-    move_similarity: float = MOVE_SIMILARITY,
-    move_algorithm: str = MOVE_ALGORITHM,
+    move_similarity: float | None = None,
+    move_algorithm: str | None = None,
     by_sentence: bool = False,
+    sentence_move_similarity: float | None = None,
+    sentence_move_algorithm: str | None = None,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
 ) -> Comparison:
@@ -1753,7 +1813,10 @@ def compare(
     documents: "accept", "reject" or "all" (kept as markup).
     move_similarity is how alike, from 0 to 1, an edited line must be to
     where it reappears to count as moved (1: only lines moved unchanged), by
-    move_algorithm, one of MOVE_ALGORITHMS.
+    move_algorithm, one of MOVE_ALGORITHMS, where lines are compared whole
+    (paragraphs, in prose); sentence_move_similarity and
+    sentence_move_algorithm where prose is compared sentence by sentence.
+    None (each) is prosediff's default for that way (move_defaults).
     by_sentence compares the prose of Markdown files (and Word documents)
     sentence by sentence instead of line by line; each sentence is labelled
     with its line and its place in it ("12.3"). language is that of their
@@ -1766,8 +1829,11 @@ def compare(
     codec's name, or "auto" (the default), UTF-8 unless the file shows it is
     not, then guessed (decode_text).
     """
-    check_move_similarity(move_similarity)
-    check_move_algorithm(move_algorithm)
+    for value in (move_similarity, sentence_move_similarity):
+        check_move_similarity(value)
+    for name in (move_algorithm, sentence_move_algorithm):
+        if name is not None:
+            check_move_algorithm(name)
     language = normalize_language(language)
     encoding = check_encoding(encoding)
     if cached and target is not None:
@@ -1816,6 +1882,8 @@ def compare(
         docx_changes=docx_changes,
         move_similarity=move_similarity,
         move_algorithm=move_algorithm,
+        sentence_move_similarity=sentence_move_similarity,
+        sentence_move_algorithm=sentence_move_algorithm,
         by_sentence=by_sentence,
         language=language,
         encoding=encoding,
@@ -1870,9 +1938,11 @@ def compare_paths(
     drop_comments: bool = False,
     max_hidden: int | None = MAX_HIDDEN,
     docx_changes: str = "accept",
-    move_similarity: float = MOVE_SIMILARITY,
-    move_algorithm: str = MOVE_ALGORITHM,
+    move_similarity: float | None = None,
+    move_algorithm: str | None = None,
     by_sentence: bool = False,
+    sentence_move_similarity: float | None = None,
+    sentence_move_algorithm: str | None = None,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
     include: str | None = FOLDER_FILES,
@@ -1888,8 +1958,11 @@ def compare_paths(
     file's name, or its path within the folder for a pattern with a "/",
     ignoring case. The other options are those of compare().
     """
-    check_move_similarity(move_similarity)
-    check_move_algorithm(move_algorithm)
+    for value in (move_similarity, sentence_move_similarity):
+        check_move_similarity(value)
+    for name in (move_algorithm, sentence_move_algorithm):
+        if name is not None:
+            check_move_algorithm(name)
     language = normalize_language(language)
     encoding = check_encoding(encoding)
     old, new = Path(old), Path(new)
@@ -1936,6 +2009,8 @@ def compare_paths(
         docx_changes=docx_changes,
         move_similarity=move_similarity,
         move_algorithm=move_algorithm,
+        sentence_move_similarity=sentence_move_similarity,
+        sentence_move_algorithm=sentence_move_algorithm,
         by_sentence=by_sentence,
         language=language,
         encoding=encoding,

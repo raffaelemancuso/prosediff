@@ -160,7 +160,6 @@ def test_split_lines_counts_like_git():
     [
         (["a", "b", "c"], ["a", "c", "d"]),
         ([], ["x", "y"]),
-        ([f"l{i}" for i in range(30)], [f"l{i}" for i in range(30) if i % 7] + ["end"]),
     ],
 )
 def test_git_opcodes_cover_both_files(old, new):

@@ -34,15 +34,14 @@ import ttkbootstrap as ttk
 
 from prosediff.diff import (
     AUTO_ENCODING,
-    MOVE_ALGORITHM,
     MOVE_ALGORITHMS,
-    MOVE_SIMILARITY,
     Comparison,
     Context,
     FilterError,
     check_encoding,
     compare,
     compare_paths,
+    move_defaults,
 )
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
 from prosediff.render import (
@@ -120,11 +119,15 @@ class Settings:
     context_lines: str = "auto"
     full: bool = False
     ignore_whitespace: bool = False
-    # None: prosediff's default (diff.MOVE_SIMILARITY, diff.MOVE_ALGORITHM),
-    # whatever it is when the window runs; a value only when one was chosen
+    # The moved-line matching of paragraphs (lines of other files), and of
+    # sentences; None: prosediff's default (diff.move_defaults), whatever it
+    # is when the window runs; a value only when one was chosen
     move_similarity: float | None = None
     move_algorithm: str | None = None
-    by_sentence: bool = False
+    sentence_move_similarity: float | None = None
+    sentence_move_algorithm: str | None = None
+    # how prose is compared: one of SPLITS
+    split: str = "paragraph"
     # a language code; "document": marked in Word and OpenDocument files;
     # "guess": guessed from each file's text; "default": document, else guess
     language: str = DEFAULT
@@ -137,8 +140,6 @@ class Settings:
 
 
 READY = "Choose what to compare, then Compare."
-# The moved-line similarity's default before the algorithm could be chosen.
-OLD_MOVE_SIMILARITY = 0.8
 # The tooltips: their width in pixels, and how long the pointer must rest.
 HINT_WIDTH = 360
 HINT_DELAY_MS = 400
@@ -146,6 +147,9 @@ HINT_DELAY_MS = 400
 TOAST_MS = 4000
 # What becomes of the comments, as --comments says.
 COMMENT_MODES = ("markers", "text", "none")
+# How prose is compared, as --split says: paragraph by paragraph, sentence
+# by sentence, or both (in the HTML report only).
+SPLITS = ("paragraph", "sentence", "both")
 # The tabs, in their order.
 MODES = ("git", "files", "folders")
 PREFILLED_FILES = (".md", ".docx", ".odt")
@@ -240,29 +244,18 @@ def settings_file() -> Path:
 
 
 def load_settings(path: Path | None = None) -> Settings:
-    """The choices of the last run, or the defaults. Two folders remembered
-    from the time files and folders shared a tab move to the folders tab."""
+    """The choices saved (Save options), or the defaults; a value that is
+    no choice the window offers gives way to its default."""
     try:
         data = json.loads((path or settings_file()).read_text(encoding="utf-8"))
         known = Settings.__dataclass_fields__
         s = Settings(**{k: v for k, v in data.items() if k in known})
     except (OSError, ValueError, TypeError):
         return Settings()
-    if "old_folder" not in data and s.old and Path(s.old).is_dir():
-        s.old_folder, s.new_folder, s.old, s.new = s.old, s.new, "", ""
-        if s.mode == "files":
-            s.mode = "folders"
     if s.mode not in MODES:
         s.mode = "git"
-    if "move_algorithm" not in data:
-        # remembered before the algorithm could be chosen: a similarity of
-        # the words in order ("tokens"); its default then, 0.8, was no choice
-        if s.move_similarity == OLD_MOVE_SIMILARITY:
-            s.move_similarity = None
-        elif s.move_similarity is not None:
-            s.move_algorithm = "tokens"
-    if "comments" not in data and data.get("fold_comments") is False:
-        s.comments = "text"  # remembered from the time of the checkbox
+    if s.split not in SPLITS:
+        s.split = "paragraph"
     if s.comments not in COMMENT_MODES:
         s.comments = "markers"
     return s
@@ -300,34 +293,46 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         drop_comments=s.comments == "none",
         empty_comments=s.empty_comments,
         docx_changes=s.docx_changes,
-        move_similarity=move_similarity_of(s),
-        move_algorithm=move_algorithm_of(s),
-        by_sentence=s.by_sentence,
+        # None: prosediff's defaults
+        move_similarity=s.move_similarity,
+        move_algorithm=s.move_algorithm if s.move_algorithm in MOVE_ALGORITHMS else None,
+        sentence_move_similarity=s.sentence_move_similarity,
+        sentence_move_algorithm=(
+            s.sentence_move_algorithm if s.sentence_move_algorithm in MOVE_ALGORITHMS else None
+        ),
         language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
     old, new = sides(s)
-    if s.mode == "files":
-        if not old or not new:
-            raise ValueError("choose the old and the new file")
-        comparison = compare_paths(old, new, **options)
-    elif s.mode == "folders":
-        if not old or not new:
-            raise ValueError("choose the old and the new folder")
-        comparison = compare_paths(old, new, include=s.include, **options)
-    else:
+    fmt = s.output_format if s.output_format in FORMATS else "html"
+    split = s.split if s.split in SPLITS else "paragraph"
+    if split == "both" and fmt != "html":
+        raise ValueError("comparing both ways is for the HTML report: a diff holds one")
+
+    def run(by_sentence: bool) -> Comparison:
+        if s.mode == "files":
+            if not old or not new:
+                raise ValueError("choose the old and the new file")
+            return compare_paths(old, new, by_sentence=by_sentence, **options)
+        if s.mode == "folders":
+            if not old or not new:
+                raise ValueError("choose the old and the new folder")
+            return compare_paths(old, new, include=s.include, by_sentence=by_sentence, **options)
         if not s.repo or not s.base:
             raise ValueError("choose a repository and a base")
         target = None if s.target in ("worktree", "index", "") else s.target
-        comparison = compare(
+        return compare(
             s.repo,
             s.base,
             target,
             cached=s.target == "index",
             untracked=s.untracked and s.target in ("worktree", ""),
+            by_sentence=by_sentence,
             **options,
         )
-    fmt = s.output_format if s.output_format in FORMATS else "html"
+
+    comparison = run(split == "sentence")
+    sentences = run(True) if split == "both" else None
     out = Path(s.output) if s.output else None
     if out is None and s.mode != "git":
         out = default_page(Path(old), Path(new))
@@ -339,6 +344,8 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         s.paths,
         align=s.align,
         context=context_of(s),
+        sentences=sentences,
+        split=split,
     )
     return out, comparison
 
@@ -352,14 +359,18 @@ def with_format(path: str, fmt: str) -> str:
     return str(p.with_suffix(FORMATS[fmt]))
 
 
-def move_similarity_of(s: Settings) -> float:
-    """The moved-line similarity chosen, or prosediff's default."""
-    return MOVE_SIMILARITY if s.move_similarity is None else s.move_similarity
+def move_similarity_of(s: Settings, sentences: bool = False) -> float:
+    """The moved-line similarity chosen for paragraphs (or sentences), or
+    prosediff's default for them."""
+    chosen = s.sentence_move_similarity if sentences else s.move_similarity
+    return move_defaults(sentences)[0] if chosen is None else chosen
 
 
-def move_algorithm_of(s: Settings) -> str:
-    """The moved-line algorithm chosen, or prosediff's default."""
-    return s.move_algorithm if s.move_algorithm in MOVE_ALGORITHMS else MOVE_ALGORITHM
+def move_algorithm_of(s: Settings, sentences: bool = False) -> str:
+    """The moved-line algorithm chosen for paragraphs (or sentences), or
+    prosediff's default for them."""
+    chosen = s.sentence_move_algorithm if sentences else s.move_algorithm
+    return chosen if chosen in MOVE_ALGORITHMS else move_defaults(sentences)[1]
 
 
 def sides(s: Settings) -> tuple[str, str]:
@@ -499,39 +510,51 @@ class App:
             "Word and OpenDocument tracked changes: accept them, reject them, or show them "
             "all, as Word does.",
         )
-        moves = ttk.Frame(compared)
-        self.move_similarity = tk.DoubleVar(value=move_similarity_of(self.s))
-        ttk.Spinbox(
-            moves,
-            from_=0.05,
-            to=1.0,
-            increment=0.05,
-            format="%.2f",
-            textvariable=self.move_similarity,
-            width=5,
-        ).pack(side="left")
-        self.move_algorithm = tk.StringVar(value=move_algorithm_of(self.s))
-        ttk.Combobox(
-            moves,
-            textvariable=self.move_algorithm,
-            values=tuple(MOVE_ALGORITHMS),
-            state="readonly",
-            width=11,
-        ).pack(side="left", padx=(6, 0))
+        self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "paragraph")
+        splits = ttk.Frame(compared)
+        split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
+        for value, text in split_names:
+            ttk.Radiobutton(
+                splits,
+                text=text,
+                value=value,
+                variable=self.split,
+                bootstyle="secondary-outline-toolbutton",
+                padding=(8, 3),
+            ).pack(side="left")
         field_row(
             compared,
             1,
-            "Moved lines",
-            moves,
-            "How alike an edited line must be to where it reappears to count as moved "
-            "(1: only lines moved unchanged), and how that is measured. token-sort: the "
-            "words in common, whatever their order.",
+            "Compare by",
+            splits,
+            "How prose is compared: paragraph by paragraph, sentence by sentence (a sentence "
+            "moved between paragraphs is recognised), or both, in one HTML report whose "
+            "toolbar switches between the two.",
         )
+        self.move_similarity = tk.DoubleVar(value=move_similarity_of(self.s))
+        self.move_algorithm = tk.StringVar(value=move_algorithm_of(self.s))
+        self.sentence_move_similarity = tk.DoubleVar(value=move_similarity_of(self.s, True))
+        self.sentence_move_algorithm = tk.StringVar(value=move_algorithm_of(self.s, True))
+        for row, what, similarity, algorithm, sentences in (
+            (2, "paragraphs", self.move_similarity, self.move_algorithm, False),
+            (3, "sentences", self.sentence_move_similarity, self.sentence_move_algorithm, True),
+        ):
+            default = "{:.2f} {}".format(*move_defaults(sentences))
+            field_row(
+                compared,
+                row,
+                f"Moved {what}",
+                move_fields(compared, similarity, algorithm),
+                f"How alike an edited {what[:-1]} must be to where it reappears to count as "
+                "moved (1: only unchanged), and how that is measured. token-sort: the words "
+                f"in common, whatever their order. Default: {default}"
+                + (" (lines of files other than prose too)." if not sentences else "."),
+            )
         self.language = tk.StringVar(value=self.s.language)
         # any code can be typed; the list holds the common ones
         field_row(
             compared,
-            2,
+            4,
             "Language",
             ttk.Combobox(compared, textvariable=self.language, values=LANGUAGES, width=12),
             "Splits sentences and hyphenates lines. default: the language Word and "
@@ -540,23 +563,15 @@ class App:
         self.encoding = tk.StringVar(value=self.s.encoding)
         field_row(
             compared,
-            3,
+            5,
             "Text encoding",
             ttk.Combobox(compared, textvariable=self.encoding, values=ENCODINGS, width=12),
             "Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed.",
         )
-        self.by_sentence = tk.BooleanVar(value=self.s.by_sentence)
-        switch_row(
-            compared,
-            4,
-            "Sentence by sentence",
-            self.by_sentence,
-            "Compare prose sentence by sentence instead of paragraph by paragraph.",
-        )
         self.ignore_ws = tk.BooleanVar(value=self.s.ignore_whitespace)
         switch_row(
             compared,
-            5,
+            6,
             "Ignore whitespace",
             self.ignore_ws,
             "Lines that differ only in spacing are the same, as git diff -w.",
@@ -813,10 +828,21 @@ class App:
         context = self.context.get().strip()
         if not context.isdigit():
             context = "auto"
-        try:
-            move_similarity = min(1.0, max(0.05, float(self.move_similarity.get())))
-        except (tk.TclError, ValueError):
-            move_similarity = MOVE_SIMILARITY
+        moves = {}
+        for sentences, similarity, algorithm in (
+            (False, self.move_similarity, self.move_algorithm),
+            (True, self.sentence_move_similarity, self.sentence_move_algorithm),
+        ):
+            # the default, while it is the one shown: it follows prosediff's
+            default_similarity, default_algorithm = move_defaults(sentences)
+            try:
+                value = min(1.0, max(0.05, float(similarity.get())))
+            except (tk.TclError, ValueError):
+                value = default_similarity
+            moves[sentences] = (
+                None if value == default_similarity else value,
+                None if algorithm.get() == default_algorithm else algorithm.get(),
+            )
         try:
             language = normalize_language(self.language.get())
         except ValueError:
@@ -844,12 +870,11 @@ class App:
             context_lines=context,
             full=self.full.get(),
             ignore_whitespace=self.ignore_ws.get(),
-            # the default, while it is the one shown: it follows prosediff's
-            move_similarity=None if move_similarity == MOVE_SIMILARITY else move_similarity,
-            move_algorithm=(
-                None if self.move_algorithm.get() == MOVE_ALGORITHM else self.move_algorithm.get()
-            ),
-            by_sentence=self.by_sentence.get(),
+            move_similarity=moves[False][0],
+            move_algorithm=moves[False][1],
+            sentence_move_similarity=moves[True][0],
+            sentence_move_algorithm=moves[True][1],
+            split=self.split.get(),
             language=language,
             encoding=encoding,
             output=self.output.get().strip(),
@@ -880,7 +905,9 @@ class App:
             (self.ignore_ws, d.ignore_whitespace),
             (self.move_similarity, move_similarity_of(d)),
             (self.move_algorithm, move_algorithm_of(d)),
-            (self.by_sentence, d.by_sentence),
+            (self.sentence_move_similarity, move_similarity_of(d, True)),
+            (self.sentence_move_algorithm, move_algorithm_of(d, True)),
+            (self.split, d.split),
             (self.language, d.language),
             (self.encoding, d.encoding),
             (self.include, d.include),
@@ -995,6 +1022,24 @@ def switch_row(
     box.grid(row=row, column=0, columnspan=3, sticky="w", pady=4)
     hint(box, tip)
     return box
+
+
+def move_fields(parent: tk.Misc, similarity: tk.DoubleVar, algorithm: tk.StringVar) -> ttk.Frame:
+    """A moved-line setting: its threshold and its algorithm, side by side."""
+    frame = ttk.Frame(parent)
+    ttk.Spinbox(
+        frame,
+        from_=0.05,
+        to=1.0,
+        increment=0.05,
+        format="%.2f",
+        textvariable=similarity,
+        width=5,
+    ).pack(side="left")
+    ttk.Combobox(
+        frame, textvariable=algorithm, values=tuple(MOVE_ALGORITHMS), state="readonly", width=11
+    ).pack(side="left", padx=(6, 0))
+    return frame
 
 
 def swap(a: tk.StringVar, b: tk.StringVar) -> None:

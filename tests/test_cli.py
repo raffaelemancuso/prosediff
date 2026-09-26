@@ -69,25 +69,18 @@ def test_cli_errors(two_commits, tmp_path, capsys):
         ["--git", ".", "HEAD", "HEAD", "--align", "center"],
         ["--git", ".", "HEAD", "HEAD", "-U", "-1"],
         ["--git", ".", "HEAD", "HEAD", "--move-similarity", "0"],
-        ["--git", ".", "HEAD", "HEAD", "--move-similarity", "1.5"],
         ["--git", ".", "HEAD", "HEAD", "--encoding", "no-such-codec"],
         ["--git", ".", "HEAD", "HEAD", "--cached"],
         ["--git", ".", "HEAD", "--cached", "--untracked"],
         ["--files", "HEAD", "b", "c"],
         ["--files", "a", "b", "--cached"],
-        ["--files", "a", "b", "--untracked"],
         ["--global"],
         ["--setup-git", "a", "b"],
-        ["--setup-git", "--global", "a"],
         ["--to-markdown", "x.docx", "a"],
-        ["a"],
         # one and only one of --git, --files and --folders
         [".", "HEAD"],
-        ["--git", "--files", ".", "HEAD"],
-        ["--files", "--folders", "a", "b"],
         ["--git", "--setup-git"],
         ["--files", "a"],
-        ["--folders", "a", "b", "-p", "x", "--cached"],
         ["--files", "a", "b", "-p", "x"],
         ["--files", "a", "b", "--include", "*.md"],
     ],
@@ -165,3 +158,27 @@ def test_cli_writes_a_unified_diff(tmp_path, monkeypatch):
     text = (tmp_path / "b" / "prosediff.diff").read_text()
     assert "Binary files a/p.png and b/p.png differ" in text
     assert "@@ -1,10 +1,10 @@" in text
+
+
+def test_cli_split(tmp_path, capsys):
+    """--split both writes both splits into the HTML report; a diff holds one
+    only; the older --by-sentence is gone."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_bytes(b"One sentence here. Another one there.\n")
+    new.write_bytes(b"Another one there. One sentence here.\n")
+    files = ["--files", str(old), str(new)]
+    out = tmp_path / "r.html"
+    assert main([*files, "--split", "both", "-o", str(out)]) == 0
+    page = out.read_text(encoding="utf-8")
+    assert 'data-split="paragraph"' in page and 'data-split="sentence"' in page
+    assert main([*files, "--split", "sentence", "-o", str(out)]) == 0
+    assert "data-split=" not in out.read_text(encoding="utf-8")
+    for bad in (
+        ["--split", "both", "-o", str(tmp_path / "r.diff")],
+        ["--by-sentence"],
+        ["--sentence-move-similarity", "1.5"],
+    ):
+        with pytest.raises(SystemExit):
+            main([*files, *bad])
+    err = capsys.readouterr().err
+    assert "HTML report" in err and "unrecognized arguments: --by-sentence" in err

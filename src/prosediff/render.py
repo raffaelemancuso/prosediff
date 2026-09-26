@@ -80,19 +80,51 @@ def page_flags(comparison: Comparison) -> set[str]:
     return codes
 
 
-def render(comparison: Comparison, paths: list[str] | None = None, align: str = "left") -> str:
-    """The HTML report; align ("left" or "justify") sets how wrapped lines are aligned."""
+def set_apart(comparison: Comparison, prefix: str) -> None:
+    """Prefix the ids of a comparison's files and rows (and the comments'
+    links to them), for a report to hold it beside another."""
+    for f in comparison.files:
+        old = f.anchor
+        f.anchor_prefix = prefix
+        new = f.anchor
+        for r in f.rows:
+            for row in [r, *r.hidden]:
+                if row.anchor.startswith(old):
+                    row.anchor = new + row.anchor[len(old) :]
+        for e in comparison.comments:
+            if e.anchor == old or e.anchor.startswith(old + "-"):
+                e.anchor = new + e.anchor[len(old) :]
+
+
+def render(
+    comparison: Comparison,
+    paths: list[str] | None = None,
+    align: str = "left",
+    sentences: Comparison | None = None,
+    split: str = "paragraph",
+) -> str:
+    """The HTML report; align ("left" or "justify") sets how wrapped lines are
+    aligned. split says how the comparison compared prose, "paragraph" or
+    "sentence"; given sentences, the same comparison sentence by sentence,
+    the report holds both (comparison then paragraph by paragraph), and a
+    switch of its toolbar shows one or the other."""
     if align not in ALIGNMENTS:
         raise ValueError(f"align must be one of {ALIGNMENTS}, not {align!r}")
     template = _env.get_template("report.html.j2")
+    if sentences is not None:
+        set_apart(sentences, "s-")
     return template.render(
         c=comparison,
+        alt=sentences,
+        split="paragraph" if sentences is not None else split,
         paths=paths or [],
         align=align,
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         version=_version(),
         homepage=HOMEPAGE,
-        flag_css=flag_css(page_flags(comparison)),
+        flag_css=flag_css(
+            page_flags(comparison) | (page_flags(sentences) if sentences is not None else set())
+        ),
     )
 
 
@@ -103,16 +135,19 @@ def write_output(
     paths: list[str] | None = None,
     align: str = "left",
     context: int | str | None = CONTEXT,
+    sentences: Comparison | None = None,
+    split: str = "paragraph",
 ) -> None:
     """Write the HTML report (fmt "html"), the unified diff ("diff") or the word
     diff ("wdiff"), LF line ends on every system. The text formats have
     context unchanged lines around each change (None: every line; "auto":
-    git's 3)."""
+    git's 3). sentences and split as in render; a text format holds one
+    comparison only."""
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {tuple(FORMATS)}, not {fmt!r}")
     if fmt != "html":
         text = unified(comparison, CONTEXT if context == "auto" else context, fmt)
     else:
-        text = render(comparison, paths, align=align)
+        text = render(comparison, paths, align=align, sentences=sentences, split=split)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

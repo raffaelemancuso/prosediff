@@ -36,6 +36,12 @@ changes) or working tree. Paragraphs wrap and are numbered, changes are
 described in plain English, and the new and removed comments of Word
 documents are shown and listed.
 
+**Track Changes need not be turned on**, in Word or in LibreOffice: prosediff
+compares the two saved versions themselves, so it shows what changed between
+a draft and the one returned whether or not the co-author tracked their
+edits. When they did, the tracked changes are accepted (or rejected, or kept
+as markup) as `--docx-changes` says.
+
 ![An HTML report made by prosediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a comment's author, text and date in a tooltip, the comments panel above](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 ## Why prosediff
@@ -74,7 +80,7 @@ prosediff sits between the two:
   footnote numbers do not disturb the alignment: a renumbered footnote or a
   comment that moved is no change.
 - **It follows text that moved, even when it changed**: a paragraph (or,
-  with `--by-sentence`, a sentence) moved elsewhere is shown at both ends,
+  with `--split sentence`, a sentence) moved elsewhere is shown at both ends,
   tinted as a move, with the words edited on the way highlighted; how alike
   it must stay to count as moved is set with `--move-similarity` and
   `--move-algorithm` (see [Moved lines](#moved-lines-algorithm-and-threshold)). Code diff
@@ -119,14 +125,15 @@ prosediff --to-markdown FILE
 | `--full`                   | show every line of each changed file                          |
 | `--max-hidden N`           | unchanged lines embedded per gap for the HTML report to reveal (default 500); longer gaps are left out, to keep the HTML report light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
-| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (🆕 when added), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. `--no-fold-comments` is the older spelling of `text`. In the GUI, "Comments" |
+| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (🆕 when added), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
 | `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
 | `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or keep them all, shown as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file (not Word or OpenDocument files, which are not read as Markdown) are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
-| `--by-sentence`            | compare the prose of Markdown files and Word documents sentence by sentence instead of paragraph by paragraph: a sentence moved between paragraphs is recognised, and each sentence is labelled with its line and its place in it (`12.3`) |
-| `--language CODE`          | the language of the prose: its rules split sentences with `--by-sentence` (about forty languages are known; others fall back to a simple rule), and the HTML report hyphenates wrapped lines by it. A code, e.g. `en`, `it`, `de`, `fr`, `pt-br`; `document`, the languages Word and OpenDocument files mark their text with, in the runs' and the styles' settings: each paragraph is split and hyphenated by its own, and the file's language is the one most of its letters are marked with, for the paragraphs that mark none (an error for Markdown and text files); or `guess`, guessed from each file's text (py3langid). Default: `document` for Word and OpenDocument files, `guess` for the others and for a document that marks no language. A file whose language is unknown (too short or too mixed to guess) is split by English rules and not hyphenated |
+| `--split paragraph\|sentence\|both` | how the prose of Markdown files and Word and OpenDocument documents is compared: paragraph by paragraph (default); sentence by sentence, where a sentence moved between paragraphs is recognised and each sentence is labelled with its line and its place in it (`12.3`); or both, in one HTML report whose toolbar switches between the two (`s`), a diff holding one only. In the GUI, "Compare by" |
+| `--language CODE`          | the language of the prose: its rules split sentences with `--split sentence` (about forty languages are known; others fall back to a simple rule), and the HTML report hyphenates wrapped lines by it. A code, e.g. `en`, `it`, `de`, `fr`, `pt-br`; `document`, the languages Word and OpenDocument files mark their text with, in the runs' and the styles' settings: each paragraph is split and hyphenated by its own, and the file's language is the one most of its letters are marked with, for the paragraphs that mark none (an error for Markdown and text files); or `guess`, guessed from each file's text (py3langid). Default: `document` for Word and OpenDocument files, `guess` for the others and for a document that marks no language. A file whose language is unknown (too short or too mixed to guess) is split by English rules and not hyphenated |
 | `--encoding NAME`          | the encoding of text and Markdown files, e.g. `utf-8`, `cp1252`, `latin-1` (Word and OpenDocument files carry their own). Default `auto`: UTF-8, unless a file cannot be read as UTF-8 or reads with control characters; then the encoding is guessed with [cchardet](https://pypi.org/project/cchardet/) (Mozilla's uchardet, reliable even on a few words), or, when its guess cannot read the file, with [charset-normalizer](https://pypi.org/project/charset-normalizer/); Windows-1252 is preferred when it reads the text alike, and the file header says which was used. In the GUI, the "Text encoding" box |
-| `--move-similarity X`      | how alike, above 0 and at most 1, an edited line must be to where it reappears to count as moved, by `--move-algorithm` (default 0.7; 1: only lines moved unchanged) |
+| `--move-similarity X`      | how alike, above 0 and at most 1, an edited paragraph (a line of other files) must be to where it reappears to count as moved, by `--move-algorithm` (default 0.7; 1: only lines moved unchanged). Since 0.5.0 it no longer applies to sentences, which have their own setting below |
+| `--sentence-move-similarity X`, `--sentence-move-algorithm NAME` | the same for sentences, when prose is compared sentence by sentence (default 0.55, `token-sort`). In the GUI, "Moved paragraphs" and "Moved sentences", each a threshold and an algorithm |
 | `--move-algorithm NAME`    | how that likeness is measured: `token-sort` (default), the words and punctuation two lines have in common whatever their order; `tokens`, in order; `chars`, their characters in common, in order; `levenshtein`, 1 − the words inserted, deleted or replaced over the longer line's; `token-set`, the words both share against the rest of each. See [Moved lines](#moved-lines-algorithm-and-threshold). In the GUI, the list next to "Moved-line similarity" |
 | `--open`                   | open the HTML report in the browser once it is written |
 | `--setup-git`              | set git up to show Word and OpenDocument files as text and to open prosediff HTML reports from `git difftool` (see below), for the repository REPO (default: the current folder) |
@@ -219,12 +226,14 @@ shows the fields of one of three sources:
 The options sit in two cards, each explained by a tooltip (rest the pointer
 on it, or on its ⓘ):
 
-- **What is compared**: Word and OpenDocument tracked changes, how alike a
-  line must stay to count as moved and how that is measured, the document
-  language (`default`: the one Word and OpenDocument files mark, the others
-  guessed; `document`; `guess`, guessed from each file; or a code such as
-  `it`), which splits sentences and hyphenates lines, the encoding of text
-  files, and switches to compare sentence by sentence and to ignore
+- **What is compared**: Word and OpenDocument tracked changes, how prose
+  is compared ("Compare by": paragraphs, sentences or both), how alike a
+  paragraph and a sentence must stay to count as moved and how that is
+  measured (a threshold and an algorithm for each, "Moved paragraphs" and
+  "Moved sentences"), the document language (`default`: the one Word and
+  OpenDocument files mark, the others guessed; `document`; `guess`, guessed
+  from each file; or a code such as `it`), which splits sentences and
+  hyphenates lines, the encoding of text files, and a switch to ignore
   whitespace.
 - **How it is shown**: the comments (markers, text or none), comments
   without text, context lines or whole files, and the alignment of wrapped
@@ -251,6 +260,8 @@ back to its default (what is compared and where the output goes stay).
   comments are in a collapsed list). In the text, a comment is a 💬 marker,
   or 🆕 when it was added since the base; hovering or focusing it shows the
   author in bold, the comment below and its date in grey.
+- At the top, how many paragraphs (or sentences; lines, for files other than
+  prose) were changed, inserted, deleted and moved.
 - The changed files with their counts of lines and words added and removed
   (and moved lines), linked to their tables; buttons expand or collapse
   every file at once.
@@ -264,8 +275,14 @@ back to its default (what is compared and where the output goes stay).
 - A removed line that reappears elsewhere in the file (at least 20 non-space
   characters) is shown as moved, in its own colour, with "moved to line N" /
   "moved from line N": as it was (spacing aside), or edited (at least 70%
-  alike by default, its words compared whatever their order), in which case
-  its edits are highlighted too.
+  alike by default, 55% sentence by sentence, its words compared whatever
+  their order), in which case its edits are highlighted too. Hovering its
+  number tells where it went ("Moved to line 137.3") or where it came from,
+  and whether it was edited on the way; a line joins its two places (hovering
+  either end lights up both), which `l` hides.
+- With `--split both`, the comparison paragraph by paragraph and the one
+  sentence by sentence in one report, each with its counts, a toolbar button
+  (`s`) switching between them.
 - Changed images (PNG, JPEG, GIF, WebP, BMP, up to 5 MB) old and new side by
   side; other binary files are listed but not shown.
 - A toolbar: the number of changes, with `n` and `p` (or its arrows) to jump
@@ -354,37 +371,44 @@ both share against the rest of each).
 
 They were compared on simulated revisions of five public-domain books from
 Project Gutenberg (Austen, Darwin, Mill, Manzoni, Goethe: English, Italian
-and German; a novel, science, an essay, drama), where where every paragraph
-went is known: 1,000 stretches of 40 paragraphs, in each 4 paragraphs moved
-and edited one way (words replaced, deleted or inserted at 0% to 50%, or
-sentences reordered, with or without 10% of words edited), and 4 deleted
-while 4 others were inserted, half of them the deleted paragraph's closest
-look-alike from elsewhere in the book, which a threshold must turn down. A
-move found is right when it pairs a paragraph with its own new version;
-recall counts the moves a reader would still call moves (up to 30% of words
-edited, or reordered). The time is that of scoring 250,000 pairs, the most
-prosediff scores in one file (500 removed × 500 added paragraphs). The best
-threshold of each measure:
+and German; a novel, science, an essay, drama), where where every line went
+is known, once for each kind of line prosediff compares: paragraphs, and
+sentences (`--split sentence`, split by prosediff's own sentence splitter).
+Each of 1,000 stretches of 40 paragraphs (or 60 sentences) had 4 lines
+moved and edited one way (words replaced, deleted or inserted at 0% to 50%,
+or reordered: a paragraph's sentences, a sentence's clauses; with or without
+10% of words edited), and 4 deleted while 4 others were inserted, half of
+them the deleted line's closest look-alike from elsewhere in the book,
+which a threshold must turn down. A move found is right when it pairs a
+line with its own new version; recall counts the moves a reader would
+still call moves (up to 30% of words edited, or reordered). The time is
+that of scoring 250,000 pairs, the most prosediff scores in one file (500
+removed × 500 added lines). The best threshold of each measure:
 
-| algorithm    | threshold | precision | recall | F1    | time, 250,000 pairs |
-|--------------|----------:|----------:|-------:|------:|--------------------:|
-| `token-sort` |      0.70 |     99.0% |  99.0% | 99.0% |              0.68 s |
-| `token-set`  |      0.80 |     98.7% |  99.5% | 99.1% |              5.24 s |
-| `chars`      |      0.50 |     94.4% |  98.7% | 96.5% |              1.23 s |
-| `tokens`     |      0.40 |     93.4% |  98.2% | 95.7% |              0.97 s |
-| `levenshtein`|      0.30 |     92.7% |  87.6% | 90.1% |              0.70 s |
+| algorithm    | paragraphs: threshold | F1    | time   | sentences: threshold | F1    | time   |
+|--------------|----------------------:|------:|-------:|---------------------:|------:|-------:|
+| `token-sort` |                  0.70 | 98.6% | 0.95 s |                 0.55 | 99.2% | 0.32 s |
+| `token-set`  |                  0.80 | 98.8% | 8.88 s |                 0.70 | 99.3% | 1.91 s |
+| `chars`      |                  0.50 | 96.3% | 1.22 s |                 0.50 | 97.4% | 0.25 s |
+| `tokens`     |                  0.40 | 95.6% | 0.97 s |                 0.40 | 98.0% | 0.34 s |
+| `levenshtein`|                  0.30 | 90.1% | 0.83 s |                 0.30 | 92.0% | 0.30 s |
 
-`token-sort` and `token-set` are the only ones that follow a paragraph
-whose sentences were reordered, and they keep false moves rare where the
-order-bound measures need a low threshold to reach the same recall (and
-then pair unrelated paragraphs). The two are tied on F1, and `token-sort` is
-eight times faster, hence the default: `token-sort` at 0.70. The former
-default, `tokens` at 0.80, had the same precision (99.1%) but found only
-73.7% of the moves: 66% of those with 30% of their words edited and 29% of
-the reordered ones, against 96% and 100% now. Lower `--move-similarity` to
-follow heavier rewrites (at 0.60, `token-sort` finds 93% of paragraphs with
-half their words changed, 2.1% of its moves then wrong), raise it to be
-stricter.
+`token-sort` and `token-set` are the only ones that follow a line whose
+sentences or clauses were reordered, and they keep false moves rare where
+the order-bound measures need a low threshold to reach the same recall
+(and then pair unrelated lines). The two are tied on F1 for both kinds of
+line, and `token-sort` is six to nine times faster, hence the defaults, one
+for each kind of line: **`token-sort` at 0.70 by paragraph, `token-sort` at
+0.55 sentence by sentence** (a sentence is short, so each word edited costs
+it more likeness). `--move-similarity` and `--move-algorithm` override
+both; the window shows the default of the way chosen, and switches it when
+"Sentence by sentence" is switched, unless another value was chosen. The
+former default, `tokens` at 0.80, was as precise (99.3%) but found only
+73.8% of the paragraphs moved: 67% of those with 30% of their words edited
+and 31% of the reordered ones, against 97.5% and 99.8% now (with
+`token-sort` at 0.70). Lower `--move-similarity` to follow heavier rewrites
+(by paragraph at 0.60, `token-sort` finds 90% of paragraphs with half their
+words changed, 1.9% of its moves then wrong), raise it to be stricter.
 The full tables, by threshold and kind of edit, are in
 [docs/move_sensitivity.txt](docs/move_sensitivity.txt); `uv run python
 docs/move_sensitivity.py` remakes them.
@@ -411,7 +435,7 @@ each of its characters beside it: no Markdown syntax in the text, so an
 asterisk or a bracket typed in the document is just text, and a change of
 formatting alone (a word made bold) is told apart from a change of words.
 The rows of a document are numbered by paragraph (1, 2, 3, and 3.1, 3.2 for
-the sentences of paragraph 3 with `--by-sentence`); Markdown files keep
+the sentences of paragraph 3 with `--split sentence`); Markdown files keep
 their line numbers. Markdown is only written from a document for git's own
 commands (`--to-markdown`, `git diff` once set up), in pandoc's syntax.
 

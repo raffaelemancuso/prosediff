@@ -140,7 +140,7 @@ def test_generate_files_and_default_output(tmp_path):
     path, c = generate(s)
     assert path.parent.name == "prosediff" and path.suffix == ".html" and len(c.files) == 1
     assert c.moved == 0
-    s.by_sentence = True
+    s.split = "sentence"
     assert generate(s)[1].moved == 1
     s.output_format = "diff"
     path, _ = generate(s)
@@ -151,22 +151,6 @@ def test_generate_files_and_default_output(tmp_path):
         generate(Settings(mode="files"))
     with pytest.raises(ValueError, match="old and the new folder"):
         generate(Settings(mode="folders", old=s.old, new=s.new))
-
-
-def test_folders_remembered_in_the_shared_tab_move(tmp_path):
-    """Two folders remembered when files and folders shared a tab open in
-    the folders tab."""
-    import json
-
-    f = tmp_path / "gui.json"
-    f.write_text(json.dumps({"mode": "files", "old": str(tmp_path), "new": str(tmp_path)}))
-    s = load_settings(f)
-    assert (s.mode, s.old, s.old_folder, s.new_folder) == (
-        "folders",
-        "",
-        str(tmp_path),
-        str(tmp_path),
-    )
 
 
 def test_settings_are_remembered(tmp_path):
@@ -273,17 +257,13 @@ def test_mode_switch(root):
 
 def test_comments_choice(root, tmp_path):
     """One choice for the comments; comments without text are a choice of
-    markers only; the checkbox of older versions is remembered as text."""
-    import json
+    markers only."""
 
     app = App(root, Settings(comments="none"))
     assert app.collect().comments == "none"
     assert app.empty_comments_box.instate(["disabled"])
     app.comments.set("markers")
     assert not app.empty_comments_box.instate(["disabled"])
-    f = tmp_path / "gui.json"
-    f.write_text(json.dumps({"fold_comments": False}))
-    assert load_settings(f).comments == "text"
 
 
 def test_invalid_arguments_show_an_error_and_exit(monkeypatch, tmp_path):
@@ -403,10 +383,7 @@ def test_linux_colour_scheme_from_the_portal(monkeypatch):
 
 def test_move_defaults_follow_prosediff(root, tmp_path):
     """The moved-line similarity and algorithm are remembered only when they
-    are not prosediff's defaults, so a new default reaches the window; the
-    old default 0.8, remembered before the algorithm could be chosen, gives
-    way to the new one, and any other value keeps its algorithm, tokens."""
-    import json
+    are not prosediff's defaults, so a new default reaches the window."""
 
     from prosediff.diff import MOVE_ALGORITHM, MOVE_SIMILARITY
 
@@ -421,13 +398,6 @@ def test_move_defaults_follow_prosediff(root, tmp_path):
     app.move_algorithm.set("chars")
     s = app.collect()
     assert (s.move_similarity, s.move_algorithm) == (0.55, "chars")
-    f = tmp_path / "gui.json"
-    f.write_text(json.dumps({"move_similarity": 0.8}))
-    s = load_settings(f)
-    assert (s.move_similarity, s.move_algorithm) == (None, None)
-    f.write_text(json.dumps({"move_similarity": 0.6}))
-    s = load_settings(f)
-    assert (s.move_similarity, s.move_algorithm) == (0.6, "tokens")
 
 
 def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
@@ -460,3 +430,29 @@ def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
     s = app.collect()
     assert (s.comments, s.move_algorithm, s.output_format) == ("markers", None, "html")
     assert s.old == str(old)
+
+
+def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
+    """Paragraphs and sentences have their own moved-line settings, shown at
+    their defaults and remembered only when changed; comparing both ways
+    writes an HTML report holding both, and no diff."""
+    from prosediff.diff import move_defaults
+
+    app = App(root, Settings())
+    shown = lambda sim, algo: (round(sim.get(), 6), algo.get())  # noqa: E731
+    assert shown(app.move_similarity, app.move_algorithm) == move_defaults(False)
+    assert shown(app.sentence_move_similarity, app.sentence_move_algorithm) == move_defaults(True)
+    app.sentence_move_similarity.set(0.65)
+    app.split.set("both")
+    s = app.collect()
+    assert (s.move_similarity, s.sentence_move_similarity, s.split) == (None, 0.65, "both")
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_bytes(b"One sentence here. Another one there.\n")
+    new.write_bytes(b"Another one there. One sentence here.\n")
+    s.mode, s.old, s.new, s.output = "files", str(old), str(new), str(tmp_path / "r.html")
+    path, _ = generate(s)
+    page = path.read_text(encoding="utf-8")
+    assert 'data-split="paragraph"' in page and 'data-split="sentence"' in page
+    s.output_format = "diff"
+    with pytest.raises(ValueError, match="HTML report"):
+        generate(s)

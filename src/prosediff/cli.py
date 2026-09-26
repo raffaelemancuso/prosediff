@@ -18,6 +18,8 @@ from prosediff.diff import (
     MOVE_ALGORITHMS,
     MOVE_SIMILARITY,
     PROSE_CONTEXT,
+    SENTENCE_MOVE_ALGORITHM,
+    SENTENCE_MOVE_SIMILARITY,
     FilterError,
     check_encoding,
     compare,
@@ -35,6 +37,8 @@ from prosediff.sources import (
 )
 
 PROG = "prosediff"
+# How prose is compared: paragraph by paragraph, sentence by sentence, or both.
+SPLITS = ("paragraph", "sentence", "both")
 # What --comments does with the comments: set apart, compared as text, or none.
 COMMENT_MODES = ("markers", "text", "none")
 
@@ -194,10 +198,6 @@ def main(argv: list[str] | None = None) -> int:
         "the diffs, CriticMarkup); text, compared as part of the text, as pandoc writes "
         "them; none, left out altogether",
     )
-    # the older spelling of --comments markers / text
-    ap.add_argument(
-        "--fold-comments", action=argparse.BooleanOptionalAction, help=argparse.SUPPRESS
-    )
     ap.add_argument(
         "--empty-comments",
         action="store_true",
@@ -213,16 +213,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--move-similarity",
         type=float,
-        default=MOVE_SIMILARITY,
+        default=None,
         metavar="X",
-        help="how alike, above 0 and at most 1, an edited line must be to where it "
-        "reappears to count as moved, by --move-algorithm "
+        help="how alike, above 0 and at most 1, an edited paragraph (a line of other "
+        "files) must be to where it reappears to count as moved, by --move-algorithm "
         f"(default: {MOVE_SIMILARITY}; 1: only lines moved unchanged)",
     )
     ap.add_argument(
         "--move-algorithm",
         choices=tuple(MOVE_ALGORITHMS),
-        default=MOVE_ALGORITHM,
+        default=None,
         help="how --move-similarity measures two lines: tokens, the share of their words "
         "and punctuation in common, in order; chars, of their characters; levenshtein, "
         "1 - the words inserted, deleted or replaced / the longer line's; token-sort, "
@@ -230,18 +230,35 @@ def main(argv: list[str] | None = None) -> int:
         f"the rest of each (default: {MOVE_ALGORITHM})",
     )
     ap.add_argument(
-        "--by-sentence",
-        action="store_true",
-        help="compare the prose of Markdown files and Word documents sentence by "
-        "sentence instead of paragraph by paragraph: moved sentences are recognised, "
-        "lines are labelled 12.1, 12.2, ...",
+        "--sentence-move-similarity",
+        type=float,
+        default=None,
+        metavar="X",
+        help="the same for sentences, when prose is compared sentence by sentence "
+        f"(--split sentence or both; default: {SENTENCE_MOVE_SIMILARITY})",
+    )
+    ap.add_argument(
+        "--sentence-move-algorithm",
+        choices=tuple(MOVE_ALGORITHMS),
+        default=None,
+        help="how --sentence-move-similarity measures two sentences "
+        f"(default: {SENTENCE_MOVE_ALGORITHM})",
+    )
+    ap.add_argument(
+        "--split",
+        choices=SPLITS,
+        default=None,
+        help="how the prose of Markdown files and Word and OpenDocument documents is "
+        "compared: paragraph by paragraph (default), sentence by sentence (moved "
+        "sentences are recognised, lines are labelled 12.1, 12.2, ...), or both, in "
+        "one HTML report whose toolbar switches between the two",
     )
     ap.add_argument(
         "--language",
         default=DEFAULT,
         metavar="CODE",
         help="the language of the documents' prose: its rules split sentences with "
-        "--by-sentence and hyphenate wrapped lines. A code (e.g. en, it, de, fr); "
+        "--split sentence and hyphenate wrapped lines. A code (e.g. en, it, de, fr); "
         "document: the language Word and OpenDocument files mark their text with "
         "(an error for Markdown and text files); guess: guessed from each file's text. "
         "Default: document for Word and OpenDocument files (guess when they mark "
@@ -303,8 +320,6 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--context must be 0 or more")
     if args.max_hidden < 0:
         ap.error("--max-hidden must be 0 or more")
-    if not 0 < args.move_similarity <= 1:
-        ap.error("--move-similarity must be above 0 and at most 1")
     try:
         args.language = normalize_language(args.language)
     except ValueError as e:
@@ -335,9 +350,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.untracked and (args.target or args.cached):
         ap.error("--untracked needs the working tree: give no TARGET and no --cached")
 
-    if args.comments and args.fold_comments is not None:
-        ap.error("give --comments or --fold-comments, not both")
-    comments = args.comments or ("text" if args.fold_comments is False else "markers")
+    split = args.split or "paragraph"
+    fmt = args.format or format_of(args.output)
+    if split == "both" and fmt != "html":
+        ap.error("--split both is for the HTML report: a diff holds one split")
+    for name in ("move_similarity", "sentence_move_similarity"):
+        value = getattr(args, name)
+        if value is not None and not 0 < value <= 1:
+            ap.error(f"--{name.replace('_', '-')} must be above 0 and at most 1")
+    comments = args.comments or "markers"
     options = dict(
         paths=args.paths,
         context=None if args.full else ("auto" if args.context is None else args.context),
@@ -350,23 +371,33 @@ def main(argv: list[str] | None = None) -> int:
         docx_changes=args.docx_changes,
         move_similarity=args.move_similarity,
         move_algorithm=args.move_algorithm,
-        by_sentence=args.by_sentence,
+        sentence_move_similarity=args.sentence_move_similarity,
+        sentence_move_algorithm=args.sentence_move_algorithm,
         language=args.language,
         encoding=args.encoding,
     )
-    try:
+
+    def run(by_sentence: bool):
         if not args.git:
             include = FOLDER_FILES if args.include is None else args.include
-            comparison = compare_paths(args.repo, args.base, include=include, **options)
-        else:
-            comparison = compare(
-                Path(args.repo),
-                args.base,
-                args.target,
-                cached=args.cached,
-                untracked=args.untracked,
-                **options,
+            return compare_paths(
+                args.repo, args.base, include=include, by_sentence=by_sentence, **options
             )
+        return compare(
+            Path(args.repo),
+            args.base,
+            args.target,
+            cached=args.cached,
+            untracked=args.untracked,
+            by_sentence=by_sentence,
+            **options,
+        )
+
+    sentences = None
+    try:
+        comparison = run(split == "sentence")
+        if split == "both":
+            sentences = run(True)
     except git.InvalidGitRepositoryError:
         print(
             f"{PROG}: not a git repository: {args.repo} "
@@ -386,7 +417,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # With --open, an HTML report in the temporary folder: git difftool -d gives
     # two temporary folders, gone once prosediff returns.
-    fmt = args.format or format_of(args.output)
     output = args.output
     if output is None and args.open:
         output = default_output(fmt)
@@ -403,6 +433,8 @@ def main(argv: list[str] | None = None) -> int:
         args.paths,
         align=args.align,
         context=None if args.full else (CONTEXT if args.context is None else args.context),
+        sentences=sentences,
+        split=split,
     )
 
     c = comparison

@@ -128,3 +128,31 @@ def test_a_move_beats_a_weak_pairing():
     anew = "Something else entirely, written anew."
     rewrite = align(["kept", other], ["kept", anew], context=None)
     assert [r.kind for r in rewrite[0]] == ["equal", "replace"]
+
+
+def test_two_move_defaults(tmp_path):
+    """By paragraph and sentence by sentence, each its own default; None in
+    compare_paths picks the one of how the file is compared."""
+    from prosediff import compare_paths
+    from prosediff.diff import MOVE_ALGORITHMS, move_defaults
+
+    (similarity, algorithm), (s_similarity, s_algorithm) = move_defaults(False), move_defaults(True)
+    assert algorithm in MOVE_ALGORITHMS and s_algorithm in MOVE_ALGORITHMS
+    assert s_similarity < similarity
+    # a sentence moved into another paragraph, half its words kept: alike
+    # enough for the sentence default, not for the paragraph one
+    kept = "Alpha beta gamma delta epsilon zeta eta theta iota kappa"
+    edited = "Alpha beta gamma delta epsilon zeta lambda mu nu xi omicron"
+    score = MOVE_ALGORITHMS[s_algorithm]
+    alike = score[1](score[0](kept + "."), score[0](edited + "."), 0)
+    assert s_similarity <= alike < similarity
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_bytes(f"{kept}. The first paragraph goes on here.\n\nAnother one stays.\n".encode())
+    new.write_bytes(f"The first paragraph goes on here.\n\nAnother one stays. {edited}.\n".encode())
+    (f,) = compare_paths(old, new, by_sentence=True).files
+    assert "moved-in" in [r.kind for r in f.rows]
+    # the paragraph setting leaves sentences alone; their own setting does not
+    (f,) = compare_paths(old, new, by_sentence=True, move_similarity=0.99).files
+    assert "moved-in" in [r.kind for r in f.rows]
+    (f,) = compare_paths(old, new, by_sentence=True, sentence_move_similarity=similarity).files
+    assert "moved-in" not in [r.kind for r in f.rows]
