@@ -5,6 +5,7 @@ import tkinter as tk
 
 import pytest
 
+from prosediff import gui
 from prosediff.gui import (
     INDEX,
     WORKTREE,
@@ -26,7 +27,6 @@ def test_arguments_prefill_a_repository(history):
     assert note == "" and s.mode == "git" and s.repo == str(b.path)
     assert (s.base, s.target, s.paths) == ("", "", [])  # the sides start from the defaults
     # a folder inside the repository names the repository
-    (b.path / "sub").mkdir()
     s, _ = settings_from_args([str(b.path / "sub")], remembered)
     assert s.repo == str(b.path)
     assert remembered.repo == "elsewhere"  # the remembered settings are not touched
@@ -48,7 +48,7 @@ def test_arguments_prefill_two_folders(tmp_path):
     b.mkdir()
     s, note = settings_from_args([str(a), str(b)], Settings(mode="git"))
     assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(b))
-    assert s.output == str(tmp_path / "submitted_vs_revised.html")
+    assert s.output == str(b / "prosediff.html")
     # a folder and a file do not make a pair
     (tmp_path / "v1.md").write_text("x")
     _, note = settings_from_args([str(a), str(tmp_path / "v1.md")], Settings())
@@ -61,9 +61,12 @@ def test_arguments_prefill_two_folders(tmp_path):
         (["plain"], "Not a folder"),
         (["x.txt", "y.txt"], "two Markdown, Word or OpenDocument files"),
         (["a", "b", "c"], "Give one git repository"),
+        ([""], "Not a git repository"),  # tmp_path itself
     ],
 )
 def test_unusable_arguments_are_ignored(tmp_path, args, message):
+    """Arguments that name nothing usable are set aside with a note saying
+    why, the remembered settings kept."""
     s, note = settings_from_args([str(tmp_path / a) for a in args], Settings(repo="kept"))
     assert message in note and s.repo == "kept"
 
@@ -96,11 +99,6 @@ def test_the_older_file_goes_on_the_left(tmp_path):
         assert s.output == str(tmp_path / "sent_vs_returned.html")
 
 
-def test_arguments_folder_not_a_repository(tmp_path):
-    s, note = settings_from_args([str(tmp_path)], Settings())
-    assert note.startswith("Not a git repository") and s.repo == ""
-
-
 def test_context_lines_box():
     from prosediff.gui import context_of
 
@@ -110,55 +108,39 @@ def test_context_lines_box():
     assert context_of(Settings(context_lines="2", full=True)) is None
 
 
-def test_generate_by_sentence(tmp_path):
-    moved = "Firms that adopted the new technology are compared with the others."
-    (tmp_path / "a.md").write_text(f"First paragraph here. {moved}\n\nSecond paragraph.\n")
-    (tmp_path / "b.md").write_text(f"First paragraph here.\n\nSecond paragraph. {moved}\n")
-    s = Settings(mode="files", old=str(tmp_path / "a.md"), new=str(tmp_path / "b.md"))
-    s.by_sentence = True
-    _, c = generate(s)
-    assert c.moved == 1
-
-
-@pytest.fixture
-def history(builder):
-    """A repository with three commits and an uncommitted change."""
-    shas = []
-    for k in range(3):
-        builder.write("doc.md", f"Version {k} of the text.\n")
-        shas.append(builder.commit(f"commit {k}"))
-    (builder.path / "doc.md").write_text("Uncommitted version of the text.\n")
-    return builder, shas
-
-
 def test_list_choices_and_default_sides(history):
     b, shas = history
     commits, dirty = list_choices(b.path)
     assert [c.ref for c in commits] == shas[::-1] and dirty
-    assert "commit 2" in commits[0].label and shas[2][:7] in commits[0].label
-    assert default_sides(commits, dirty=True) == (shas[2], "worktree")
-    assert default_sides(commits, dirty=False) == (shas[1], shas[2])
+    assert "commit 4" in commits[0].label and shas[4][:7] in commits[0].label
+    assert default_sides(commits, dirty=True) == (shas[4], "worktree")
+    assert default_sides(commits, dirty=False) == (shas[3], shas[4])
     assert default_sides([], dirty=False) == ("", "")
 
 
 def test_generate_git(history, tmp_path):
     """The new side can be the working tree, the index or a commit."""
     b, shas = history
-    for target in ("worktree", "index", shas[2]):
+    for target in ("worktree", "index", shas[4]):
         out = tmp_path / f"{target}.html"
         path, c = generate(Settings(repo=str(b.path), base=shas[0], target=target, output=str(out)))
         assert path == out and out.read_bytes().startswith(b"<!DOCTYPE html>")
-        short = {"worktree": "working tree", "index": "index"}.get(target, shas[2][:7])
+        short = {"worktree": "working tree", "index": "index"}.get(target, shas[4][:7])
         assert c.target.short == short
 
 
 def test_generate_files_and_default_output(tmp_path):
-    (tmp_path / "a.md").write_text("one\n")
-    (tmp_path / "b.md").write_text("two\n")
-    path, c = generate(
-        Settings(mode="files", old=str(tmp_path / "a.md"), new=str(tmp_path / "b.md"))
-    )
+    """Two files make a page in the temporary folder by default, compared
+    sentence by sentence when asked; without both files, an error."""
+    moved = "Firms that adopted the new technology are compared with the others."
+    (tmp_path / "a.md").write_text(f"First paragraph here. {moved}\n\nSecond paragraph.\n")
+    (tmp_path / "b.md").write_text(f"First paragraph here.\n\nSecond paragraph. {moved}\n")
+    s = Settings(mode="files", old=str(tmp_path / "a.md"), new=str(tmp_path / "b.md"))
+    path, c = generate(s)
     assert path.parent.name == "prosediff" and path.suffix == ".html" and len(c.files) == 1
+    assert c.moved == 0
+    s.by_sentence = True
+    assert generate(s)[1].moved == 1
     with pytest.raises(ValueError, match="old and the new"):
         generate(Settings(mode="files"))
 
@@ -198,10 +180,10 @@ def test_window_loads_a_repository(root, history):
     b, shas = history
     app = App(root, Settings(repo=str(b.path)))
     assert app.target.get() == WORKTREE
-    assert shas[2][:7] in app.base.get()
+    assert shas[4][:7] in app.base.get()
     assert list(app.target_box["values"])[:2] == [WORKTREE, INDEX]
     s = app.collect()
-    assert (s.mode, s.base, s.target) == ("git", shas[2], "worktree")
+    assert (s.mode, s.base, s.target) == ("git", shas[4], "worktree")
     # a ref typed by hand goes through as it is
     app.base.set("HEAD~2")
     assert app.collect().base == "HEAD~2"
@@ -288,3 +270,56 @@ def test_the_window_has_the_logo(tk_root):
     tk_feather = icons()
     gui.set_icon(tk_root)
     assert all(icons()) and all(a != b for a, b in zip(icons(), tk_feather, strict=True))
+
+
+def test_linux_colour_scheme_from_the_portal(monkeypatch):
+    """On Linux the desktop portal says light or dark, through ReadOne, or the
+    deprecated Read on an older portal (its answer a variant within a
+    variant); no portal, no answer."""
+    import types
+
+    class Refused(Exception):
+        pass
+
+    def fake_jeepney(replies):
+        calls = []
+
+        class Bus:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def send_and_get_reply(self, call, timeout=None):
+                assert timeout == gui.SETTING_TIMEOUT
+                calls.append(call)
+                answer = replies[call]
+                if answer is Refused:
+                    raise Refused(call)
+                return types.SimpleNamespace(body=(answer,))
+
+        jeepney = types.ModuleType("jeepney")
+        jeepney.DBusAddress = lambda *a, **k: None
+        jeepney.DBusErrorResponse = Refused
+        jeepney.new_method_call = lambda obj, method, sig, body: method
+        blocking = types.ModuleType("jeepney.io.blocking")
+        blocking.open_dbus_connection = lambda bus, auth_timeout: Bus()
+        io = types.ModuleType("jeepney.io")
+        for name, module in (
+            ("jeepney", jeepney),
+            ("jeepney.io", io),
+            ("jeepney.io.blocking", blocking),
+        ):
+            monkeypatch.setitem(sys.modules, name, module)
+        return calls
+
+    fake_jeepney({"ReadOne": ("u", 1)})
+    assert gui.portal_color_scheme() == gui.PREFER_DARK
+    calls = fake_jeepney({"ReadOne": Refused, "Read": ("v", ("u", 2))})
+    assert gui.portal_color_scheme() == 2 and calls == ["ReadOne", "Read"]
+    monkeypatch.setattr(sys, "platform", "linux")
+    fake_jeepney({"ReadOne": ("u", 1)})
+    assert gui.system_dark()
+    monkeypatch.setitem(sys.modules, "jeepney", None)  # not installed
+    assert gui.portal_color_scheme() is None and not gui.system_dark()

@@ -9,6 +9,8 @@ from prosediff.sources import SourceError, docx_to_markdown
 
 
 def test_two_files_with_different_names(tmp_path):
+    """Two files are compared as a rename, each side named after its file;
+    identical files have no differences."""
     (tmp_path / "v1.md").write_text("Hello world.\n")
     (tmp_path / "v2.md").write_text("Hello there.\n")
     c = compare_paths(tmp_path / "v1.md", tmp_path / "v2.md")
@@ -17,12 +19,9 @@ def test_two_files_with_different_names(tmp_path):
     assert f.additions == 1 and ">there</ins>" in str(f.rows[0].right)
     assert c.base.short == "v1.md" and c.target.short == "v2.md"
     assert c.base.subject == "file" and c.base.date
-
-
-def test_identical_files(tmp_path):
-    (tmp_path / "a.txt").write_text("same\n")
-    (tmp_path / "b.txt").write_text("same\n")
-    assert compare_paths(tmp_path / "a.txt", tmp_path / "b.txt").files == []
+    # identical files have no differences
+    (tmp_path / "v3.md").write_text("Hello there.\n")
+    assert compare_paths(tmp_path / "v2.md", tmp_path / "v3.md").files == []
 
 
 def test_two_folders(tmp_path):
@@ -91,7 +90,7 @@ def test_compare_two_docx_with_comments_panel(tmp_path):
     )
     c = compare_paths(a, b, fold_comments_md=True)
     (f,) = c.files
-    assert f.markdown and "converted from Word" in f.note
+    assert f.markdown and "read from Word" in f.note
     assert [(e.status, e.author, e.text) for e in c.comments] == [("new", "Anna", "Why second?")]
     html = render(c)
     assert "Comments: 1 new, 0 removed</h2>" in html
@@ -191,13 +190,13 @@ def test_cli_include(tmp_path, capsys):
         (old / name).write_text("a\n")
         (new / name).write_text("b\n")
     out = tmp_path / "page.html"
-    assert main(["--files", str(old), str(new), "-o", str(out)]) == 0
+    assert main(["--folders", str(old), str(new), "-o", str(out)]) == 0
     assert "run.py" not in out.read_text(encoding="utf-8")
-    assert main(["--files", str(old), str(new), "-o", str(out), "--include", "*.py"]) == 0
+    assert main(["--folders", str(old), str(new), "-o", str(out), "--include", "*.py"]) == 0
     page = out.read_text(encoding="utf-8")
     assert "run.py" in page and "paper.md" not in page
     with pytest.raises(SystemExit):
-        main([str(tmp_path), "HEAD", "--include", "*.md"])
+        main(["--git", str(tmp_path), "HEAD", "--include", "*.md"])
     assert "--include picks the files of two folders" in capsys.readouterr().err
 
 
@@ -209,14 +208,55 @@ def test_git_runs_without_a_console_window(tmp_path, monkeypatch):
     from prosediff import diff
 
     seen = []
-    real = subprocess.run
 
-    def run(*args, **kwargs):
-        seen.append(kwargs.get("creationflags"))
-        return real(*args, **kwargs)
+    class Recording(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            seen.append(kwargs.get("creationflags"))
+            super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(diff.subprocess, "run", run)
+    monkeypatch.setattr(diff.subprocess, "Popen", Recording)
     (tmp_path / "a.md").write_text("Hello world.\n")
     (tmp_path / "b.md").write_text("Hello there.\n")
     compare_paths(tmp_path / "a.md", tmp_path / "b.md", md_filter="sort")
     assert seen and set(seen) == {getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+
+
+def test_folders_page_goes_into_the_new_folder(tmp_path, monkeypatch):
+    """Without -o, the page comparing two folders is prosediff.html in the
+    new one; compared again, the folders leave it out, whatever --include
+    says. With --open it goes to the temporary folder, as git difftool -d
+    needs; two files keep diff.html."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    for d in (old, new):
+        d.mkdir()
+    (old / "paper.md").write_text("a\n")
+    (new / "paper.md").write_text("b\n")
+    monkeypatch.chdir(tmp_path)
+    assert main(["--folders", str(old), str(new)]) == 0
+    page = new / "prosediff.html"
+    assert page.is_file() and not (tmp_path / "diff.html").exists()
+    (old / "prosediff.html").write_text("an old page")
+    assert [f.path for f in compare_paths(old, new, include="").files] == ["paper.md"]
+    opened = []
+    monkeypatch.setattr("webbrowser.open", opened.append)
+    page.unlink()
+    assert main(["--folders", str(old), str(new), "--open"]) == 0
+    assert not page.exists() and "prosediff_" in opened[0]
+    assert main(["--files", str(old / "paper.md"), str(new / "paper.md")]) == 0
+    assert (tmp_path / "diff.html").is_file()
+
+
+def test_a_hung_filter_is_stopped(tmp_path, monkeypatch):
+    """A filter that never finishes is stopped at the time limit, with an
+    error that says so, rather than hanging the comparison."""
+    import sys
+
+    from prosediff import diff
+    from prosediff.diff import FilterError
+
+    monkeypatch.setattr(diff, "FILTER_TIMEOUT", 1)
+    (tmp_path / "a.md").write_text("Hello world.\n")
+    (tmp_path / "b.md").write_text("Hello there.\n")
+    sleeper = f'"{sys.executable}" -c "import time; time.sleep(30)"'
+    with pytest.raises(FilterError, match=r"more than 1 seconds on b.md"):
+        compare_paths(tmp_path / "a.md", tmp_path / "b.md", md_filter=sleeper)

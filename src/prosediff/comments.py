@@ -62,7 +62,7 @@ class Comments:
     """The comments folded out of a comparison, each behind one placeholder.
 
     A comment is identified by its author and text, not by its id: the ids
-    are renumbered each time a document is converted, and the same comment
+    are renumbered each time a document is saved or read, and the same comment
     must compare equal on both sides.
     """
 

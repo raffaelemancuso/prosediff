@@ -22,7 +22,10 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
-from prosediff.diff import NO_WINDOW
+from prosediff.diff import run
+
+# git config answers at once (seconds).
+GIT_TIMEOUT = 60
 
 DRIVER = "prosediff"
 ATTRIBUTES = ("*.docx diff=prosediff", "*.odt diff=prosediff")
@@ -40,16 +43,11 @@ def command() -> str:
 
 def git(*args: str, cwd: Path | None = None) -> str:
     try:
-        done = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            creationflags=NO_WINDOW,
-        )
+        done = run(["git", *args], cwd=cwd, text=True, encoding="utf-8", timeout=GIT_TIMEOUT)
     except FileNotFoundError:
         raise SetupError("git is not on PATH") from None
+    except subprocess.TimeoutExpired:
+        raise SetupError(f"git {' '.join(args)} took too long, and was stopped") from None
     if done.returncode not in (0, 1):  # 1: git config --get found nothing
         raise SetupError(done.stderr.strip() or f"git {' '.join(args)} failed")
     return done.stdout.strip()
@@ -83,7 +81,11 @@ def setup_git(repo: Path | None) -> list[str]:
     run = command()
     settings = {
         f"diff.{DRIVER}.textconv": f"{run} --to-markdown",
-        f"difftool.{DRIVER}.cmd": f'{run} --files "$LOCAL" "$REMOTE" --open',
+        # two files, or with git difftool -d two folders
+        f"difftool.{DRIVER}.cmd": (
+            'if [ -d "$LOCAL" ]; then mode=--folders; else mode=--files; fi; '
+            f'{run} "$mode" "$LOCAL" "$REMOTE" --open'
+        ),
     }
     done = []
     for key, value in settings.items():

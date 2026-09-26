@@ -1,41 +1,62 @@
-"""Word documents read into Markdown, with python-docx.
+"""Word documents read with python-docx, into paragraphs of styled text.
 
 python-docx opens the document and resolves what the XML alone does not say:
-paragraph and run styles, bold and italic, link targets, and the comments
-(author, date, text). The paragraphs are then walked element by element, so
-that everything lands where it sits in the text:
+paragraph and run styles, bold, italic, underline and the like, link targets,
+and the comments (author, date, text). The paragraphs are then walked element
+by element, into a prosediff.document.Document, so that everything lands
+where it sits in the text:
 
-- headings (Title, Heading 1-6) become #, list paragraphs "- ", tables pipe
-  tables, footnotes and endnotes [^n] with their text at the end, links
-  [text](url), bold and italic ** and *;
-- each comment becomes, where it starts, the span pandoc writes for it,
-  [note]{.comment-start id=... author="..." date="..."}, which the rest of
-  prosediff folds into a marker and lists in the comments panel;
+- headings (Title, Heading 1-6), list paragraphs and tables are blocks of
+  their kind, footnotes and endnotes numbered blocks of their own, referenced
+  where they are; each run keeps its styles, each link its target;
+- each comment is kept where it starts, for the rest of prosediff to fold
+  into a marker and list in the comments panel;
 - tracked changes are settled as asked: accepting keeps the inserted runs
   (w:ins, w:moveTo) and drops the deleted ones (w:del, w:moveFrom),
-  rejecting does the reverse, and "all" keeps both, as [text]{.insertion
-  ...} and [text]{.deletion ...} spans. The spaces at the edges of a change
-  stay with it, and a comment anchored in dropped text is kept.
+  rejecting does the reverse, and "all" keeps both, marked as insertions
+  and deletions with their author and date. The spaces at the edges of a
+  change stay with it, and a comment anchored in dropped text is kept.
 
-Headers, footers, text boxes' layout and page breaks are not text of the
-body and are left out; an image is written [image], with its description
-when it has one, and an equation as its text.
+No Markdown is involved in the comparison: it is only written, from the
+Document, for git's own commands (docx_to_markdown). Headers, footers, text
+boxes' layout and page breaks are not text of the body and are left out; an
+image is written [image], with its description when it has one, and an
+equation as its text.
 """
 
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 from io import BytesIO
 
 import docx
-from docx.document import Document
+from docx.enum.text import WD_UNDERLINE
 from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 
-from prosediff.language import WordLanguages, line_languages, most_letters
+from prosediff.document import (
+    EM,
+    STRIKE,
+    STRONG,
+    SUB,
+    SUP,
+    UNDERLINE,
+    Block,
+    CommentMark,
+    Document,
+    Image,
+    NoteRef,
+    Span,
+    Text,
+    comments_in,
+    comments_only,
+    markdown,
+    strip,
+    to_markdown,
+)
+from prosediff.language import WordLanguages, most_letters
 
 CHANGES = ("accept", "reject", "all")
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
@@ -44,8 +65,6 @@ LIST_STYLES = ("list", "bullet", "number")
 INSERTED = {qn("w:ins"), qn("w:moveTo")}
 DELETED = {qn("w:del"), qn("w:moveFrom")}
 # Wrappers whose content is part of the paragraph's text.
-# A paragraph of nothing but comment spans: a paragraph deleted as a whole.
-COMMENTS_ONLY = re.compile(r"(?:\[(?:[^\[\]\\]|\\.)*\]\{\.comment-start[^}]*\}\s*)+")
 TRANSPARENT = {
     qn("w:smartTag"),
     qn("w:customXml"),
@@ -58,16 +77,6 @@ TRANSPARENT = {
 
 class WordError(RuntimeError):
     """The file is not a Word document python-docx can read."""
-
-
-@dataclass
-class Piece:
-    """A piece of a paragraph: text in a style, or Markdown written as is."""
-
-    text: str
-    bold: bool = False
-    italic: bool = False
-    raw: bool = False
 
 
 class _Story:
@@ -104,13 +113,10 @@ class Reader:
     note_order: list = field(default_factory=list)  # [(kind, id)] as referenced
     shown_comments: set = field(default_factory=set)
     # comments of a paragraph deleted as a whole, for the next paragraph
-    carried: str = ""
-    # The languages the text is marked with, when asked for: that of each
-    # block of the body (as body() returns them) and of each note, and the
-    # letters of the whole in each language.
+    carried: list = field(default_factory=list)
+    # The languages the text is marked with, when asked for, and the letters
+    # of the whole in each language.
     languages: WordLanguages | None = None
-    block_languages: list = field(default_factory=list)
-    note_languages: list = field(default_factory=list)
     letters: Counter = field(default_factory=Counter)
 
     def language_of(self, paragraphs) -> str | None:
@@ -122,64 +128,72 @@ class Reader:
 
     # Paragraph content ----------------------------------------------------------
 
-    def comment(self, cid: str) -> list[Piece]:
-        """The comment-start span of a comment, once."""
+    def comment(self, cid: str) -> list:
+        """Where a comment starts, once."""
         c = self.comments.get(cid)
         if c is None or cid in self.shown_comments:
             return []
         self.shown_comments.add(cid)
-        note = " ".join(c.text.split()).replace("\\", "\\\\")
-        note = note.replace("[", "\\[").replace("]", "\\]")
-        author = (c.author or "").replace('"', "'")
         date = c.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if c.timestamp else ""
-        span = f'[{note}]{{.comment-start id="{cid}" author="{author}" date="{date}"}}'
-        return [Piece(span, raw=True)]
+        return [CommentMark(cid, c.author or "", " ".join(c.text.split()), date)]
 
-    def note_ref(self, kind: str, nid: str) -> list[Piece]:
+    def note_ref(self, kind: str, nid: str) -> list:
         key = (kind, nid)
         if key not in self.note_order:
             self.note_order.append(key)
-        return [Piece(f"[^{self.note_order.index(key) + 1}]", raw=True)]
+        return [NoteRef(self.note_order.index(key) + 1)]
 
-    def run(self, el, paragraph, deleted: bool, dropping: bool = False) -> list[Piece]:
-        """The pieces of a w:r: its text, with the run's bold and italic.
+    def run(self, el, paragraph, deleted: bool, dropping: bool = False) -> list:
+        """The inlines of a w:r: its text, in the run's styles.
 
         dropping: the run is in text that goes (a change settled away); only
         its comments are kept, so its footnote references are not counted.
         """
         r = Run(el, paragraph)
         style = (r.style.name or "").lower() if r.style is not None else ""
-        bold = bool(r.bold) or style == "strong"
-        italic = bool(r.italic) or style == "emphasis"
-        pieces: list[Piece] = []
+        styles = set()
+        if r.bold or style == "strong":
+            styles.add(STRONG)
+        if r.italic or style == "emphasis":
+            styles.add(EM)
+        if r.underline not in (None, False, WD_UNDERLINE.NONE):
+            styles.add(UNDERLINE)
+        if r.font.strike or r.font.double_strike:
+            styles.add(STRIKE)
+        if r.font.superscript:
+            styles.add(SUP)
+        elif r.font.subscript:
+            styles.add(SUB)
+        styles = frozenset(styles)
+        out: list = []
         for child in el:
             tag = child.tag
             if tag == qn("w:t") or (tag == qn("w:delText") and deleted):
-                pieces.append(Piece(child.text or "", bold, italic))
+                out.append(Text(child.text or "", styles))
             elif tag in (qn("w:tab"), qn("w:ptab"), qn("w:br"), qn("w:cr")):
-                pieces.append(Piece(" ", bold, italic))
+                out.append(Text(" ", styles))
             elif tag == qn("w:noBreakHyphen"):
-                pieces.append(Piece("-", bold, italic))
+                out.append(Text("-", styles))
             elif tag == qn("w:footnoteReference") and not dropping:
-                pieces += self.note_ref("footnote", child.get(qn("w:id")))
+                out += self.note_ref("footnote", child.get(qn("w:id")))
             elif tag == qn("w:endnoteReference") and not dropping:
-                pieces += self.note_ref("endnote", child.get(qn("w:id")))
+                out += self.note_ref("endnote", child.get(qn("w:id")))
             elif tag == qn("w:commentReference"):
-                pieces += self.comment(child.get(qn("w:id")))
+                out += self.comment(child.get(qn("w:id")))
             elif tag in (qn("w:drawing"), qn("w:pict"), qn("w:object")):
                 descr = next((d.get("descr") for d in child.iter() if d.get("descr")), "")
-                pieces.append(Piece(f"[image: {descr}]" if descr else "[image]", raw=True))
-        return pieces
+                out.append(Image(f"[image: {descr}]" if descr else "[image]"))
+        return out
 
-    def children(self, el, paragraph, deleted: bool = False, dropping: bool = False) -> list[Piece]:
-        """The pieces of an element's children, tracked changes settled."""
-        pieces: list[Piece] = []
+    def children(self, el, paragraph, deleted: bool = False, dropping: bool = False) -> list:
+        """The inlines of an element's children, tracked changes settled."""
+        out: list = []
         for child in el:
             tag = child.tag
             if tag == qn("w:r"):
-                pieces += self.run(child, paragraph, deleted, dropping)
+                out += self.run(child, paragraph, deleted, dropping)
             elif tag == qn("w:commentRangeStart"):
-                pieces += self.comment(child.get(qn("w:id")))
+                out += self.comment(child.get(qn("w:id")))
             elif tag in INSERTED or tag in DELETED:
                 is_deletion = tag in DELETED
                 keep = self.changes == "all" or (self.changes == "accept") != is_deletion
@@ -188,102 +202,109 @@ class Reader:
                 )
                 if not keep:
                     # the text goes, the comments anchored in it stay
-                    pieces += [p for p in inner if p.raw and ".comment-start" in p.text]
+                    out += comments_in(inner)
                 elif self.changes == "all":
-                    kind = "deletion" if is_deletion else "insertion"
-                    author = (child.get(qn("w:author")) or "").replace('"', "'")
-                    date = child.get(qn("w:date")) or ""
-                    text = render_pieces(inner)
-                    if text:
-                        span = f'[{text}]{{.{kind} author="{author}" date="{date}"}}'
-                        pieces.append(Piece(span, raw=True))
+                    if markdown(inner):
+                        out.append(
+                            Span(
+                                "deletion" if is_deletion else "insertion",
+                                inner,
+                                author=child.get(qn("w:author")) or "",
+                                date=child.get(qn("w:date")) or "",
+                            )
+                        )
                 else:
-                    pieces += inner
+                    out += inner
             elif tag == qn("w:hyperlink"):
                 inner = self.children(child, paragraph, deleted, dropping)
                 rid = child.get(qn("r:id"))
                 target = ""
                 if rid and rid in paragraph.part.rels:
                     target = paragraph.part.rels[rid].target_ref
-                text = render_pieces(inner)
-                # a link that shows its own address is written once
-                link = f"[{text}]({target})" if target and text != target else text
-                pieces.append(Piece(link, raw=True))
+                out.append(Span("link", inner, target=target))
             elif tag == qn("w:sdt"):
                 content = child.find(qn("w:sdtContent"))
                 if content is not None:
-                    pieces += self.children(content, paragraph, deleted, dropping)
+                    out += self.children(content, paragraph, deleted, dropping)
             elif tag in TRANSPARENT:
-                pieces += self.children(child, paragraph, deleted, dropping)
+                out += self.children(child, paragraph, deleted, dropping)
             elif tag in (f"{{{M_NS}}}oMath", f"{{{M_NS}}}oMathPara"):
-                pieces.append(Piece(omml_text(child)))
-        return pieces
+                out.append(Text(omml_text(child)))
+        return out
 
     # Blocks -----------------------------------------------------------------------
 
-    def paragraph_text(self, el, part=None) -> str:
-        """A paragraph's text; part is the one it belongs to (a footnote's
-        links are looked up among the footnotes' relationships)."""
+    def paragraph_inlines(self, el, part=None) -> list:
+        """A paragraph's inlines, its edges stripped; part is the one it
+        belongs to (a footnote's links are looked up among the footnotes'
+        relationships)."""
         doc = self.document.part
         p = Paragraph(el, _Story(doc if part is None else _NotesPart(part, doc)))
-        return render_pieces(self.children(el, p)).strip()
+        return strip(self.children(el, p))
 
-    def paragraph(self, el) -> str:
-        text = self.paragraph_text(el)
-        if not text:
-            return ""
+    def cell(self, paragraphs, part=None) -> list:
+        """The inlines of several paragraphs, as one, a space between them."""
+        out: list = []
+        for p in paragraphs:
+            inlines = self.paragraph_inlines(p, part)
+            if markdown(inlines):
+                if out:
+                    out.append(Text(" "))
+                out += inlines
+        return out
+
+    def paragraph(self, el) -> Block | None:
+        inlines = self.paragraph_inlines(el)
+        if not markdown(inlines):
+            return None
         # A paragraph deleted as a whole keeps only the comments anchored in
         # it: as Word merges it into the next paragraph, they go there.
-        if COMMENTS_ONLY.fullmatch(text):
-            self.carried += text
-            return ""
-        text, self.carried = self.carried + text, ""
+        if comments_only(inlines):
+            self.carried += inlines
+            return None
+        inlines, self.carried = self.carried + inlines, []
+        language = self.language_of([el])
         p = Paragraph(el, _Story(self.document.part))
         style = (p.style.name or "").lower() if p.style is not None else ""
         if style in HEADING_STYLES:
-            return "#" * HEADING_STYLES[style] + " " + text
+            return Block("heading", inlines, level=HEADING_STYLES[style], language=language)
         numbered = el.find(f"{qn('w:pPr')}/{qn('w:numPr')}") is not None
         if numbered or style.startswith(LIST_STYLES):
-            return "- " + text
-        return text
+            return Block("item", inlines, language=language)
+        return Block("p", inlines, language=language)
 
-    def table(self, el) -> list[str]:
-        rows = []
-        for tr in el.iter(qn("w:tr")):
-            cells = []
-            for tc in tr.findall(qn("w:tc")):
-                texts = [self.paragraph_text(p) for p in tc.iter(qn("w:p"))]
-                cells.append(" ".join(t for t in texts if t).replace("|", "\\|"))
-            rows.append("| " + " | ".join(cells) + " |")
-        if rows:
-            width = rows[0].count(" | ") + 1
-            rows.insert(1, "|" + "---|" * width)
-        return rows
+    def table(self, el) -> Block:
+        rows = [
+            [self.cell(tc.iter(qn("w:p"))) for tc in tr.findall(qn("w:tc"))]
+            for tr in el.iter(qn("w:tr"))
+        ]
+        return Block("table", rows=rows, language=self.language_of(el.iter(qn("w:p"))))
 
-    def body(self) -> list[str]:
+    def body(self) -> list[Block]:
         """The paragraphs and tables of the document; comments carried past
         the last paragraph join it."""
         out = self.blocks(self.document.element.body)
         if self.carried:
-            if out:
-                out[-1] += self.carried
+            if not out:
+                out.append(Block("p"))
+            last = out[-1]
+            if last.kind == "table" and last.rows and last.rows[-1]:
+                last.rows[-1][-1] += self.carried
+            elif last.kind == "table":
+                out.append(Block("p", self.carried))
             else:
-                out.append(self.carried)
-                self.block_languages.append(None)
-            self.carried = ""
+                last.inlines += self.carried
+            self.carried = []
         return out
 
-    def blocks(self, container) -> list[str]:
-        out: list[str] = []
+    def blocks(self, container) -> list[Block]:
+        out: list[Block] = []
         for child in container:
             if child.tag == qn("w:p"):
-                line = self.paragraph(child)
-                if line:
-                    out.append(line)
-                    self.block_languages.append(self.language_of([child]))
+                if block := self.paragraph(child):
+                    out.append(block)
             elif child.tag == qn("w:tbl"):
-                out.append("\n".join(self.table(child)))
-                self.block_languages.append(self.language_of(child.iter(qn("w:p"))))
+                out.append(self.table(child))
             elif child.tag == qn("w:sdt"):
                 content = child.find(qn("w:sdtContent"))
                 if content is not None:
@@ -292,7 +313,7 @@ class Reader:
                 out += self.blocks(child)
         return out
 
-    def note_lines(self) -> list[str]:
+    def note_blocks(self) -> list[Block]:
         """The footnotes and endnotes, in the order they are referenced (a note
         may reference another, so the list can grow while it is written)."""
         out = []
@@ -303,9 +324,15 @@ class Reader:
             if found is None:
                 continue
             el, part = found
-            texts = [self.paragraph_text(p, part) for p in el.iter(qn("w:p"))]
-            out.append(f"[^{k}]: " + " ".join(t for t in texts if t))
-            self.note_languages.append(self.language_of(el.iter(qn("w:p"))))
+            paragraphs = list(el.iter(qn("w:p")))
+            out.append(
+                Block(
+                    "note",
+                    self.cell(paragraphs, part),
+                    number=k,
+                    language=self.language_of(paragraphs),
+                )
+            )
         return out
 
 
@@ -370,40 +397,7 @@ def omml_text(el) -> str:
     return text
 
 
-def render_pieces(pieces: list[Piece]) -> str:
-    """Pieces as Markdown: runs of the same style wrapped in ** or *, the
-    blanks at the edges of a run kept outside the markers."""
-    out = []
-    k = 0
-    while k < len(pieces):
-        p = pieces[k]
-        if p.raw:
-            out.append(p.text)
-            k += 1
-            continue
-        text = ""
-        while (
-            k < len(pieces)
-            and not pieces[k].raw
-            and (pieces[k].bold, pieces[k].italic)
-            == (
-                p.bold,
-                p.italic,
-            )
-        ):
-            text += pieces[k].text
-            k += 1
-        marker = ("**" if p.bold else "") + ("*" if p.italic else "")
-        core = text.strip()
-        if marker and core:
-            lead = text[: len(text) - len(text.lstrip())]
-            trail = text[len(text.rstrip()) :]
-            text = f"{lead}{marker}{core}{marker[::-1]}{trail}"
-        out.append(text)
-    return "".join(out)
-
-
-def _notes(document: Document) -> dict:
+def _notes(document) -> dict:
     """The footnote and endnote elements with the part holding them, by
     (kind, id), separators left out."""
     notes = {}
@@ -422,13 +416,13 @@ def _notes(document: Document) -> dict:
 def docx_to_markdown(data: bytes, changes: str = "accept") -> str:
     """A Word document's body as Markdown, its tracked changes settled
     ("accept", "reject") or kept as markup ("all"), its comments kept."""
-    return read_docx(data, changes)[0]
+    return to_markdown(read_docx(data, changes))
 
 
-def read_docx(data: bytes, changes: str = "accept") -> tuple[str, list[str | None], str | None]:
-    """A Word document's body as Markdown (docx_to_markdown), the language
-    each line of it is marked with (None: unmarked, or a blank line), and
-    the language most of its letters are marked with."""
+def read_docx(data: bytes, changes: str = "accept") -> Document:
+    """A Word document as prosediff reads it (prosediff.document), its
+    tracked changes settled ("accept", "reject") or kept as markup ("all"),
+    its comments kept, each paragraph with the language it is marked with."""
     if changes not in CHANGES:
         raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")
     try:
@@ -443,10 +437,6 @@ def read_docx(data: bytes, changes: str = "accept") -> tuple[str, list[str | Non
     except (KeyError, ValueError):
         reader.comments = {}
     reader.notes = _notes(document)
-    lines = reader.body()
-    notes = reader.note_lines()
-    text = "\n\n".join(lines)
-    if notes:
-        text += "\n\n" + "\n\n".join(notes)
-    blocks = zip(lines + notes, reader.block_languages + reader.note_languages, strict=True)
-    return text + "\n", line_languages(list(blocks)), most_letters(reader.letters)
+    blocks = reader.body()
+    notes = reader.note_blocks()
+    return Document(blocks, notes, most_letters(reader.letters))

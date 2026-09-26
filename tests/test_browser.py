@@ -246,23 +246,51 @@ def test_comment_tooltip(page):
     assert not tip.is_visible()
 
 
-def test_tracked_change_tooltip(browser, tmp_path):
-    """A tracked change kept as markup says who made it and when."""
-    old, new = tmp_path / "a.md", tmp_path / "b.md"
-    old.write_text("The cat sat on the mat.\n", encoding="utf-8")
-    new.write_text(
+def test_tracked_and_formatting_changes(browser, tmp_path):
+    """A tracked change kept as markup says who made it and when. Off by
+    default, the formatting changes of a document stay out of sight; the
+    switch (m) unfolds the lines that have them, marks them and says on
+    hover what changed."""
+    from helpers import docx_xml
+
+    def run(text, props=""):
+        return f'<w:r>{props}<w:t xml:space="preserve">{text}</w:t></w:r>'
+
+    old, new = tmp_path / "old", tmp_path / "new"
+    old.mkdir()
+    new.mkdir()
+    (old / "p.md").write_text("The cat sat on the mat.\n", encoding="utf-8")
+    (new / "p.md").write_text(
         'The cat [slept]{.insertion author="Riccardo" date="2026-09-25T10:15:00Z"} on the mat.\n',
         encoding="utf-8",
+    )
+    docx_xml(old / "d.docx", f"<w:p>{run('Some words.')}</w:p><w:p>{run('Old.')}</w:p>")
+    docx_xml(
+        new / "d.docx",
+        f"<w:p>{run('Some ')}{run('words', '<w:rPr><w:b/></w:rPr>')}{run('.')}</w:p>"
+        f"<w:p>{run('New.')}</w:p>",
     )
     out = tmp_path / "page.html"
     out.write_text(render(compare_paths(old, new)), encoding="utf-8")
     context = browser.new_context()
     page = context.new_page()
     page.goto(out.as_uri())
+    tip = page.locator("#tip")
     tracked = page.locator(".s-tc-ins").first
     assert "underline" in tracked.evaluate("e => getComputedStyle(e).textDecorationLine")
     tracked.hover()
-    tip = page.locator("#tip")
     assert tip.locator("b").inner_text() == "Tracked insertion"
     assert "by Riccardo" in tip.inner_text() and "2026-09-25 10:15" in tip.inner_text()
+    page.mouse.move(0, 0)
+    # formatting changes: shown by default, their lines unfolded
+    mark = page.locator(".fmt").first
+    assert mark.is_visible() and page.locator(".fmt-count").is_visible()
+    assert mark.evaluate("e => getComputedStyle(e).borderBottomStyle") == "dotted"
+    mark.hover()
+    assert tip.locator("b").inner_text() == "Formatting changed"
+    assert 'made "words" bold' in tip.inner_text()
+    page.mouse.move(0, 0)
+    page.keyboard.press("m")  # hidden: no mark, no count
+    assert mark.evaluate("e => getComputedStyle(e).borderBottomStyle") == "none"
+    assert not page.locator(".fmt-count").is_visible()
     context.close()

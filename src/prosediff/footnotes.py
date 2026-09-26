@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 
 from markupsafe import Markup, escape
 
+from prosediff.document import sub
+
 # Supplementary Private Use Area-A: apart from the comment placeholders,
 # which use the Private Use Area of the Basic Multilingual Plane.
 FIRST = 0xF0000
@@ -148,8 +150,8 @@ def set_aside(
     def replace(lines: list[str], mapping: dict[str, str]) -> list[str]:
         out = []
         for line in lines:
-            line = DEFINITION.sub(lambda m: mapping.get(m[1], m[0][:-1]) + ":", line, count=1)
-            out.append(REFERENCE.sub(lambda m: mapping.get(m[1], m[0]), line))
+            line = sub(DEFINITION, lambda m: mapping.get(m[1], m[0][:-1]) + ":", line, count=1)
+            out.append(sub(REFERENCE, lambda m: mapping.get(m[1], m[0]), line))
         return out
 
     return replace(old, old_map), replace(new, new_map), notes

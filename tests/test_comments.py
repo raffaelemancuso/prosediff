@@ -18,6 +18,8 @@ def versions(tmp_path, old, new):
 
 
 def test_fold_comments_replaces_span_with_one_placeholder():
+    """A comment span becomes one placeholder character standing for its
+    author, text and date; the same comment with a new id, the same one."""
     comments = Comments()
     folded = fold_comments(f"Text {NOTE}anchor{END} more.", comments)
     assert len(comments) == 1
@@ -26,13 +28,9 @@ def test_fold_comments_replaces_span_with_one_placeholder():
     assert comments.get(folded[5]).author == "Anna"
     assert comments.get(folded[5]).text == "Too long."
     assert comments.get(folded[5]).date == "2026-09-23 23:40"
-
-
-def test_same_comment_with_new_id_gets_same_placeholder():
-    comments = Comments()
-    a = fold_comments(NOTE, comments)
-    b = fold_comments(NOTE.replace('id="3"', 'id="25"'), comments)
-    assert a == b and len(comments) == 1
+    renumbered = NOTE.replace('id="3"', 'id="25"')
+    again = fold_comments(f"Text {renumbered}anchor{END} more.", comments)
+    assert again == folded and len(comments) == 1
 
 
 def test_nested_brackets_in_the_note():
@@ -67,7 +65,7 @@ def test_empty_comments_switch(tmp_path):
     assert ">(no text)</a>" in render(c)
     # the command line passes the switch on
     out = tmp_path / "r.html"
-    assert main(["--files", str(a), str(b), "--empty-comments", "-o", str(out)]) == 0
+    assert main(["--folders", str(a), str(b), "--empty-comments", "-o", str(out)]) == 0
     assert ">(no text)</a>" in out.read_text(encoding="utf-8")
 
 
@@ -155,12 +153,10 @@ def test_a_paragraph_with_only_a_new_comment_is_shown(tmp_path):
 
 
 def test_compare_fold_comments(builder, tmp_path):
-    builder.write("p.md", f"Some text{NOTE} here.{END}\n")
-    builder.write("p.txt", f"x {NOTE}\n")
+    builder.write_all({"p.md": f"Some text{NOTE} here.{END}\n", "p.txt": f"x {NOTE}\n"})
     base = builder.commit("first")
     renumbered = NOTE.replace('id="3"', 'id="9"')
-    builder.write("p.md", f"Some new text{renumbered} here.{END}\n")
-    builder.write("p.txt", f"y {NOTE}\n")
+    builder.write_all({"p.md": f"Some new text{renumbered} here.{END}\n", "p.txt": f"y {NOTE}\n"})
     target = builder.commit("second")
     c = compare(builder.path, base, target)  # folding is the default
     md, txt = c.files

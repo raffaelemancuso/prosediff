@@ -4,17 +4,56 @@ and print styles (their behaviour: test_browser.py).
 
 import re
 
+import pytest
+from conftest import RepoBuilder
+
 from prosediff import compare, render
 
 MOVED = "This sentence travels to the end of the file."
 
 
-def test_render_side_by_side(two_commits):
+def gap_file(changed):
+    return "".join(f"{i}\n" for i in range(50)).replace("25\n", changed)
+
+
+@pytest.fixture(scope="module")
+def page(tmp_path_factory):
+    """A Markdown file gaining markup to escape, from a commit whose subject
+    needs escaping too, a file that grew by 1,500 lines, one with a line
+    moved, one with a long unchanged stretch and one with a line changed,
+    removed and added; the repository, the commits and the page built once,
+    as no test changes them."""
+    b = RepoBuilder(tmp_path_factory.mktemp("page") / "repo")
+    b.write_all(
+        {
+            "doc.md": "Hello world.\nSecond line.\n",
+            "big.txt": "",
+            "moved.txt": f"{MOVED}\nkeep one\nkeep two\n",
+            "gap.txt": gap_file("25\n"),
+            "signs.txt": "keep\nthe old line of text\ngone\n",
+        }
+    )
+    base = b.commit("first <draft>")
+    b.write_all(
+        {
+            "doc.md": "Hello there.\nSecond line.\n<script>x</script>\n",
+            "big.txt": "".join(f"{i}\n" for i in range(1500)),
+            "moved.txt": f"keep one\nkeep two\n{MOVED}\n",
+            "gap.txt": gap_file("X\n"),
+            "signs.txt": "keep\nthe new line of text\nadded\n",
+        }
+    )
+    target = b.commit("second")
+    c = compare(b.path, base, target)
+    yield b, base, target, c, render(c)
+    b.repo.close()
+
+
+def test_render_side_by_side(page):
     """A self-contained page, its content and commit subjects escaped, the
     changes without tooltips (the highlighting says it), and a footer that
     names the program."""
-    b, base, target = two_commits
-    html = render(compare(b.path, base, target))
+    html = page[4]
     assert html.startswith("<!DOCTYPE html>")
     assert '<tr class="replace' in html
     assert "<ins>there</ins>" in html and "<del>world</del>" in html
@@ -30,47 +69,33 @@ def test_render_side_by_side(two_commits):
     assert 'by <a href="https://github.com/raffaelemancuso/prosediff">prosediff</a>' in footer
 
 
-def test_render_thousand_separators(builder):
-    builder.write("f.txt", "")
-    base = builder.commit("empty")
-    builder.write("f.txt", "".join(f"{i}\n" for i in range(1500)))
-    target = builder.commit("big")
-    html = render(compare(builder.path, base, target))
-    assert "+1,500" in html
+def test_render_thousand_separators(page):
+    assert "+1,500" in page[4]
 
 
-def test_moved_rendered(builder):
-    builder.write("f.txt", f"{MOVED}\nkeep one\nkeep two\n")
-    base = builder.commit("first")
-    builder.write("f.txt", f"keep one\nkeep two\n{MOVED}\n")
-    target = builder.commit("second")
-    c = compare(builder.path, base, target)
+def test_moved_rendered(page):
+    c, html = page[3], page[4]
     assert c.moved == 1
-    html = render(c)
     assert '<tr class="moved-out' in html and '<tr class="moved-in' in html
     assert "1 moved line" in html
 
 
-def test_left_out_gap_rendered(builder):
-    builder.write("f.txt", "".join(f"{i}\n" for i in range(50)))
-    base = builder.commit("first")
-    builder.write("f.txt", "".join(f"{i}\n" for i in range(50)).replace("25\n", "X\n"))
-    target = builder.commit("second")
-    html = render(compare(builder.path, base, target, max_hidden=5))
+def test_left_out_gap_rendered(page):
+    """An unchanged stretch longer than max_hidden is left out of the page,
+    not hidden in it."""
+    b, base, target, _, html = page
+    assert "left out of the page" not in html
+    html = render(compare(b.path, base, target, paths=["gap.txt"], max_hidden=5))
     assert "left out of the page" in html
     assert "<tbody hidden>" not in html
 
 
-def test_signs_screen_reader_text_and_print_styles(builder):
+def test_signs_screen_reader_text_and_print_styles(page):
     """What the page offers without the browser tests' script: signs beside
     the colours, text for screen readers, a print layout."""
-    builder.write("f.txt", "keep\nthe old line of text\ngone\n")
-    base = builder.commit("first")
-    builder.write("f.txt", "keep\nthe new line of text\nadded\n")
-    target = builder.commit("second")
-    html = render(compare(builder.path, base, target))
+    html = page[4]
     assert '<span class="sign" aria-hidden="true">~</span>' in html
     assert '<span class="sr">changed line, old: </span>' in html
-    assert '<caption class="sr" lang="en">Changes in f.txt' in html
+    assert '<caption class="sr" lang="en">Changes in signs.txt' in html
     assert 'aria-live="polite"' in html and 'aria-pressed="false"' in html
     assert "@media print" in html and "beforeprint" in html

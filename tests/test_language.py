@@ -82,10 +82,10 @@ def test_cli_language(tmp_path, capsys):
     """A given language is used as it is, not guessed; a bad one is refused."""
     old, new = pair(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     out = tmp_path / "page.html"
-    assert main(["--files", str(old), str(new), "-o", str(out), "--language", "DE"]) == 0
+    assert main(["--folders", str(old), str(new), "-o", str(out), "--language", "DE"]) == 0
     assert "language: de<" in out.read_text(encoding="utf-8")
     with pytest.raises(SystemExit):
-        main(["--files", str(old), str(new), "--language", "italian!"])
+        main(["--folders", str(old), str(new), "--language", "italian!"])
     assert "--language: not a language code" in capsys.readouterr().err
 
 
@@ -107,7 +107,7 @@ FLAG = re.compile(
 
 def marked(data: bytes, name: str) -> str | None:
     """The language most of a document's letters are marked with."""
-    return read_document(data, name)[2]
+    return read_document(data, name).language
 
 
 def word_pair(tmp_path, runs_old, runs_new, styles=None):
@@ -203,7 +203,7 @@ def test_document_language_refuses_other_files(tmp_path, capsys):
     old, new = pair(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     with pytest.raises(SourceError, match=r"paper\.md is not a Word or OpenDocument"):
         compare_paths(old, new, language="document")
-    assert main(["--files", str(old), str(new), "--language", "document"]) == 1
+    assert main(["--folders", str(old), str(new), "--language", "document"]) == 1
     assert "paper.md is not a Word or OpenDocument" in capsys.readouterr().err
     assert compare_paths(old, new).files[0].language_source == "guessed"
 
@@ -225,8 +225,8 @@ def test_word_paragraph_languages(tmp_path):
     new = docx_xml(
         tmp_path / "new.docx", para("it-IT", ITALIAN_EDITED) + para("de-DE", GERMAN_EDITED)
     )
-    _, languages, language = read_document(new.read_bytes(), "new.docx")
-    assert (languages, language) == (["it-it", None, "de-de"], "it-it")
+    doc = read_document(new.read_bytes(), "new.docx")
+    assert ([b.language for b in doc.blocks], doc.language) == (["it-it", "de-de"], "it-it")
     c = compare_paths(old, new)
     (f,) = c.files
     assert (f.language, f.language_source) == ("it-it", "document")

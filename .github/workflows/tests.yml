@@ -21,6 +21,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.11", "3.14"]
     runs-on: ${{ matrix.os }}
+    # The suite takes minutes; a hung job is stopped rather than left to
+    # block a release for hours.
+    timeout-minutes: 20
     env:
       # uv's own Python builds include Tk, which the GUI tests need;
       # Homebrew's Python on macOS does not.

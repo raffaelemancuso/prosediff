@@ -42,13 +42,12 @@ def test_structure(written):
 
 
 def test_comment_is_a_span_with_escaped_brackets(written):
-    assert '[Is \\[this\\] right?]{.comment-start id="0" author="Anna" date="' in written, written
-    assert written.rstrip().endswith("A sentence with a [bracket] and a remark.")
-
-
-def test_comment_brackets_are_unescaped_when_folded(tmp_path, written):
+    """A comment is a pandoc span, the brackets of its text escaped; folded,
+    its text is as written."""
     from prosediff.comments import Comments, fold_comments
 
+    assert '[Is \\[this\\] right?]{.comment-start id="0" author="Anna" date="' in written, written
+    assert written.rstrip().endswith("A sentence with a [bracket] and a remark.")
     comments = Comments()
     folded = fold_comments(written, comments)
     (placeholder,) = [ch for ch in folded if 0xE000 <= ord(ch) <= 0xF8FF]

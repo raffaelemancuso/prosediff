@@ -332,21 +332,6 @@ class OdtLanguages:
         return most_letters(counts), counts
 
 
-def line_languages(blocks: list[tuple[str, str | None]]) -> list[str | None]:
-    """The language of each line of the Markdown a document is read into,
-    from its blocks (a paragraph, a table, a note) and their languages: the
-    blocks are joined by blank lines, which have none. An empty document
-    is one blank line."""
-    if not blocks:
-        return [None]
-    out: list[str | None] = []
-    for k, (text, language) in enumerate(blocks):
-        if k:
-            out.append(None)
-        out += [language] * len(text.split("\n"))
-    return out
-
-
 # How the page shows a language ----------------------------------------------------
 
 # How the language of a file was found, as its tooltip says it.

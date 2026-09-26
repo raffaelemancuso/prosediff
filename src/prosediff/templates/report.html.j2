@@ -11,6 +11,7 @@
   --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
   --add: #1a7f37; --rem: #cf222e; --link: #0969da;
   --move-line: #fbefff; --move: #8250df; --current: #bf8700;
+  --fmt: #9a6700; --fmt-bg: #fff8c5;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -19,6 +20,7 @@
     --ins-line: #2ea04326; --ins-word: #2ea04366; --skip: #388bfd1a;
     --add: #3fb950; --rem: #f85149; --link: #4493f8;
     --move-line: #ab7df826; --move: #ab7df8; --current: #d29922;
+    --fmt: #d29922; --fmt-bg: #bb800933;
   }
 }
 /* On paper, the light colours even when the browser is in dark mode: no
@@ -30,6 +32,7 @@
     --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
     --add: #1a7f37; --rem: #cf222e; --link: #0969da;
     --move-line: #fbefff; --move: #8250df; --current: #bf8700;
+    --fmt: #9a6700; --fmt-bg: #fff8c5;
   }
 }
 * { box-sizing: border-box; }
@@ -174,6 +177,19 @@ body.formatted .s-strong { font-weight: 700; }
 body.formatted .s-code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em;
   background: var(--panel); }
 body.formatted .s-link { color: var(--link); text-decoration: underline; }
+body.formatted .s-u { text-decoration: underline; }
+body.formatted .s-strike { text-decoration: line-through; }
+body.formatted .s-u.s-strike { text-decoration: underline line-through; }
+body.formatted .s-sup { vertical-align: super; font-size: 0.75em; line-height: 0; }
+body.formatted .s-sub { vertical-align: sub; font-size: 0.75em; line-height: 0; }
+/* Formatting changes (a document's text made bold, underlined, ...), shown
+   by default, dotted in amber, what changed on hover, and a count in each
+   file's header; the toolbar's switch hides them. */
+.fmt-count { display: none; color: var(--fmt); }
+body.formats .fmt-count { display: inline; }
+body.formats .fmt { background: var(--fmt-bg); border-bottom: 2px dotted var(--fmt);
+  cursor: help; }
+body.formats tr.fmt-row td.no { color: var(--fmt); font-weight: 600; }
 body.formatted .s-cite { color: var(--move); }
 /* Tracked changes kept as markup (--docx-changes all), as Word shows them:
    insertions underlined, deletions struck through; hovering one says who
@@ -390,6 +406,7 @@ thead.print, .print-note { display: none; }
     <span class="path">{% if f.change == "renamed" %}{{ f.old_path }} → {% endif %}{{ f.path }}</span>
     <span class="role">{{ f.change }}</span>
     {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}
+    {% if f.formatted_rows %}<span class="fmt-count">formatting changed in {{ "{:,}".format(f.formatted_rows) }} line{{ "" if f.formatted_rows == 1 else "s" }}</span>{% endif %}
     {% if f.note %}<span class="file-note">{{ f.note }}</span>{% endif %}
     {% if f.language %}<span class="file-note" title="{{ file_language_note(f.language, f.language_source) }}; its sentences are split and its lines hyphenated by it{% if f.mixed_languages %}, where a paragraph is marked with none of its own{% endif %}">{% if not f.mixed_languages %}{{ flag(f.language) }} {% endif %}language: {{ f.language }}{% if f.language_source == "guessed" %} (guessed){% elif f.language_source == "document" %} (from the document){% endif %}</span>{% endif %}
   </summary>
@@ -420,14 +437,14 @@ thead.print, .print-note { display: none; }
     <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
     <tbody hidden>
     {% for h in r.hidden %}
-    <tr class="equal"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ gutter_flag(f, h.left_no, h.left_lang) }}{{ h.left_label or h.left_no }}</td><td class="code left"{% if h.left_lang and h.left_lang != f.language %} lang="{{ h.left_lang }}"{% endif %}>{{ h.left | hyphenate(h.left_lang or f.language) }}</td><td class="no r">{{ gutter_flag(f, h.right_no, h.right_lang) }}{{ h.right_label or h.right_no }}</td><td class="code right"{% if h.right_lang and h.right_lang != f.language %} lang="{{ h.right_lang }}"{% endif %}>{{ h.right | hyphenate(h.right_lang or f.language) }}</td></tr>
+    <tr class="equal{% if h.format_changes %} fmt-row{% endif %}"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ gutter_flag(f, h.left_no, h.left_lang) }}{{ h.left_label or h.left_no }}</td><td class="code left"{% if h.left_lang and h.left_lang != f.language %} lang="{{ h.left_lang }}"{% endif %}>{{ h.left | hyphenate(h.left_lang or f.language) }}</td><td class="no r">{{ gutter_flag(f, h.right_no, h.right_lang) }}{{ h.right_label or h.right_no }}</td><td class="code right"{% if h.right_lang and h.right_lang != f.language %} lang="{{ h.right_lang }}"{% endif %}>{{ h.right | hyphenate(h.right_lang or f.language) }}</td></tr>
     {% endfor %}
     </tbody>
     {% endif %}
     <tbody>
     {% else %}
     {% set sign = signs.get(r.kind, ("", "")) %}
-    <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>
+    <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}{% if r.format_changes %} fmt-row{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>
       <td class="no l">{{ gutter_flag(f, r.left_no, r.left_lang) }}{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
       <td class="code left"{% if r.left_lang and r.left_lang != f.language %} lang="{{ r.left_lang }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left | hyphenate(r.left_lang or f.language) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
       <td class="no r">{{ gutter_flag(f, r.right_no, r.right_lang) }}{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
@@ -453,6 +470,7 @@ thead.print, .print-note { display: none; }
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
   <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg></button>
   <button type="button" class="icon" data-toggle="tint" aria-pressed="false" aria-label="Tint edited lines" title="Tint edited lines: the whole of an edited line, not only its changed words (t)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="5.5" width="14" height="5" rx="1" class="fill soft"/><path d="M3 8h10M3 3h7M3 13h9"/></svg></button>
+  <button type="button" class="icon" data-toggle="formats" aria-pressed="false" aria-label="Formatting changes" title="Formatting changes: text of a document made bold, italic, underlined, ..., its words unchanged (m)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h4.2a2.6 2.6 0 0 1 0 5.2H4zM4 7.7h4.8a2.9 2.9 0 0 1 0 5.8H4z"/><path d="M11.5 11.5l1.5 1.5 2.5-3" /></svg></button>
   <span class="spacing"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span>
     <span class="stepper">
       <button type="button" tabindex="-1" aria-hidden="true" data-gap="-1" title="Less space between paragraphs ([)">−</button>
@@ -490,14 +508,16 @@ thead.print, .print-note { display: none; }
   // are classes of the body, remembered where the browser allows.
   function setView(name, on) {
     document.body.classList.toggle(name, on);
+    if (name === "formats" && on) unfoldFormats();
     var b = document.querySelector('[data-toggle="' + name + '"]');
     if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
     try { localStorage.setItem("prosediff-" + name, on ? "1" : "0"); } catch (e) {}
   }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
-  // Formatted Markdown is on by default, the other views off; a choice the
+  // Formatted text and formatting changes are on by default, the other
+  // views off; a choice the
   // browser remembers wins.
-  var VIEW_DEFAULT = { unified: false, formatted: true, tint: false, inline: false };
+  var VIEW_DEFAULT = { unified: false, formatted: true, tint: false, inline: false, formats: true };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
     try {
@@ -508,11 +528,22 @@ thead.print, .print-note { display: none; }
     var b = document.querySelector('[data-toggle="' + name + '"]');
     if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
   });
+  if (document.body.classList.contains("formats")) unfoldFormats();
 
   // Reveal the run of unchanged lines a fold row stands for.
   function unfold(fold) {
     fold.nextElementSibling.hidden = false;
     fold.remove();
+  }
+  // Showing the formatting changes reveals the unchanged lines that have
+  // them.
+  function unfoldFormats() {
+    document.querySelectorAll("tbody[hidden] tr.fmt-row").forEach(function (row) {
+      var body = row.closest("tbody[hidden]");
+      if (body && body.previousElementSibling && body.previousElementSibling.classList.contains("fold")) {
+        unfold(body.previousElementSibling);
+      }
+    });
   }
 
   document.addEventListener("click", function (e) {
@@ -573,6 +604,7 @@ thead.print, .print-note { display: none; }
     var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
                  t: function () { toggle("tint"); }, i: function () { toggle("inline"); },
+                 m: function () { toggle("formats"); },
                  "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
   });
@@ -621,6 +653,9 @@ thead.print, .print-note { display: none; }
       add("b", el.dataset.author || "Comment");
       add("line", el.dataset.text);
       if (el.dataset.date) add("when", el.dataset.date);
+    } else if (el.classList.contains("fmt")) {
+      add("b", "Formatting changed");
+      add("line", el.dataset.fmt);
     } else if (el.matches(".s-tc-ins, .s-tc-del")) {
       add("b", el.classList.contains("s-tc-ins") ? "Tracked insertion" : "Tracked deletion");
       if (el.dataset.author) add("line", "by " + el.dataset.author);
@@ -673,6 +708,7 @@ thead.print, .print-note { display: none; }
   var anchorX = 0;
   function tipTarget(el) {
     return el.closest(".toolbar [data-help]") || (commentTips && el.closest(".comment")) ||
+      (document.body.classList.contains("formats") && el.closest(".fmt")) ||
       (document.body.classList.contains("formatted") && el.closest(".s-tc-ins, .s-tc-del"));
   }
   document.addEventListener("mouseover", function (e) {

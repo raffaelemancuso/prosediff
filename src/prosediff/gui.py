@@ -5,21 +5,27 @@ the working tree and the index, or typed as any ref), or two files or
 folders. The options are those of the command line that matter when reading
 a diff. The comparison runs in a background thread, so the window stays
 responsive; the choices are remembered for the next time.
+
+The widgets are ttkbootstrap's, in its Bootstrap theme: light or dark as the
+system is set (Windows' app mode, macOS's appearance), the title bar too on
+Windows.
 """
 
 import ctypes
 import json
 import os
 import queue
+import subprocess
 import sys
 import threading
 import tkinter as tk
 import webbrowser
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
 import git
+import ttkbootstrap as ttk
 
 from prosediff.diff import (
     AUTO_ENCODING,
@@ -33,7 +39,7 @@ from prosediff.diff import (
 )
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
 from prosediff.render import ALIGNMENTS, default_output, render
-from prosediff.sources import DOCX_CHANGES, FOLDER_FILES, SourceError
+from prosediff.sources import DOCX_CHANGES, FOLDER_FILES, SourceError, default_page
 
 MAX_COMMITS = 200
 ENCODINGS = (AUTO_ENCODING, "utf-8", "cp1252", "latin-1", "utf-16", "cp1250", "cp1251")
@@ -122,7 +128,10 @@ def single_file(args: list[str]) -> Path | None:
 
 def page_beside(old: Path, new: Path) -> str:
     """Where the page comparing two files goes: next to the new one, named
-    after both, so pages of different pairs do not overwrite each other."""
+    after both, so pages of different pairs do not overwrite each other; that
+    comparing two folders, into the new one (default_page)."""
+    if folder_page := default_page(old, new):
+        return str(folder_page.resolve())
     return str(new.resolve().parent / f"{old.stem}_vs_{new.stem}.html")
 
 
@@ -249,7 +258,10 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
             untracked=s.untracked and s.target in ("worktree", ""),
             **options,
         )
-    out = Path(s.output) if s.output else default_output()
+    out = Path(s.output) if s.output else None
+    if out is None and s.mode == "files":
+        out = default_page(Path(s.old), Path(s.new))
+    out = out or default_output()
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write(render(comparison, s.paths, align=s.align))
     return out, comparison
@@ -260,6 +272,7 @@ class App:
 
     def __init__(self, root: tk.Tk | tk.Toplevel, settings: Settings | None = None) -> None:
         self.root = root
+        use_theme(root)
         self.s = settings or load_settings()
         self.choices: dict[str, str] = {}  # label -> ref
         self.results: queue.Queue = queue.Queue()
@@ -302,7 +315,7 @@ class App:
         ttk.Entry(git_tab, textvariable=self.paths).grid(
             row=4, column=1, columnspan=2, sticky="ew", **pad
         )
-        ttk.Label(git_tab, text="optional, separated by ;", foreground="grey").grid(
+        ttk.Label(git_tab, text="optional, separated by ;", bootstyle="secondary").grid(
             row=5, column=1, sticky="w", padx=6
         )
 
@@ -321,7 +334,7 @@ class App:
         ttk.Label(
             files_tab,
             text="Two files (whatever their names, Word documents included) or two folders.",
-            foreground="grey",
+            bootstyle="secondary",
         ).grid(row=2, column=1, sticky="w", padx=6)
         ttk.Button(files_tab, text="⇅ Swap", command=self.swap_files).grid(
             row=2, column=2, columnspan=2, sticky="ew", **pad
@@ -332,7 +345,7 @@ class App:
         ttk.Label(
             files_tab,
             text="patterns separated by |; empty: every file",
-            foreground="grey",
+            bootstyle="secondary",
         ).grid(row=4, column=1, sticky="w", padx=6)
 
         # Options
@@ -380,7 +393,7 @@ class App:
         ttk.Label(
             opts,
             text="how alike an edited line must be to count as moved (1: only unchanged)",
-            foreground="grey",
+            bootstyle="secondary",
         ).grid(row=3, column=2, columnspan=2, sticky="w", **pad)
         self.by_sentence = tk.BooleanVar(value=self.s.by_sentence)
         ttk.Checkbutton(opts, text="Compare sentence by sentence", variable=self.by_sentence).grid(
@@ -400,7 +413,7 @@ class App:
             opts,
             text="splits sentences and hyphenates lines; default: marked in Word and "
             "OpenDocument files, else guessed",
-            foreground="grey",
+            bootstyle="secondary",
         ).grid(row=6, column=2, columnspan=2, sticky="w", **pad)
         ttk.Label(opts, text="Text encoding").grid(row=7, column=0, sticky="w", **pad)
         self.encoding = tk.StringVar(value=self.s.encoding)
@@ -410,7 +423,7 @@ class App:
         ttk.Label(
             opts,
             text="of text and Markdown files; auto: UTF-8 unless a file is not, then guessed",
-            foreground="grey",
+            bootstyle="secondary",
         ).grid(row=7, column=2, columnspan=2, sticky="w", **pad)
 
         # Output
@@ -421,9 +434,12 @@ class App:
         self.output = tk.StringVar(value=self.s.output)
         ttk.Entry(out, textvariable=self.output).grid(row=0, column=1, sticky="ew", **pad)
         ttk.Button(out, text="Save as…", command=self.pick_output).grid(row=0, column=2, **pad)
-        ttk.Label(out, text="empty: a new page in the temporary folder", foreground="grey").grid(
-            row=1, column=1, sticky="w", padx=6
-        )
+        ttk.Label(
+            out,
+            text="empty: two folders, prosediff.html in the new one; "
+            "otherwise a new page in the temporary folder",
+            bootstyle="secondary",
+        ).grid(row=1, column=1, sticky="w", padx=6)
         self.open_page = tk.BooleanVar(value=self.s.open_page)
         ttk.Checkbutton(out, text="Open in the browser when done", variable=self.open_page).grid(
             row=2, column=1, sticky="w", **pad
@@ -434,7 +450,9 @@ class App:
         bottom.pack(fill="x")
         self.status = tk.StringVar(value="Choose what to compare, then Compare.")
         ttk.Label(bottom, textvariable=self.status).pack(side="left")
-        self.button = ttk.Button(bottom, text="Compare", command=self.run, default="active")
+        self.button = ttk.Button(
+            bottom, text="Compare", command=self.run, default="active", bootstyle="primary"
+        )
         self.button.pack(side="right")
         root.bind("<Control-Return>", lambda e: self.run())
 
@@ -635,6 +653,101 @@ def own_taskbar_button() -> None:
     Called before the first window is made."""
     if sys.platform == "win32":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("prosediff.gui")
+
+
+# The Bootstrap theme, in the system's light or dark.
+LIGHT_THEME, DARK_THEME = "bootstrap-light", "bootstrap-dark"
+# Windows' setting: its apps in light or dark ("app mode").
+PERSONALIZE = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+# How long to wait for a system setting (seconds): it answers at once, or
+# never.
+SETTING_TIMEOUT = 2
+# The desktop portal's colour scheme for dark.
+PREFER_DARK = 1
+# DwmSetWindowAttribute's attribute for a dark title bar (Windows 10 20H1 on).
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+
+
+def system_dark() -> bool:
+    """Whether the system asks for dark windows: Windows' app mode, macOS's
+    appearance, Linux's colour scheme (the desktop portal's, which GNOME,
+    KDE and others set); when it cannot be told, light."""
+    try:
+        if sys.platform == "win32":
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, PERSONALIZE) as key:
+                return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+        if sys.platform == "darwin":
+            done = subprocess.run(
+                ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                capture_output=True,
+                text=True,
+                timeout=SETTING_TIMEOUT,
+            )
+            return done.stdout.strip() == "Dark"
+        if sys.platform.startswith("linux"):
+            return portal_color_scheme() == PREFER_DARK
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return False
+
+
+def portal_color_scheme() -> int | None:
+    """The colour scheme the freedesktop desktop portal reports on its
+    session bus (1: prefer dark, 2: prefer light, 0: none), read with
+    jeepney; None when there is no portal to ask."""
+    try:
+        from jeepney import DBusAddress, DBusErrorResponse, new_method_call
+        from jeepney.io.blocking import open_dbus_connection
+    except ImportError:
+        return None
+    portal = DBusAddress(
+        "/org/freedesktop/portal/desktop",
+        bus_name="org.freedesktop.portal.Desktop",
+        interface="org.freedesktop.portal.Settings",
+    )
+    try:
+        with open_dbus_connection(bus="SESSION", auth_timeout=SETTING_TIMEOUT) as bus:
+            # ReadOne since version 2 of the portal; Read, now deprecated,
+            # before it
+            for method in ("ReadOne", "Read"):
+                call = new_method_call(
+                    portal, method, "ss", ("org.freedesktop.appearance", "color-scheme")
+                )
+                try:
+                    reply = bus.send_and_get_reply(call, timeout=SETTING_TIMEOUT)
+                except DBusErrorResponse:
+                    continue
+                return unwrap_variant(reply.body[0])
+    except (OSError, KeyError, ValueError, TimeoutError, DBusErrorResponse):
+        return None
+    return None
+
+
+def unwrap_variant(value) -> int | None:
+    """An integer out of D-Bus variants as jeepney gives them, (signature,
+    value) pairs, nested once by the portal's deprecated Read."""
+    while isinstance(value, tuple) and len(value) == 2 and isinstance(value[0], str):
+        value = value[1]
+    return value if isinstance(value, int) else None
+
+
+def use_theme(root: tk.Tk | tk.Toplevel) -> None:
+    """The Bootstrap theme on the window, light or dark as the system is;
+    on Windows, a title bar to match."""
+    dark = system_dark()
+    ttk.Style(theme=DARK_THEME if dark else LIGHT_THEME)
+    if dark and sys.platform == "win32":
+        try:
+            root.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+            on = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(on), ctypes.sizeof(on)
+            )
+        except (AttributeError, OSError, tk.TclError):
+            pass  # an older Windows: a light title bar
 
 
 def set_icon(root: tk.Tk) -> None:

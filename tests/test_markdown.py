@@ -89,6 +89,7 @@ def test_markdown_files_are_styled(tmp_path):
         new.write_text("a *c*\n")
         return render(compare_paths(old, new))
 
-    html = page(".md")
-    assert "s-em" in html and "s-syn" in html
-    assert "s-em" not in page(".txt").split("<main>")[1]
+    styled_cell = 'a <span class="s-syn">*</span><ins><span class="s-em">c</span></ins>'
+    assert styled_cell in page(".md")
+    text = page(".txt").split("<main>")[1]
+    assert "a *<ins>c</ins>*</td>" in text and "s-em" not in text

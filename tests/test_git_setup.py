@@ -63,6 +63,9 @@ def git(repo, *args, **kw):
 
 
 def test_to_markdown(tmp_path, capsysbinary):
+    """--to-markdown prints a document as Markdown, its tracked changes
+    accepted or rejected, whatever its name; a file it cannot read is an
+    error."""
     d = docx(tmp_path / "a.docx", [[("run", "Kept "), ("del", "gone"), ("ins", "new")]])
     assert main(["--to-markdown", str(d)]) == 0
     assert capsysbinary.readouterr().out == b"Kept new\n"
@@ -73,12 +76,9 @@ def test_to_markdown(tmp_path, capsysbinary):
     o.rename(tmp_path / "b")
     assert main(["--to-markdown", str(tmp_path / "b")]) == 0
     assert capsysbinary.readouterr().out == "Città.\n".encode()
-
-
-def test_to_markdown_errors(tmp_path, capsys):
     (tmp_path / "x.docx").write_bytes(b"not a zip")
     assert main(["--to-markdown", str(tmp_path / "x.docx")]) == 1
-    assert "not a readable Word document" in capsys.readouterr().err
+    assert b"not a readable Word document" in capsysbinary.readouterr().err
     assert main(["--to-markdown", str(tmp_path / "missing.docx")]) == 1
 
 
@@ -110,20 +110,19 @@ def test_setup_git_makes_git_diff_and_difftool_show_documents(two_documents, bro
     assert page.startswith("file:") and page.endswith(".html")
     html = Path(url2pathname(urlparse(page).path)).read_text(encoding="utf-8")
     # the changed letters are marked: s<mark>lept</mark>
-    assert "slept" in re.sub(r"<[^>]+>", "", html) and "converted from Word" in html
+    assert "slept" in re.sub(r"<[^>]+>", "", html) and "read from Word" in html
 
 
-def test_setup_git_global(no_global_git, capsys):
+def test_setup_git_global_and_outside_a_repository(no_global_git, capsys):
+    """--global writes the user's git configuration and attributes; a
+    folder that is no repository is an error."""
     tmp = no_global_git
     assert main(["--setup-git", "--global"]) == 0
     config = (tmp / "gitconfig").read_text()
     assert "textconv" in config and "--to-markdown" in config and "$LOCAL" in config
     assert (tmp / "xdg" / "git" / "attributes").read_text().splitlines() == list(ATTRIBUTES)
-
-
-def test_setup_git_outside_a_repository(tmp_path, no_global_git, capsys):
-    (tmp_path / "plain").mkdir()
-    assert main(["--setup-git", str(tmp_path / "plain")]) == 1
+    (tmp / "plain").mkdir()
+    assert main(["--setup-git", str(tmp / "plain")]) == 1
     assert "not a git repository" in capsys.readouterr().err
 
 

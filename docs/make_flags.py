@@ -18,13 +18,15 @@ from pathlib import Path
 
 PACKAGE = Path(__file__).parent.parent / "src" / "prosediff"
 REGISTRY = "https://registry.npmjs.org/flag-icons/latest"
+# Seconds to wait for the registry and the download, which take a few.
+TIMEOUT = 60
 COUNTRY = re.compile(r"package/flags/4x3/([a-z]{2})\.svg")
 
 
 def main() -> None:
-    with urllib.request.urlopen(REGISTRY) as r:
+    with urllib.request.urlopen(REGISTRY, timeout=TIMEOUT) as r:
         latest = json.load(r)
-    with urllib.request.urlopen(latest["dist"]["tarball"]) as r:
+    with urllib.request.urlopen(latest["dist"]["tarball"], timeout=TIMEOUT) as r:
         tarball = io.BytesIO(r.read())
     out = PACKAGE / "flags.zip"
     count = 0

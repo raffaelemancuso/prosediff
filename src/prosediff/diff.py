@@ -20,12 +20,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+import cchardet
 import git
+import psutil
 from charset_normalizer import from_bytes
 from markupsafe import Markup
 from rapidfuzz.distance import Indel
 
-from prosediff import footnotes
+from prosediff import document, footnotes
 from prosediff.comments import (  # noqa: F401  (re-exported)
     COMMENT_MARK,
     PLACEHOLDER,
@@ -36,6 +38,7 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
     plain,
     show_comments,
 )
+from prosediff.document import CommentMark, Document, Line, comment_markdown, sub
 from prosediff.language import (
     DEFAULT,
     DOCUMENT,
@@ -58,6 +61,13 @@ from prosediff.sources import (
 # a process without one, such as the window of prosediff-gui: a terminal
 # that flashes up while it runs. This flag starts it without.
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+# How long git may take to line up every file of a comparison, and a
+# filter to rewrite one (seconds): far beyond what either takes on the
+# longest manuscript, so that a hung process fails instead of waiting forever.
+GIT_TIMEOUT = 300
+FILTER_TIMEOUT = 300
+# A comment's date as its document stamps it, to the minute.
+COMMENT_DATE = re.compile(r"(\d{4}-\d\d-\d\d)T(\d\d:\d\d)")
 # How many leading bytes are inspected to decide whether a file is binary,
 # as git itself does.
 BINARY_SNIFF = 8000
@@ -66,6 +76,7 @@ WESTERN = "cp1252"
 # The encoding option that guesses it; C1 controls betray a text misread.
 AUTO_ENCODING = "auto"
 C1_CONTROLS = re.compile("[\x80-\x9f]")
+BOMS = (codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE, codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
 # Changed words, spaces and punctuation are compared as separate tokens, so a
 # changed word is highlighted alone and not the whole run it sits in.
 TOKEN = re.compile(r"\w+|\s+|[^\w\s]", re.UNICODE)
@@ -191,6 +202,9 @@ class Row:
     # with, if any.
     left_lang: str = ""
     right_lang: str = ""
+    # Its formatting changes, in plain English: text of a document made bold,
+    # underlined, ... (the page shows them on demand).
+    format_changes: list[str] = field(default_factory=list)
 
     @property
     def skipped(self) -> int:
@@ -216,7 +230,7 @@ class FileDiff:
     # data: URIs of the two versions of an image, when small enough.
     old_image: str | None = None
     new_image: str | None = None
-    # How the file was read, when not as text (e.g. converted from Word).
+    # How the file was read, when not as text (e.g. from Word).
     note: str = ""
     markdown: bool = False
     # The language of its prose (a BCP 47 tag, e.g. "it"), when known, and
@@ -247,6 +261,11 @@ class FileDiff:
     @property
     def change_count(self) -> int:
         return sum(r.first_of_change for r in self.rows)
+
+    @property
+    def formatted_rows(self) -> int:
+        """How many lines' formatting changed."""
+        return sum(bool(row.format_changes) for r in self.rows for row in [r, *r.hidden])
 
     @property
     def anchor(self) -> str:
@@ -347,14 +366,20 @@ def decode_text(data: bytes, encoding: str = AUTO_ENCODING) -> tuple[str, str]:
     Given an encoding, the file is read in it, a byte it cannot read standing
     in as U+FFFD. With "auto", UTF-8 is assumed, unless the file cannot be
     read in it, or reads with C1 control characters (U+0080 to U+009F),
-    which text never holds. Such a file is read in the encoding charset-normalizer
-    finds likeliest. UTF-16 and UTF-32 need their byte-order mark, since a
-    few bytes of Latin text otherwise read as UTF-16 too. When encodings fit
-    equally well (a short Italian text is as good in Central European
-    cp1250, "caffč", as in cp1252; "café" as good in Urdu), Windows-1252
-    wins if it reads the text as one of them does: the usual encoding of
-    Western European text, and a superset of Latin-1. (charset-normalizer
-    lists one of the encodings that read a text alike, not necessarily it.)
+    which text never holds. Such a file is read in the encoding cchardet
+    (uchardet, Mozilla's detector) finds: right even on a few words, where
+    charset-normalizer's guesses are little better than chance ("“yes”"
+    read as "УyesФ"). Latin-1 is read as Windows-1252, its superset, whose
+    quotes and dashes it would read as control characters.
+
+    When cchardet's guess does not read the file (it takes some Polish for
+    UTF-8), charset-normalizer's likeliest encoding is used. UTF-16 and
+    UTF-32 need their byte-order mark, since a few bytes of Latin text
+    otherwise read as UTF-16 too. When its encodings fit equally well (a
+    short Italian text is as good in Central European cp1250, "caffč", as in
+    cp1252), Windows-1252 wins if it reads the text as one of them does: the
+    usual encoding of Western European text. (charset-normalizer lists one of
+    the encodings that read a text alike, not necessarily it.)
     """
     if encoding != AUTO_ENCODING:
         text = data.decode(encoding, errors="replace")
@@ -365,6 +390,8 @@ def decode_text(data: bytes, encoding: str = AUTO_ENCODING) -> tuple[str, str]:
             return text, ""
     except UnicodeDecodeError:
         pass
+    if found := detected(data):
+        return found
     try:
         western = data.decode(WESTERN)
     except UnicodeDecodeError:
@@ -382,6 +409,38 @@ def decode_text(data: bytes, encoding: str = AUTO_ENCODING) -> tuple[str, str]:
     return str(best), best.encoding
 
 
+def detected(data: bytes) -> tuple[str, str] | None:
+    """The file read in the encoding cchardet finds, and that encoding's
+    name; None when it finds none, or one that does not read the file as
+    text (bytes it cannot decode, control characters, UTF-16 or UTF-32
+    without a byte-order mark)."""
+    guess = cchardet.detect(data).get("encoding")
+    try:
+        name = codecs.lookup(guess).name if guess else ""
+    except LookupError:
+        return None
+    if name == "iso8859-1":
+        name = WESTERN
+    if not name or name == "utf-8":
+        return None  # UTF-8 has been tried
+    if name.startswith(("utf-16", "utf-32")) and not data.startswith(BOMS):
+        return None
+    try:
+        text = data.decode(name)
+    except UnicodeDecodeError:
+        return None
+    if C1_CONTROLS.search(text):
+        return None
+    # Named as Windows-1252 when it reads the file alike: "“yes”" is as
+    # good in cp1250, but a Western text more likely.
+    try:
+        if name != WESTERN and data.decode(WESTERN) == text:
+            name = WESTERN
+    except UnicodeDecodeError:
+        pass
+    return text, name
+
+
 def split_lines(text: str) -> list[str]:
     """Lines as git counts them: split on LF only (CRLF counts as LF)."""
     lines = text.replace("\r\n", "\n").split("\n")
@@ -397,15 +456,44 @@ def image_uri(path: str, data: bytes) -> str | None:
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
 
+def run(args: str | list[str], *, timeout: float, **options) -> subprocess.CompletedProcess:
+    """subprocess.run(args, capture_output=True, ...) without a console window,
+    but a process that outlives timeout is stopped with every process it
+    started, then subprocess.TimeoutExpired raised. subprocess.run stops only
+    the process it started: a shell's command would go on running, holding
+    the pipes open, and the wait on them would never end."""
+    data = options.pop("input", None)
+    with subprocess.Popen(
+        args,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=NO_WINDOW,
+        **options,
+    ) as proc:
+        try:
+            out, err = proc.communicate(data, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                tree = psutil.Process(proc.pid)
+                for child in tree.children(recursive=True):
+                    child.kill()
+                tree.kill()
+            except psutil.NoSuchProcess:
+                pass
+            proc.communicate()
+            raise
+    return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
 def run_filter(command: str, text: str, path: str) -> str:
     """Pipe text through a shell command (cmd.exe on Windows, sh elsewhere)."""
-    proc = subprocess.run(
-        command,
-        shell=True,
-        input=text.encode("utf-8"),
-        capture_output=True,
-        creationflags=NO_WINDOW,
-    )
+    try:
+        proc = run(command, shell=True, input=text.encode("utf-8"), timeout=FILTER_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise FilterError(
+            f"filter took more than {FILTER_TIMEOUT} seconds on {path}, and was stopped"
+        ) from None
     if proc.returncode != 0:
         raise FilterError(
             f"filter failed on {path} (exit {proc.returncode}): "
@@ -438,6 +526,74 @@ def describe(old: str, new: str) -> str:
     if new:
         return "added a space" if new_blank else f"added {quote(new)}"
     return "removed a space" if old_blank else f"removed {quote(old)}"
+
+
+# The styles whose change is a formatting change, and how it reads: made
+# "text" bold, made "text" not bold. A heading's level is its own.
+FORMATS = {
+    "strong": ("made {} bold", "made {} not bold"),
+    "em": ("made {} italic", "made {} not italic"),
+    "u": ("underlined {}", "took the underline off {}"),
+    "strike": ("struck {} through", "took the strikethrough off {}"),
+    "sup": ("made {} superscript", "made {} not superscript"),
+    "sub": ("made {} subscript", "made {} not subscript"),
+    "link": ("made {} a link", "made {} not a link"),
+}
+HEADING_STYLE = re.compile(r"h([1-6])")
+FMT = Markup('<span class="fmt" data-fmt="{}">{}</span>')
+
+
+def formatting(styles: set[str] | frozenset[str]) -> frozenset[str]:
+    """The styles of a character that are formatting."""
+    return frozenset(s for s in styles if s in FORMATS or HEADING_STYLE.fullmatch(s))
+
+
+def describe_format(text: str, old: frozenset[str], new: frozenset[str]) -> list[str]:
+    """How the formatting of a piece of text changed, in plain English."""
+    q = quote(text)
+    out = []
+    old_heading = next((int(s[1]) for s in old if HEADING_STYLE.fullmatch(s)), 0)
+    new_heading = next((int(s[1]) for s in new if HEADING_STYLE.fullmatch(s)), 0)
+    if old_heading != new_heading:
+        out.append(
+            f"made {q} a level {new_heading} heading" if new_heading else f"made {q} not a heading"
+        )
+    for style, (made, unmade) in FORMATS.items():
+        if (style in new) != (style in old):
+            out.append((made if style in new else unmade).format(q))
+    return out
+
+
+def format_marks(
+    text: str, old_styles: Styles, new_styles: Styles
+) -> tuple[Markup, Markup, list[str]] | None:
+    """Text both sides have, each side in its own styles, with the pieces
+    whose formatting changed marked (class fmt, what changed in data-fmt);
+    and the changes in plain English. None when the formatting is the same
+    (or unknown: text without styles of its own)."""
+    if old_styles is None or new_styles is None:
+        return None
+    old_f = [formatting(s) for s in old_styles]
+    new_f = [formatting(s) for s in new_styles]
+    if old_f == new_f:
+        return None
+    left, right, changes = [], [], []
+    start = 0
+    for k in range(1, len(text) + 1):
+        if k < len(text) and (old_f[k], new_f[k]) == (old_f[start], new_f[start]):
+            continue
+        piece = text[start:k]
+        o, n = styled(piece, old_styles[start:k]), styled(piece, new_styles[start:k])
+        if old_f[start] != new_f[start] and piece.strip():
+            what = describe_format(piece, old_f[start], new_f[start])
+            changes += what
+            o, n = FMT.format("; ".join(what), o), FMT.format("; ".join(what), n)
+        left.append(o)
+        right.append(n)
+        start = k
+    if not changes:
+        return None
+    return Markup("").join(left), Markup("").join(right), changes
 
 
 def _slice(styles: Styles, start: int, end: int) -> Styles:
@@ -477,6 +633,8 @@ class WordDiff:
     changes: list[str]
     words_added: int
     words_removed: int
+    # The formatting changes of the words both have.
+    format_changes: list[str] = field(default_factory=list)
 
 
 DEL = Markup("<del>{}</del>")
@@ -540,7 +698,7 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
     """
     a, b = TOKEN.findall(old), TOKEN.findall(new)
     ao, bo = _offsets(a), _offsets(b)
-    left, right, changes = [], [], []
+    left, right, changes, formats = [], [], [], []
     added = removed = 0
     matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
     for op, i1, i2, j1, j2 in merge_across_spaces(matcher.get_opcodes(), a):
@@ -551,6 +709,11 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
             # Comment markers are not text: whether a comment is new, gone or
             # moved (to the next paragraph, when its own was deleted) shows in
             # its icon and in the comments panel, not as a changed word.
+            if op == "equal" and (marked := format_marks(old_part, old_st, new_st)):
+                left.append(marked[0])
+                right.append(marked[1])
+                formats += marked[2]
+                continue
             left.append(styled(old_part, old_st))
             right.append(styled(new_part, new_st))
             continue
@@ -574,7 +737,7 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
             left.append(DEL.format(styled(old_part, old_st)))
         if new_part:
             right.append(INS.format(styled(new_part, new_st)))
-    return WordDiff(Markup("").join(left), Markup("").join(right), changes, added, removed)
+    return WordDiff(Markup("").join(left), Markup("").join(right), changes, added, removed, formats)
 
 
 # Line similarity ----------------------------------------------------------------
@@ -748,9 +911,12 @@ def git_opcodes(
         ]
         if ignore_whitespace:
             cmd.append("--ignore-all-space")
-        proc = subprocess.run(
-            [*cmd, "a", "b"], cwd=tmp, capture_output=True, creationflags=NO_WINDOW
-        )
+        try:
+            proc = run([*cmd, "a", "b"], cwd=tmp, timeout=GIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"git diff took more than {GIT_TIMEOUT} seconds, and was stopped"
+            ) from None
     # git diff --no-index exits 1 when the trees differ.
     if proc.returncode not in (0, 1):
         raise RuntimeError(
@@ -772,13 +938,16 @@ def git_opcodes(
 
 
 class Styler:
-    """The Markdown styles of lines, computed once each, or none at all."""
+    """The styles of lines: a document's own, those of Markdown's syntax
+    (computed once each), or none at all."""
 
     def __init__(self, markdown: bool) -> None:
         self.markdown = markdown
         self._cache: dict[str, list[set[str]]] = {}
 
     def __call__(self, line: str) -> Styles:
+        if isinstance(line, Line):  # a document's: its own styles
+            return line.styles
         if not self.markdown:
             return None
         if line not in self._cache:
@@ -891,22 +1060,23 @@ def align(
     count in neither.
     """
     ops = difflib_opcodes(old, new) if opcodes is None else opcodes
-    if all(tag == "equal" for tag, *_ in ops):
-        return [], 0, 0
     style = Styler(markdown)
+    if all(tag == "equal" for tag, *_ in ops) and not any(
+        format_marks(o, style(o), style(n)) for o, n in zip(old, new, strict=False)
+    ):
+        return [], 0, 0
+
+    def equal_row(i: int, j: int) -> Row:
+        """An unchanged row, of old line i and new line j (0-based): its text
+        the same, its formatting maybe not."""
+        o, n = old[i], new[j]
+        if marked := format_marks(o, style(o), style(n)):
+            return Row("equal", i + 1, marked[0], j + 1, marked[1], format_changes=marked[2])
+        return Row("equal", i + 1, styled(o, style(o)), j + 1, styled(n, style(n)))
 
     def equal_rows(i: int, j: int, count: int) -> list[Row]:
         """count unchanged rows, from old line i and new line j (0-based)."""
-        return [
-            Row(
-                "equal",
-                i + t + 1,
-                styled(old[i + t], style(old[i + t])),
-                j + t + 1,
-                styled(new[j + t], style(new[j + t])),
-            )
-            for t in range(count)
-        ]
+        return [equal_row(i + t, j + t) for t in range(count)]
 
     rows: list[Row] = []
     last = len(ops) - 1
@@ -946,6 +1116,7 @@ def align(
                             changes=w.changes,
                             words_added=w.words_added,
                             words_removed=w.words_removed,
+                            format_changes=w.format_changes,
                         )
                     )
                 elif pi is not None:
@@ -1001,33 +1172,16 @@ def paragraph_numbers(labels: list[str]) -> list[str]:
     return out
 
 
-def paragraph_languages(
-    line_labels: list[str], paragraph_labels: list[str], languages: list[str | None] | None
-) -> dict[str, str]:
-    """The language of each paragraph, by its number, from the language of
-    each line of the text (languages) and the labels of its lines before
-    and after paragraph_numbers()."""
-    if not languages:
-        return {}
-    out = {}
-    for line, paragraph in zip(line_labels, paragraph_labels, strict=True):
-        if found := languages[int(line.partition(".")[0]) - 1]:
-            out[paragraph.partition(".")[0]] = found
-    return out
-
-
-def set_row_languages(
-    rows: list[Row], old: dict[str, str], new: dict[str, str], language: str
-) -> bool:
-    """Each row's language, on each side: that its paragraph is marked with.
-    Whether any is not the file's language."""
+def set_row_languages(rows: list[Row], old: list[str], new: list[str], language: str) -> bool:
+    """Each row's language, on each side: that of the paragraph of a
+    document it comes from, if marked. Whether any is not the file's."""
     mixed = False
     for r in rows:
         for row in [r, *r.hidden]:
             if row.left_no is not None:
-                row.left_lang = old.get(row.left_label.partition(".")[0], "")
+                row.left_lang = getattr(old[row.left_no - 1], "lang", "")
             if row.right_no is not None:
-                row.right_lang = new.get(row.right_label.partition(".")[0], "")
+                row.right_lang = getattr(new[row.right_no - 1], "lang", "")
             mixed = mixed or any(x and x != language for x in (row.left_lang, row.right_lang))
     return mixed
 
@@ -1055,7 +1209,7 @@ def without_shared_comments(
             before_punct = not at_edge and line[m.end()] in ".,;:!?)]}"
             return " " if spaced and not at_edge and not before_punct else ""
 
-        return pattern.sub(gap, line)
+        return sub(pattern, gap, line)
 
     def side(lines: list[str], labels: list[str] | None) -> tuple[list[str], list[str] | None]:
         kept, kept_labels = [], []
@@ -1089,9 +1243,10 @@ def build_files(
 ) -> list[CommentEntry]:
     """Fill in the rows of every file; returns the comments for the panel.
 
-    Word and OpenDocument texts are read into Markdown first (prosediff.word,
-    prosediff.odt); a document that cannot be read is listed as a binary
-    file, with the reason.
+    Word and OpenDocument texts are read into paragraphs of styled text
+    (prosediff.word, prosediff.odt, prosediff.document), compared as lines
+    that carry their styles, languages and kinds; a document that cannot be
+    read is listed as a binary file, with the reason.
     """
     if language == DOCUMENT:
         for fd, old_bytes, new_bytes in entries:
@@ -1106,48 +1261,58 @@ def build_files(
     comments = Comments()
     texts: list[tuple[FileDiff, list[str], list[str]]] = []
     labels: dict[int, tuple[list[str] | None, list[str] | None]] = {}
-    # The language of each paragraph, by its number, of the Word and
-    # OpenDocument files whose paragraphs are marked with one.
-    paragraph_langs: dict[int, tuple[dict[str, str], dict[str, str]]] = {}
     notes: dict[int, footnotes.Footnotes] = {}
+    # The languages a document marks are used, or the one given or guessed.
+    marked_languages = language in (DOCUMENT, DEFAULT)
+
+    def comment(c: CommentMark) -> str:
+        """What a document's comment is in its text: a placeholder, folded;
+        nothing, when it has no text to show; or the span pandoc writes."""
+        if not fold:
+            return comment_markdown(c)
+        if not c.text and not empty_comments:
+            return ""
+        when = COMMENT_DATE.match(c.date)
+        mark = comments.placeholder(
+            c.author.replace('"', "'"), c.text, f"{when[1]} {when[2]}" if when else ""
+        )
+        return mark if mark is not None else comment_markdown(c)
+
+    def document_lines(doc: Document | None) -> list[Line]:
+        found = document.lines(doc, comment) if doc is not None else []
+        if not marked_languages:
+            for line in found:
+                line.lang = ""
+        return found
+
     for fd, old_bytes, new_bytes in entries:
+        # A Word or OpenDocument side is read into lines of styled text
+        # (prosediff.document); a side of any other file is text.
         from_word = is_document(fd.old_path) or is_document(fd.new_path)
-        # The languages the document marks: the one most of its letters are
-        # in (the new side's, unless it is gone or marks none), and that of
-        # each line of each side.
-        marked = old_langs = new_langs = None
+        old_doc = new_doc = None
         if from_word:
             try:
-                old_marked = new_marked = None
-                if old_bytes:
-                    old_bytes, old_langs, old_marked = read_document(
-                        old_bytes, fd.old_path or "", docx_changes
-                    )
-                if new_bytes:
-                    new_bytes, new_langs, new_marked = read_document(
-                        new_bytes, fd.new_path or "", docx_changes
-                    )
-                if language in (DOCUMENT, DEFAULT):
-                    marked = new_marked or old_marked
-                else:
-                    old_langs = new_langs = None
-                fd.markdown = True
-                kinds = {
-                    DOCUMENT_SUFFIXES[Path(p).suffix.lower()]
-                    for p in (fd.old_path, fd.new_path)
-                    if is_document(p)
-                }
-                fd.note = (
-                    f"converted from {' and '.join(sorted(kinds))}, tracked changes "
-                    + {"accept": "accepted", "reject": "rejected", "all": "shown as markup"}[
-                        docx_changes
-                    ]
-                )
+                if old_bytes and is_document(fd.old_path):
+                    old_doc = read_document(old_bytes, fd.old_path, docx_changes)
+                if new_bytes and is_document(fd.new_path):
+                    new_doc = read_document(new_bytes, fd.new_path, docx_changes)
             except SourceError as e:
                 fd.binary = True
                 fd.note = str(e)
                 continue
-        if is_binary(old_bytes) or is_binary(new_bytes):
+            fd.markdown = True
+            kinds = {
+                DOCUMENT_SUFFIXES[Path(p).suffix.lower()]
+                for p in (fd.old_path, fd.new_path)
+                if is_document(p)
+            }
+            fd.note = (
+                f"read from {' and '.join(sorted(kinds))}, tracked changes "
+                + {"accept": "accepted", "reject": "rejected", "all": "shown as markup"}[
+                    docx_changes
+                ]
+            )
+        if (old_doc is None and is_binary(old_bytes)) or (new_doc is None and is_binary(new_bytes)):
             fd.binary = True
             if fd.old_path:
                 fd.old_image = image_uri(fd.old_path, old_bytes)
@@ -1155,8 +1320,12 @@ def build_files(
                 fd.new_image = image_uri(fd.new_path, new_bytes)
             continue
         fd.markdown = fd.markdown or fd.path.lower().endswith(".md")
-        old_text, old_encoding = decode_text(old_bytes, encoding)
-        new_text, new_encoding = decode_text(new_bytes, encoding)
+        old_text = new_text = ""
+        old_encoding = new_encoding = ""
+        if old_doc is None:
+            old_text, old_encoding = decode_text(old_bytes, encoding)
+        if new_doc is None:
+            new_text, new_encoding = decode_text(new_bytes, encoding)
         if read_as := " and ".join(dict.fromkeys(e for e in (old_encoding, new_encoding) if e)):
             fd.note = "; ".join(filter(None, (fd.note, f"read as {read_as}")))
         # Folded before filtering, so a filter cannot cut a comment in two.
@@ -1168,36 +1337,28 @@ def build_files(
                 old_text = run_filter(md_filter, old_text, fd.path)
             if new_text:
                 new_text = run_filter(md_filter, new_text, fd.path)
+        old_lines = document_lines(old_doc) if old_doc is not None else split_lines(old_text)
+        new_lines = document_lines(new_doc) if new_doc is not None else split_lines(new_text)
         if fd.markdown:
             # One language for both sides: the new one's, unless it is gone.
+            marked = None
+            if marked_languages:
+                marked = next((d.language for d in (new_doc, old_doc) if d and d.language), None)
             fd.language, fd.language_source = resolve_language(
-                language, new_text or old_text, marked
+                language, "\n".join(new_lines or old_lines), marked
             )
-        old_lines, new_lines = split_lines(old_text), split_lines(new_text)
-        # Lines the filter or the folding of comments added or took away
-        # leave the languages of the lines unknown.
-        if old_langs is not None and len(old_langs) != len(old_lines):
-            old_langs = None
-        if new_langs is not None and len(new_langs) != len(new_lines):
-            new_langs = None
         old_labels = new_labels = None
         if by_sentence and fd.markdown:
             rules = fd.language or "en"
-            old_lines, old_labels = split_sentences(old_lines, rules, old_langs)
-            new_lines, new_labels = split_sentences(new_lines, rules, new_langs)
+            old_lines, old_labels = split_sentences(old_lines, rules)
+            new_lines, new_labels = split_sentences(new_lines, rules)
         if fd.markdown:
             old_lines, old_labels = without_blank_lines(old_lines, old_labels)
             new_lines, new_labels = without_blank_lines(new_lines, new_labels)
             if from_word:
-                # No one sees the Markdown a Word document was read into:
-                # its paragraphs are numbered instead of its lines.
-                old_numbers = paragraph_numbers(old_labels)
-                new_numbers = paragraph_numbers(new_labels)
-                paragraph_langs[id(fd)] = (
-                    paragraph_languages(old_labels, old_numbers, old_langs),
-                    paragraph_languages(new_labels, new_numbers, new_langs),
-                )
-                old_labels, new_labels = old_numbers, new_numbers
+                # A document has paragraphs, not lines: they are numbered.
+                old_labels = paragraph_numbers(old_labels)
+                new_labels = paragraph_numbers(new_labels)
             if fold:
                 old_lines, new_lines, old_labels, new_labels = without_shared_comments(
                     old_lines, new_lines, old_labels, new_labels
@@ -1225,8 +1386,7 @@ def build_files(
             new_labels=labels[id(fd)][1],
         )
         footnotes.reset_tooltips(token)
-        if id(fd) in paragraph_langs:
-            fd.mixed_languages = set_row_languages(fd.rows, *paragraph_langs[id(fd)], fd.language)
+        fd.mixed_languages = set_row_languages(fd.rows, old, new, fd.language)
         if fn is not None and (fn.old or fn.new):
             for r in fd.rows:
                 for row in [r, *r.hidden]:

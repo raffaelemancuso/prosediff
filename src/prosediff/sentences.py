@@ -1,6 +1,6 @@
 """Markdown prose split into sentences, for comparing sentence by sentence.
 
-A paragraph is often one long line (Word documents converted by pandoc, or
+A paragraph is often one long line (a Word document's paragraphs, or
 text written that way), so a line-by-line comparison pairs whole paragraphs:
 a sentence moved from one paragraph to another is not recognised, and a long
 paragraph is one row. Split into sentences, each is a line of its own.
@@ -24,6 +24,11 @@ from functools import cache
 from yasbd import BoundaryDetector
 from yasbd.exceptions import UnsupportedLanguageError
 
+from prosediff.document import BULLET, Line, concat
+
+# The paragraphs of a document that are not prose to split: headings and
+# table rows.
+UNSPLIT = {"heading", "row"}
 FENCE = re.compile(r"^\s*(```|~~~)")
 BLANK = re.compile(r"^\s*$")
 HEADING = re.compile(r"^\s{0,3}#")
@@ -85,8 +90,8 @@ def _without_footnotes(text: str) -> tuple[str, list[int]]:
     return "".join(kept), index_map
 
 
-def sentences(text: str, language: str = "en") -> list[str]:
-    """The sentences of one line of prose.
+def sentence_spans(text: str, language: str = "en") -> list[tuple[int, int]]:
+    """Where each sentence of one line of prose starts and ends.
 
     A break is only taken where whitespace follows (a footnote marker or a
     closing quote may come first), so nothing is cut inside a word or a link.
@@ -99,11 +104,16 @@ def sentences(text: str, language: str = "en") -> list[str]:
         gap = GAP.match(text, end)
         if gap is None or end <= start:
             continue
-        out.append(text[start:end])
+        out.append((start, end))
         start = gap.end()
     if start < len(text):
-        out.append(text[start:])
-    return [s for s in out if s.strip()] or [text]
+        out.append((start, len(text)))
+    return [(a, b) for a, b in out if text[a:b].strip()] or [(0, len(text))]
+
+
+def sentences(text: str, language: str = "en") -> list[str]:
+    """The sentences of one line of prose (sentence_spans)."""
+    return [text[a:b] for a, b in sentence_spans(text, language)]
 
 
 def _is_special(line: str) -> bool:
@@ -144,7 +154,13 @@ def split_sentences(
     label: the number of the line it came from, plus its place among the
     sentences of that line when there are several ("12.3"). Each line is
     split by the rules of its language in line_languages, when it has one,
-    else by those of language."""
+    else by those of language.
+
+    A line of a Word or OpenDocument text (a Line) is split by the rules of
+    its paragraph's language, when marked, and its styles are split with
+    it; being no Markdown, it is never taken for code, a table or a heading
+    because of how it starts: its kind says what it is.
+    """
     out: list[str] = []
     labels: list[str] = []
 
@@ -165,7 +181,21 @@ def split_sentences(
             i += 1
     while i < n:
         line = lines[i]
-        if FENCE.match(line):
+        if isinstance(line, Line):
+            if line.kind in UNSPLIT:
+                keep(i)
+            else:
+                prefix = BULLET if line.kind == "item" else ""
+                parts = sentence_spans(str(line)[len(prefix) :], line.lang or language)
+                if len(parts) == 1:
+                    keep(i)
+                else:
+                    for k, (a, b) in enumerate(parts):
+                        lead = line.cut(0, len(prefix)) if k == 0 else " " * len(prefix)
+                        out.append(concat(lead, line.cut(len(prefix) + a, len(prefix) + b)))
+                        labels.append(f"{i + 1}.{k + 1}")
+            i += 1
+        elif FENCE.match(line):
             in_fence = not in_fence
             keep(i)
             i += 1

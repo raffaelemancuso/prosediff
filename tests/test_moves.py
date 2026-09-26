@@ -26,7 +26,11 @@ def test_moved_line_is_marked_both_ends():
 
 def test_move_ignores_spacing():
     rows, _, _ = align([MOVED, "a"], ["a", "  " + MOVED.replace(" ", "  ")], context=None)
-    assert {r.kind for r in rows} >= {"moved-out", "moved-in"}
+    assert [(r.kind, r.changes) for r in rows] == [
+        ("moved-out", ["moved to line 2"]),
+        ("equal", []),
+        ("moved-in", ["moved from line 1"]),
+    ]
 
 
 def test_short_lines_are_not_moves():
@@ -34,6 +38,7 @@ def test_short_lines_are_not_moves():
     rows, add, rem = align([short, "a"], ["a", short], context=None)
     assert "moved-in" not in {r.kind for r in rows}
     assert (add, rem) == (1, 1)
+    mark_moves([])  # no rows, no moves, no error
 
 
 def test_edited_line_moved_is_a_move_with_its_changes():
@@ -57,10 +62,6 @@ def test_most_similar_pairs_move_first():
     rows = align([a, "x", "y"], ["x", "y", far, near], context=None)[0]
     (into,) = [r for r in rows if r.kind == "moved-in"]
     assert into.right_no == 4
-
-
-def test_no_rows_no_moves():
-    mark_moves([])  # nothing to do, no error
 
 
 # Similarity 0.686: between the default threshold and 0.6.

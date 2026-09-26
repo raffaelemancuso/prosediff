@@ -33,14 +33,9 @@ def test_rows_carry_the_changes():
     assert (add, rem) == (1, 1)
 
 
-def test_align_equal_files():
-    # nothing to show: the page says "Content unchanged"
-    rows, add, rem = align(["a", "b"], ["a", "b"], context=None)
-    assert rows == []
-    assert (add, rem) == (0, 0)
-
-
 def test_align_insert_and_delete():
+    # equal files: nothing to show, the page says "Content unchanged"
+    assert align(["a", "b"], ["a", "b"], context=None) == ([], 0, 0)
     rows, add, rem = align(["a", "b", "c"], ["a", "c", "d"], context=None)
     assert kinds(rows) == ["equal", "delete", "equal", "insert"]
     assert (add, rem) == (1, 1)
@@ -69,7 +64,7 @@ def test_align_context_skips_unchanged_lines():
     assert "skip" not in kinds(rows) and len(rows) == 20
 
 
-def test_pairing_unrelated_lines_stand_alone():
+def test_pairing_in_order_unrelated_lines_alone():
     # several lines with nothing in common: removed and added, not face to
     # face, each in its place
     assert pair_lines(["a", "b"], ["c", "d", "e"]) == [
@@ -85,9 +80,6 @@ def test_pairing_unrelated_lines_stand_alone():
     assert pair_lines(old, new)[0] == (0, 0)
     # one line rewritten in place is a pair, however different
     assert pair_lines(["a"], ["c"]) == [(0, 0)]
-
-
-def test_pairing_reordered_keeps_order():
     # pairs never cross: each line faces the one in its place, not its
     # closer match further down
     old = ["first line of text", "second line of text"]
@@ -118,7 +110,19 @@ def test_align_uses_pairing():
         ("caff\xe8", "latin-1", "cp1252"),  # too short for anything but a tie
         ("He said \u201cyes\u201d \u2013 and left.", "cp1252", "cp1252"),
         ("Die Gr\xf6\xdfe der St\xe4dte w\xe4chst.", "latin-1", "cp1252"),
-        ("Un caff\xe8, grazie.", "utf-16", "utf_16"),  # with its byte-order mark
+        ("Un caff\xe8, grazie.", "utf-16", "utf-16"),  # with its byte-order mark
+        # a few words, where charset-normalizer guessed by chance: "\u201cyes\u201d"
+        # read as "\u0423yes\u0424", Russian as box drawing
+        ("\u201cyes\u201d", "cp1252", "cp1252"),
+        ("\u041f\u0440\u0438\u0432\u0435\u0442 \u043c\u0438\u0440", "cp1251", "cp1251"),
+        ("\u015eeker ve \xe7ay i\xe7tik", "cp1254", "iso8859-9"),
+        (
+            "\u039a\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 \u03ba\u03cc\u03c3\u03bc\u03b5",
+            "cp1253",
+            "iso8859-7",
+        ),
+        # cchardet takes it for UTF-8, which cannot read it: charset-normalizer
+        ("Za\u017c\xf3\u0142\u0107 g\u0119\u015bl\u0105 ja\u017a\u0144", "cp1250", "cp1250"),
         (
             "\u0420\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u044b "
             "\u043e\u0431\u043d\u0430\u0434\u0451\u0436\u0438\u0432\u0430\u044e\u0442.",
@@ -140,7 +144,8 @@ def test_decode_text_given_or_betrayed():
     assert decode_text("caff\xe8".encode(), "utf-8") == ("caff\xe8", "")
     # "\u201cyes\u201d" in cp1252 bytes, which happen to be valid UTF-8 as C1 controls
     c1 = "\u0093yes\u0094".encode()
-    assert decode_text(c1)[1] != ""
+    text, read_as = decode_text(c1)
+    assert read_as and text != "\u0093yes\u0094"
 
 
 def test_split_lines_counts_like_git():

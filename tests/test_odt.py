@@ -99,7 +99,7 @@ def test_compared_like_a_word_document(tmp_path):
     a = odt_xml(tmp_path / "a.odt", "<text:p>The cat sat on the mat.</text:p>")
     b = odt_xml(tmp_path / "b.odt", "<text:p>The cat slept on the mat.</text:p>")
     (f,) = compare_paths(a, b).files
-    assert f.markdown and f.note == "converted from OpenDocument, tracked changes accepted"
+    assert f.markdown and f.note == "read from OpenDocument, tracked changes accepted"
     assert f.additions == f.deletions == 1
 
 
