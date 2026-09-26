@@ -1,6 +1,6 @@
 [project]
 name = "prosediff"
-version = "0.4.0"
+version = "0.5.0"
 description = "Side-by-side diff for prose, not code: optimised for Word .docx documents, OpenDocument .odt and Markdown included, from two files or from git"
 readme = "README.md"
 license = "MIT"
