@@ -24,6 +24,8 @@ import re
 
 from markupsafe import Markup, escape
 
+from prosediff.document import DATE_ATTRIBUTE, short_date
+
 HEADING = re.compile(r"^(#{1,6})([ \t]+)")
 QUOTE = re.compile(r"^((?:>[ \t]?)+)")
 CODE = re.compile(r"(`+)(.+?)(?<!`)\1(?!`)")
@@ -33,7 +35,6 @@ IMAGE_OR_LINK = re.compile(r"(!?\[)((?:[^\[\]]|\[[^\]]*\])*)(\]\([^)\s]*(?:\s+\"
 ATTR_SPAN = re.compile(r"(\[)((?:[^\[\]]|\[[^\]]*\])*)(\]\{[^}]*\})")
 TRACKED = re.compile(r"\{\.(insertion|deletion)\b")
 AUTHOR = re.compile(r'\bauthor="([^"]*)"')
-DATE = re.compile(r'\bdate="(\d{4}-\d\d-\d\d)(?:T(\d\d:\d\d))?')
 CITATION = re.compile(r"\[-?@[^\]]+\]|(?<![\w\[])-?@[\w:.#$%&+?<>~/-]+")
 
 
@@ -74,8 +75,8 @@ def md_styles(line: str) -> list[set[str]]:
             mark(m.start(2), m.end(2), "tc-ins" if tracked[1] == "insertion" else "tc-del")
             if author := AUTHOR.search(m[3]):
                 mark(m.start(2), m.end(2), f"@author={author[1]}")
-            if date := DATE.search(m[3]):
-                mark(m.start(2), m.end(2), "@date=" + " ".join(filter(None, date.groups())))
+            if (date := DATE_ATTRIBUTE.search(m[3])) and (when := short_date(date[1])):
+                mark(m.start(2), m.end(2), f"@date={when}")
     for m in CITATION.finditer(line):
         mark(m.start(), m.end(), "cite")
     for pattern, cls in ((STRONG, "strong"), (EMPH, "em")):

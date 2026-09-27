@@ -143,7 +143,9 @@ class Reader:
         if c is None or cid in self.shown_comments:
             return []
         self.shown_comments.add(cid)
-        date = c.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") if c.timestamp else ""
+        # as written, like a tracked change's: python-docx's timestamp makes
+        # a date without a time midnight
+        date = c._comment_elm.get(qn("w:date")) or ""
         return [CommentMark(cid, c.author or "", " ".join(c.text.split()), date)]
 
     def note_ref(self, kind: str, nid: str) -> list:

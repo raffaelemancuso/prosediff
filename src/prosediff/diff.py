@@ -44,7 +44,14 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
     plain,
     show_comments,
 )
-from prosediff.document import CommentMark, Document, Line, comment_markdown, sub
+from prosediff.document import (
+    CommentMark,
+    Document,
+    Line,
+    comment_markdown,
+    short_date,
+    sub,
+)
 from prosediff.language import (
     DEFAULT,
     DOCUMENT,
@@ -77,8 +84,6 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # longest manuscript, so that a hung process fails instead of waiting forever.
 GIT_TIMEOUT = 300
 FILTER_TIMEOUT = 300
-# A comment's date as its document stamps it, to the minute.
-COMMENT_DATE = re.compile(r"(\d{4}-\d\d-\d\d)T(\d\d:\d\d)")
 # How many leading bytes are inspected to decide whether a file is binary,
 # as git itself does.
 BINARY_SNIFF = 8000
@@ -2424,10 +2429,7 @@ def build_files(
             return comment_markdown(c)
         if not c.text and not options.empty_comments:
             return ""
-        when = COMMENT_DATE.match(c.date)
-        mark = comments.placeholder(
-            c.author.replace('"', "'"), c.text, f"{when[1]} {when[2]}" if when else ""
-        )
+        mark = comments.placeholder(c.author.replace('"', "'"), c.text, short_date(c.date))
         return mark if mark is not None else comment_markdown(c)
 
     def document_lines(doc: Document | None) -> list[Line]:

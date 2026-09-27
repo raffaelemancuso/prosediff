@@ -210,3 +210,11 @@ def test_no_placeholder_left_where_moved_passages_are_hidden(tmp_path):
     html = render(c)
     assert 'class="pv-off"' in html
     assert not PLACEHOLDER.search(html)
+
+
+def test_a_comment_dated_without_a_time_keeps_its_date():
+    """A date without a time is shown as it is, like a tracked change's."""
+    comments = Comments()
+    span = '[Why?]{.comment-start id="1" author="A" date="2026-09-23"}'
+    folded = fold_comments(f"x {span} y", comments)
+    assert comments.get(folded[2]).date == "2026-09-23"

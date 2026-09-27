@@ -18,6 +18,10 @@ from dataclasses import dataclass, field
 
 # The styles a run of text can have, as classes of the HTML report: s-strong, ...
 STRONG, EM, UNDERLINE, STRIKE, SUP, SUB = "strong", "em", "u", "strike", "sup", "sub"
+# A date, and its time to the minute if it has one (short_date); and the
+# date="..." attribute of a pandoc span, a comment or a tracked change.
+SHORT_DATE = re.compile(r"(\d{4}-\d\d-\d\d)(?:T(\d\d:\d\d))?")
+DATE_ATTRIBUTE = re.compile(r'\bdate="([^"]*)"')
 # What a list item starts with in the HTML report.
 BULLET = "\u2022 "
 
@@ -342,9 +346,11 @@ class Builder:
         return Line("".join(self.text), self.styles, lang, kind)
 
 
-def _date(date: str) -> str:
-    """A tracked change's date as the HTML report shows it: 2026-01-01 10:15."""
-    m = re.match(r"(\d{4}-\d\d-\d\d)(?:T(\d\d:\d\d))?", date)
+def short_date(date: str) -> str:
+    """A date and time as the HTML report shows them, to the minute: an ISO
+    2026-01-01T10:15:30Z as 2026-01-01 10:15, a date alone as it is; "" when
+    it is none."""
+    m = SHORT_DATE.match(date)
     return " ".join(filter(None, m.groups())) if m else ""
 
 
@@ -369,7 +375,7 @@ def _add(
             marks = {"tc-ins" if i.kind == "insertion" else "tc-del"}
             if i.author:
                 marks.add(f"@author={i.author}")
-            if date := _date(i.date):
+            if date := short_date(i.date):
                 marks.add(f"@date={date}")
             _add(out, i.children, styles | marks, comment)
 

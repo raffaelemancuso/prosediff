@@ -260,3 +260,21 @@ def test_a_hung_filter_is_stopped(tmp_path, monkeypatch):
     sleeper = f'"{sys.executable}" -c "import time; time.sleep(30)"'
     with pytest.raises(FilterError, match=r"more than 1 seconds on b.md"):
         compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(md_filter=sleeper))
+
+
+def test_a_word_comment_dated_without_a_time_keeps_its_date(tmp_path):
+    """The comments panel shows a Word comment's date to the minute, or the
+    date alone when the comment has no time."""
+    a = docx_xml(tmp_path / "a.docx", "<w:p><w:r><w:t>Text.</w:t></w:r></w:p>")
+    body = (
+        '<w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Text.</w:t></w:r>'
+        '<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>'
+    )
+    for date, shown in (("2026-01-01T09:30:00Z", "2026-01-01 09:30"), ("2026-01-01", "2026-01-01")):
+        b = docx_xml(
+            tmp_path / f"b_{len(date)}.docx",
+            body,
+            comments=f'<w:comment w:id="0" w:author="Anna" w:date="{date}">'
+            "<w:p><w:r><w:t>Why?</w:t></w:r></w:p></w:comment>",
+        )
+        assert [e.date for e in compare_paths(a, b).comments] == [shown]

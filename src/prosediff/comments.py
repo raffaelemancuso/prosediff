@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 from markupsafe import Markup
 
+from prosediff.document import DATE_ATTRIBUTE, short_date
+
 PUA_FIRST, PUA_LAST = 0xE000, 0xF8FF
 PLACEHOLDER = re.compile(f"[{chr(PUA_FIRST)}-{chr(PUA_LAST)}]")
 COMMENT_MARK = "\N{SPEECH BALLOON}"
@@ -22,7 +24,6 @@ NEW_COMMENT_MARK = "\N{SQUARED NEW}"
 
 COMMENT_CLASS = re.compile(r"^\{\s*\.(comment-start|comment-end)\b")
 AUTHOR = re.compile(r'\bauthor="((?:[^"\\]|\\.)*)"')
-DATE = re.compile(r'\bdate="(\d{4}-\d\d-\d\d)T(\d\d:\d\d)')
 ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|'\"<>~^$])")
 
 
@@ -151,7 +152,7 @@ def fold_comments(text: str, comments: Comments, keep_empty: bool = False) -> st
                         i = end + 1
                         continue
                     author = AUTHOR.search(attrs)
-                    date = DATE.search(attrs)
+                    date = DATE_ATTRIBUTE.search(attrs)
                     # Markdown escapes (\[ \* \_ ...) are not part of the comment
                     note = ESCAPE.sub(r"\1", " ".join(text[i + 1 : close].split()))
                     if not note and not keep_empty:
@@ -161,7 +162,7 @@ def fold_comments(text: str, comments: Comments, keep_empty: bool = False) -> st
                     mark = comments.placeholder(
                         author[1] if author else "",
                         note,
-                        f"{date[1]} {date[2]}" if date else "",
+                        short_date(date[1]) if date else "",
                     )
                     if mark is not None:
                         out.append(mark)
