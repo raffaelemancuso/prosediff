@@ -5,7 +5,7 @@ import subprocess
 
 from helpers import END, NOTE
 
-from prosediff import compare_paths
+from prosediff import Options, compare_paths
 from prosediff.unified import unified
 
 
@@ -76,7 +76,7 @@ def test_comments_left_out(tmp_path):
     old.write_text("One sentence.\n\nTwo words.\n")
     new.write_text(f"One sentence.\n\n{NOTE}Two{END} words.\n")
     assert "{>>" in unified(compare_paths(old, new))
-    assert unified(compare_paths(old, new, drop_comments=True)) == ""
+    assert unified(compare_paths(old, new, Options(comments="none"))) == ""
 
 
 def test_word_diff(tmp_path):

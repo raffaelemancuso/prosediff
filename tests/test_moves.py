@@ -2,7 +2,7 @@
 
 import pytest
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.diff import MIN_MOVE_CHARS, align, mark_moves
 
 EDITED = "This long sentence travels to the end of the file, almost as it was."
@@ -92,7 +92,7 @@ def test_move_similarity_validated(tmp_path):
     (tmp_path / "b.md").write_text("y\n")
     for bad in (0, -0.1, 1.5):
         with pytest.raises(ValueError, match="move similarity"):
-            compare_paths(tmp_path / "a.md", tmp_path / "b.md", move_similarity=bad)
+            compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(move_similarity=bad))
 
 
 def test_where_a_moved_line_went_is_printed(tmp_path):
@@ -100,7 +100,7 @@ def test_where_a_moved_line_went_is_printed(tmp_path):
     under it (hidden on screen by the HTML report's style)."""
     (tmp_path / "a.md").write_text(f"{EDITED}\na\nb\nc\n")
     (tmp_path / "b.md").write_text(f"a\nb\nc\n{EDITED.replace('almost', 'nearly')}\n")
-    html = render(compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None))
+    html = render(compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(context=None)))
     assert '<span class="print-note" aria-hidden="true">moved to line 4</span>' in html
     assert '<span class="print-note" aria-hidden="true">moved from line 1</span>' in html
 
@@ -149,10 +149,12 @@ def test_two_move_defaults(tmp_path):
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     old.write_bytes(f"{kept}. The first paragraph goes on here.\n\nAnother one stays.\n".encode())
     new.write_bytes(f"The first paragraph goes on here.\n\nAnother one stays. {edited}.\n".encode())
-    (f,) = compare_paths(old, new, by_sentence=True).files
+    (f,) = compare_paths(old, new, Options(by_sentence=True)).files
     assert "moved-in" in [r.kind for r in f.rows]
     # the paragraph setting leaves sentences alone; their own setting does not
-    (f,) = compare_paths(old, new, by_sentence=True, move_similarity=0.99).files
+    (f,) = compare_paths(old, new, Options(by_sentence=True, move_similarity=0.99)).files
     assert "moved-in" in [r.kind for r in f.rows]
-    (f,) = compare_paths(old, new, by_sentence=True, sentence_move_similarity=similarity).files
+    (f,) = compare_paths(
+        old, new, Options(by_sentence=True, sentence_move_similarity=similarity)
+    ).files
     assert "moved-in" not in [r.kind for r in f.rows]

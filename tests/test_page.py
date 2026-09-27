@@ -7,7 +7,7 @@ import re
 import pytest
 from conftest import RepoBuilder
 
-from prosediff import compare, render
+from prosediff import Options, compare, render
 
 MOVED = "This sentence travels to the end of the file."
 
@@ -85,7 +85,7 @@ def test_left_out_gap_rendered(page):
     not hidden in it."""
     b, base, target, _, html = page
     assert "left out of the HTML report" not in html
-    html = render(compare(b.path, base, target, paths=["gap.txt"], max_hidden=5))
+    html = render(compare(b.path, base, target, Options(max_hidden=5), paths=["gap.txt"]))
     assert "left out of the HTML report" in html
     assert "<tbody hidden>" not in html
 

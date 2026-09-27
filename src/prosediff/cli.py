@@ -5,7 +5,7 @@ git's own commands."""
 import argparse
 import sys
 import webbrowser
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 import git
@@ -23,10 +23,10 @@ from prosediff.diff import (
     SENTENCE_MOVE_SIMILARITY,
     FilterError,
     MovedPassageSettings,
+    Options,
     SettingError,
     check_encoding,
     check_move_similarity,
-    comment_options,
     compare,
     compare_paths,
     setting_type,
@@ -377,13 +377,11 @@ def main(argv: list[str] | None = None) -> int:
         passage_settings.check()
     except SettingError as e:
         ap.error(f"{passage_option(e.name)}: {e}")
-    comments = args.comments or "markers"
-    options = dict(
-        paths=args.paths,
+    options = Options(
         context=None if args.full else ("auto" if args.context is None else args.context),
         md_filter=args.md_filter,
         ignore_whitespace=args.ignore_whitespace,
-        **comment_options(comments),
+        comments=args.comments or "markers",
         empty_comments=args.empty_comments,
         max_hidden=args.max_hidden,
         docx_changes=args.docx_changes,
@@ -401,16 +399,20 @@ def main(argv: list[str] | None = None) -> int:
         if not args.git:
             include = FOLDER_FILES if args.include is None else args.include
             return compare_paths(
-                args.repo, args.base, include=include, by_sentence=by_sentence, **options
+                args.repo,
+                args.base,
+                replace(options, by_sentence=by_sentence),
+                paths=args.paths,
+                include=include,
             )
         return compare(
             Path(args.repo),
             args.base,
             args.target,
+            replace(options, by_sentence=by_sentence),
+            paths=args.paths,
             cached=args.cached,
             untracked=args.untracked,
-            by_sentence=by_sentence,
-            **options,
         )
 
     sentences = None

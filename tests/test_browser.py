@@ -7,7 +7,7 @@ Skipped when Playwright's Chromium is not installed
 import pytest
 from conftest import RepoBuilder
 
-from prosediff import compare, compare_paths, render
+from prosediff import Options, compare, compare_paths, render
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -41,7 +41,9 @@ def page_file(tmp_path_factory):
     builder.write("doc.md", "\n".join(lines) + "\n")
     target = builder.commit("second")
     out = tmp_path / "page.html"
-    out.write_text(render(compare(builder.path, base, target, context=3)), encoding="utf-8")
+    out.write_text(
+        render(compare(builder.path, base, target, Options(context=3))), encoding="utf-8"
+    )
     return out
 
 
@@ -303,7 +305,7 @@ def test_moved_line_numbers_tell_where(browser, tmp_path):
     old.write_bytes(f"{moved}\n\nFirst kept paragraph.\n\nSecond kept paragraph.\n".encode())
     new.write_bytes(f"First kept paragraph.\n\nSecond kept paragraph.\n\n{edited}\n".encode())
     out = tmp_path / "page.html"
-    out.write_text(render(compare_paths(old, new, context=None)), encoding="utf-8")
+    out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
     context = browser.new_context()
     page = context.new_page()
     page.goto(out.as_uri())
@@ -333,8 +335,8 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     out = tmp_path / "page.html"
     out.write_text(
         render(
-            compare_paths(old, new, context=None),
-            sentences=compare_paths(old, new, context=None, by_sentence=True),
+            compare_paths(old, new, Options(context=None)),
+            sentences=compare_paths(old, new, Options(context=None, by_sentence=True)),
         ),
         encoding="utf-8",
     )
@@ -370,7 +372,7 @@ def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
     old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
     new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
     out = tmp_path / "page.html"
-    out.write_text(render(compare_paths(old, new, context=None)), encoding="utf-8")
+    out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
     context = browser.new_context()
     page = context.new_page()
     page.goto(out.as_uri())
@@ -394,7 +396,7 @@ def test_moved_passages_switch(browser, tmp_path):
     old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
     new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
     out = tmp_path / "page.html"
-    out.write_text(render(compare_paths(old, new, context=None)), encoding="utf-8")
+    out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
     context = browser.new_context()
     page = context.new_page()
     page.goto(out.as_uri())

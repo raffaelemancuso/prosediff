@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.cli import main
 from prosediff.diff import (
     MOVED_PASSAGE_DEFAULTS,
@@ -143,7 +143,7 @@ def test_move_passages_can_be_turned_off(tmp_path):
     html = render(on)
     assert len(moved_spans(html)) == 2
     assert "1 moved passage" in html
-    off = compare_paths(tmp_path / "a.md", tmp_path / "b.md", move_passages=False)
+    off = compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(move_passages=False))
     assert off.moved_passages == 0
     assert not moved_spans(render(off))
     # and from the command line

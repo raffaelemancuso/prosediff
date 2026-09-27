@@ -4,7 +4,7 @@ import re
 
 from helpers import docx_xml, run, strip_tags
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.document import Line, concat, lines, sub
 from prosediff.sources import read_document
 
@@ -35,7 +35,7 @@ def test_styles_survive_the_pipeline(tmp_path):
         f"{run(' Typed *stars* and [brackets], edited.')}</w:p>",
         footnotes=footnote(1, "Gone.") + footnote(2, "First note."),
     )
-    html = render(compare_paths(old, new, by_sentence=True, context=None))
+    html = render(compare_paths(old, new, Options(by_sentence=True, context=None)))
     assert '<span class="s-strong">bold</span>' in html
     classes = " ".join(re.findall(r'class="([^"]*)"', html))
     assert "*stars*" in html and "s-em" not in classes and "s-syn" not in classes
@@ -83,7 +83,7 @@ def test_formatting_changes(tmp_path):
         f"<w:p>{run('A ')}{run('plain', BOLD)}{run(' claim, and a ')}{run('link', UNDERLINE)}"
         f"{run('.')}</w:p><w:p>{run('Other text, edited.')}</w:p>",
     )
-    c = compare_paths(old, new, context=None)
+    c = compare_paths(old, new, Options(context=None))
     (f,) = c.files
     first = f.rows[0]
     assert first.kind == "equal" and not first.changed
@@ -135,7 +135,7 @@ def test_bold_from_a_style_is_bold(tmp_path):
     new = docx_xml(
         tmp_path / "new.docx", para("Heading1", "A title.") + para("Lead", "A lead."), styles=STYLES
     )
-    (f,) = compare_paths(old, new, context=None).files
+    (f,) = compare_paths(old, new, Options(context=None)).files
     assert f.formatted_rows == 0
     got = lines(read_document(new.read_bytes(), "new.docx"), lambda c: "")
     assert got[0].styles == [frozenset({"h1"})] * len("A title.")

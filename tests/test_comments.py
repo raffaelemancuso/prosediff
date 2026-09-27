@@ -2,7 +2,7 @@
 
 from helpers import END, NOTE, two_folders
 
-from prosediff import compare, compare_paths, render
+from prosediff import Options, compare, compare_paths, render
 from prosediff.comments import NEW_COMMENT_MARK
 from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
 
@@ -52,7 +52,7 @@ def test_empty_comments_switch(tmp_path):
     empty = '[]{.comment-start id="4" author="Anna" date="2026-09-23T10:00:00Z"}'
     a, b = two_folders(tmp_path, "p.md", "Text.\n", f"Text.{empty}\n")
     assert compare_paths(a, b).comments == []
-    c = compare_paths(a, b, empty_comments=True)
+    c = compare_paths(a, b, Options(empty_comments=True))
     assert [(e.author, e.text, e.status) for e in c.comments] == [("Anna", "", "new")]
     assert ">(no text)</a>" in render(c)
     # the command line passes the switch on
@@ -161,7 +161,7 @@ def test_compare_fold_comments(builder, tmp_path):
     assert "comment-start" in str(txt.rows[0].right)  # only Markdown is folded
     assert not PLACEHOLDER.search(render(c))
     # without folding the markup is compared as text, and there is no panel
-    c = compare(builder.path, base, target, fold_comments_md=False)
+    c = compare(builder.path, base, target, Options(comments="text"))
     html = render(c)
     assert "comment-start" in html
     assert c.comments == [] and '<section class="comments-panel"' not in html
@@ -179,7 +179,7 @@ def test_comments_panel_statuses_and_links(tmp_path):
     cur[2] += kept
     cur[21] = "Line 21 edited." + new
     a, b = two_folders(tmp_path, "p.md", "\n".join(old) + "\n", "\n".join(cur) + "\n")
-    c = compare_paths(a, b, fold_comments_md=True)
+    c = compare_paths(a, b)
     status = {e.text: e.status for e in c.comments}
     # the comment both sides have is left out
     assert status == {"Old remark.": "removed", "New remark.": "new"}

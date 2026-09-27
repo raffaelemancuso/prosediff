@@ -40,8 +40,8 @@ from prosediff.diff import (
     Context,
     FilterError,
     MovedPassageSettings,
+    Options,
     check_encoding,
-    comment_options,
     compare,
     compare_paths,
     move_defaults,
@@ -311,11 +311,11 @@ def context_of(s: Settings) -> Context:
 
 def generate(s: Settings) -> tuple[Path, Comparison]:
     """Compare as the settings say and write the HTML report; returns its path."""
-    options = dict(
-        paths=s.paths or None,
+    paths = s.paths or None
+    options = Options(
         context=context_of(s),
         ignore_whitespace=s.ignore_whitespace,
-        **comment_options(s.comments),
+        comments=s.comments,
         empty_comments=s.empty_comments,
         docx_changes=s.docx_changes,
         # None: prosediff's defaults
@@ -340,11 +340,17 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         if s.mode == "files":
             if not old or not new:
                 raise ValueError("choose the old and the new file")
-            return compare_paths(old, new, by_sentence=by_sentence, **options)
+            return compare_paths(old, new, replace(options, by_sentence=by_sentence), paths=paths)
         if s.mode == "folders":
             if not old or not new:
                 raise ValueError("choose the old and the new folder")
-            return compare_paths(old, new, include=s.include, by_sentence=by_sentence, **options)
+            return compare_paths(
+                old,
+                new,
+                replace(options, by_sentence=by_sentence),
+                paths=paths,
+                include=s.include,
+            )
         if not s.repo or not s.base:
             raise ValueError("choose a repository and a base")
         target = None if s.target in ("worktree", "index", "") else s.target
@@ -352,10 +358,10 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
             s.repo,
             s.base,
             target,
+            replace(options, by_sentence=by_sentence),
+            paths=paths,
             cached=s.target == "index",
             untracked=s.untracked and s.target in ("worktree", ""),
-            by_sentence=by_sentence,
-            **options,
         )
 
     comparison = run(split == "sentence")

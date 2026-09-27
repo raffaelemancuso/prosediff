@@ -1,6 +1,6 @@
 """Comparing sentence by sentence: splitting prose, labelling the sentences."""
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.sentences import is_supported, sentences, split_sentences
 
 
@@ -61,7 +61,7 @@ def test_compare_by_sentence(tmp_path):
     (f,) = compare_paths(a, b).files
     assert f.moved == 0
     # sentence by sentence: the sentence moved
-    c = compare_paths(a, b, by_sentence=True)
+    c = compare_paths(a, b, Options(by_sentence=True))
     (f,) = c.files
     assert f.moved == 1
     out = next(r for r in f.rows if r.kind == "moved-out")

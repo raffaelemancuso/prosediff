@@ -9,7 +9,7 @@ import pytest
 from conftest import RepoBuilder
 from helpers import docx
 
-from prosediff import compare, render
+from prosediff import Options, compare, render
 from prosediff.diff import MAX_IMAGE_BYTES, image_uri
 
 PNG_1 = base64.b64decode(
@@ -128,7 +128,7 @@ def test_compare_md_filter_only_on_markdown(versions):
         f'"{sys.executable}" -c "import sys; '
         "sys.stdout.write(' '.join(sys.stdin.read().upper().split()) + chr(10))\""
     )
-    c = compare(b.path, base, target, md_filter=flow, paths=["a.md", "p.md", "a.txt"])
+    c = compare(b.path, base, target, Options(md_filter=flow), paths=["a.md", "p.md", "a.txt"])
     by_path = {f.path: f for f in c.files}
     assert "ONE" in by_path["a.md"].rows[0].left
     assert "one" in by_path["a.txt"].rows[0].left
@@ -139,7 +139,7 @@ def test_compare_ignore_whitespace(versions):
     b, base, target, _, by_path = versions
     f = by_path["f.py"]
     assert (f.additions, f.deletions) == (1, 1)
-    (f,) = compare(b.path, base, target, paths=["f.py"], ignore_whitespace=True).files
+    (f,) = compare(b.path, base, target, Options(ignore_whitespace=True), paths=["f.py"]).files
     assert f.rows == []
 
 

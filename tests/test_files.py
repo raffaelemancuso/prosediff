@@ -3,7 +3,7 @@
 import pytest
 from helpers import docx, docx_xml
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.cli import main
 from prosediff.sources import SourceError, document_to_markdown
 
@@ -88,7 +88,7 @@ def test_compare_two_docx_with_comments_panel(tmp_path):
         [[("run", "The second draft.")], [("run", "Unchanged.")]],
         comment="Why second?",
     )
-    c = compare_paths(a, b, fold_comments_md=True)
+    c = compare_paths(a, b)
     (f,) = c.files
     assert f.markdown and "read from Word" in f.note
     assert [(e.status, e.author, e.text) for e in c.comments] == [("new", "Anna", "Why second?")]
@@ -106,7 +106,7 @@ def test_inserted_paragraph_does_not_shift_the_pairing(tmp_path):
     new = "Body text.\n\nA new closing paragraph.\n\n" + "\n\n".join(notes) + "\n"
     (tmp_path / "a.md").write_text(old)
     (tmp_path / "b.md").write_text(new)
-    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=3).files
+    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(context=3)).files
     rows = [r for r in f.rows if r.kind != "skip"]
     assert [(r.kind, r.left_label, r.right_label) for r in rows] == [
         ("equal", "1", "1"),
@@ -123,12 +123,12 @@ def test_word_documents_are_numbered_by_paragraph(tmp_path):
     edited = [list(p) for p in paragraphs]
     edited[3] = [("run", "Paragraph 4 of the document, edited.")]
     b = docx(tmp_path / "b.docx", edited)
-    (f,) = compare_paths(a, b, context=None).files
+    (f,) = compare_paths(a, b, Options(context=None)).files
     rows = [r for r in f.rows if r.kind != "skip"]
     assert [r.left_label for r in rows] == ["1", "2", "3", "4", "5", "6"]
     assert next(r for r in rows if r.kind == "replace").right_label == "4"
     # sentences follow their paragraph's number
-    c = compare_paths(a, b, context=None, by_sentence=True)
+    c = compare_paths(a, b, Options(context=None, by_sentence=True))
     assert [r.left_label for r in c.files[0].rows][:2] == ["1", "2"]
 
 
@@ -143,7 +143,7 @@ def test_context_is_zero_for_prose_three_for_code_unless_set(tmp_path):
             (tmp_path / folder / f"f{ext}").write_text(sep.join(text) + "\n")
 
     def shown(**kw):
-        c = compare_paths(tmp_path / "a", tmp_path / "b", **kw)
+        c = compare_paths(tmp_path / "a", tmp_path / "b", Options(**kw))
         return {f.path: sum(r.kind == "equal" for r in f.rows) for f in c.files}
 
     assert shown() == {"f.md": 0, "f.txt": 6}
@@ -217,7 +217,7 @@ def test_git_runs_without_a_console_window(tmp_path, monkeypatch):
     monkeypatch.setattr(diff.subprocess, "Popen", Recording)
     (tmp_path / "a.md").write_text("Hello world.\n")
     (tmp_path / "b.md").write_text("Hello there.\n")
-    compare_paths(tmp_path / "a.md", tmp_path / "b.md", md_filter="sort")
+    compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(md_filter="sort"))
     assert seen and set(seen) == {getattr(subprocess, "CREATE_NO_WINDOW", 0)}
 
 
@@ -259,4 +259,4 @@ def test_a_hung_filter_is_stopped(tmp_path, monkeypatch):
     (tmp_path / "b.md").write_text("Hello there.\n")
     sleeper = f'"{sys.executable}" -c "import time; time.sleep(30)"'
     with pytest.raises(FilterError, match=r"more than 1 seconds on b.md"):
-        compare_paths(tmp_path / "a.md", tmp_path / "b.md", md_filter=sleeper)
+        compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(md_filter=sleeper))

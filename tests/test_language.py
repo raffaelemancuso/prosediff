@@ -7,7 +7,7 @@ from html import unescape
 import pytest
 from helpers import docx_xml, odt_xml, strip_tags, two_folders
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.cli import main
 from prosediff.flags import flag_css, flag_html
 from prosediff.language import detect_language, flag_code, normalize_language
@@ -140,8 +140,8 @@ def test_word_language_from_the_document(tmp_path):
     assert html.count('.flag-us { background-image: url("data:image/svg+xml;base64,') == 1
     assert "English (United States): the language most of the document" in html
     # "document" says the same; "guess" guesses
-    assert compare_paths(old, new, language="document").files[0].language == "en-us"
-    assert compare_paths(old, new, language="guess").files[0].language == "it"
+    assert compare_paths(old, new, Options(language="document")).files[0].language == "en-us"
+    assert compare_paths(old, new, Options(language="guess")).files[0].language == "it"
 
 
 def test_word_language_through_styles(tmp_path):
@@ -164,7 +164,7 @@ def test_unmarked_document(tmp_path):
     old, new = word_pair(tmp_path, [(None, ITALIAN)], [(None, ITALIAN_EDITED)])
     (f,) = compare_paths(old, new).files
     assert (f.language, f.language_source) == ("it", "guessed")
-    (f,) = compare_paths(old, new, language="document").files
+    (f,) = compare_paths(old, new, Options(language="document")).files
     assert (f.language, f.language_source) == ("", "")
 
 
@@ -194,7 +194,7 @@ def test_document_language_refuses_other_files(tmp_path, capsys):
     is an error; by default it is guessed."""
     old, new = two_folders(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     with pytest.raises(SourceError, match=r"paper\.md is not a Word or OpenDocument"):
-        compare_paths(old, new, language="document")
+        compare_paths(old, new, Options(language="document"))
     assert main(["--folders", str(old), str(new), "--language", "document"]) == 1
     assert "paper.md is not a Word or OpenDocument" in capsys.readouterr().err
     assert compare_paths(old, new).files[0].language_source == "guessed"
@@ -238,7 +238,7 @@ def test_word_paragraph_languages(tmp_path):
         == "German (Germany): this paragraph's language, as the document marks it"
     )
     # a language given, or guessed, is the language of every paragraph
-    (f,) = compare_paths(old, new, language="en").files
+    (f,) = compare_paths(old, new, Options(language="en")).files
     assert [r.right_lang for r in f.rows] == ["", ""]
     assert not f.mixed_languages
 
@@ -259,7 +259,7 @@ def test_odt_paragraph_languages(tmp_path):
 
     old = odt_xml(tmp_path / "old.odt", body(ITALIAN, GERMAN), styles)
     new = odt_xml(tmp_path / "new.odt", body(ITALIAN_EDITED, GERMAN_EDITED), styles)
-    c = compare_paths(old, new, by_sentence=True)
+    c = compare_paths(old, new, Options(by_sentence=True))
     (f,) = c.files
     assert f.language == "it-it"
     assert [r.right_lang for r in f.rows] == ["it-it", "de-de"]

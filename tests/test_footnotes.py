@@ -2,7 +2,7 @@
 
 from helpers import strip_tags
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.diff import footnote_similarity
 from prosediff.footnotes import STAND_IN, match_footnotes, set_aside
 
@@ -30,7 +30,7 @@ def versions(tmp_path, edit_third=""):
     )
     (tmp_path / "old.md").write_text(old + "\n")
     (tmp_path / "new.md").write_text(new + "\n")
-    return compare_paths(tmp_path / "old.md", tmp_path / "new.md", context=3)
+    return compare_paths(tmp_path / "old.md", tmp_path / "new.md", Options(context=3))
 
 
 def test_renumbered_footnotes_are_no_change(tmp_path):
@@ -95,7 +95,7 @@ def test_no_stand_in_left_where_moved_passages_are_hidden(tmp_path):
     notes = "\n[^1]: The first note.\n\n[^2]: The second note.\n"
     (tmp_path / "old.md").write_text(old + notes)
     (tmp_path / "new.md").write_text(new + notes)
-    c = compare_paths(tmp_path / "old.md", tmp_path / "new.md", context=3)
+    c = compare_paths(tmp_path / "old.md", tmp_path / "new.md", Options(context=3))
     (f,) = c.files
     assert any(r.without_passages for r in f.rows)
     html = render(c)

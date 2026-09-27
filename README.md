@@ -533,11 +533,15 @@ lines as git does (on LF; CRLF counts as LF). A file is binary if its first
 From Python:
 
 ```python
-from prosediff import compare, compare_paths, render
+from prosediff import Options, compare, compare_paths, render
 
-html = render(compare("path/to/repo", "HEAD~1", "HEAD", context=3))
-html = render(compare_paths("v1.docx", "v2.docx", fold_comments_md=True))
+html = render(compare("path/to/repo", "HEAD~1", "HEAD", Options(context=3)))
+html = render(compare_paths("v1.docx", "v2.docx", Options(by_sentence=True, language="it")))
 ```
+
+`Options` holds every option of a comparison but what is compared (its
+docstring lists them); `compare` also takes `paths`, `cached` and
+`untracked`, and `compare_paths` `paths` and `include`.
 
 ## Development
 

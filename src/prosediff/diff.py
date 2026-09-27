@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from functools import lru_cache
 from itertools import groupby
 from pathlib import Path
@@ -2267,6 +2267,111 @@ def without_shared_comments(
     return old, new, old_labels, new_labels
 
 
+# What becomes of the comments (--comments): set apart as markers, compared
+# as text, or left out.
+COMMENT_MODES = ("markers", "text", "none")
+
+
+def check_move_similarity(value: float | None) -> None:
+    if value is not None and not 0 < value <= 1:
+        raise ValueError(f"move similarity must be above 0 and at most 1, not {value}")
+
+
+@dataclass(frozen=True)
+class Options:
+    """How files are compared and shown: every option of compare() and
+    compare_paths() but what is compared.
+
+    context is the number of unchanged lines shown around each change, in
+    every file; "auto" (the default) is 0 in Markdown files and Word
+    documents, whose lines are paragraphs, and 3 in the others; None shows
+    every line. max_hidden caps the unchanged lines embedded per gap.
+    md_filter is a shell command both versions of every Markdown file are
+    piped through before they are compared. ignore_whitespace compares lines
+    as git diff --ignore-all-space does. comments, one of COMMENT_MODES:
+    "markers" (the default) shows each comment added or removed, of a Word
+    or OpenDocument file or a pandoc comment span of a Markdown file
+    ([note]{.comment-start ...}), as a marker whose tooltip is the comment,
+    and lists the comments in a panel; "text" compares the comment markup
+    as text; "none" leaves every comment out, in every format. Comments
+    without text are left out, unless empty_comments. docx_changes settles
+    the tracked changes of Word and OpenDocument documents: "accept",
+    "reject" or "all" (kept as markup).
+
+    by_sentence compares the prose of Markdown files (and Word documents)
+    sentence by sentence instead of line by line; each sentence is labelled
+    with its line and its place in it ("12.3"). move_similarity is how
+    alike, from 0 to 1, an edited line must be to where it reappears to
+    count as moved (1: only lines moved unchanged), by move_algorithm, one
+    of MOVE_ALGORITHMS, where lines are compared whole (paragraphs, in
+    prose); sentence_move_similarity and sentence_move_algorithm where prose
+    is compared sentence by sentence. None (each) is prosediff's default for
+    that way (move_defaults). move_passages (on by default) also follows the
+    passages of text moved within a line or between two, by the same
+    measure: a run of words removed in one place and added in another, as
+    it was or lightly edited, is shown as moved (mark_passage_moves).
+    moved_passage_settings tunes how those passages are told from chance
+    likeness (MovedPassageSettings).
+
+    language is that of the prose, whose rules split sentences and
+    hyphenate lines: a code (en, it, ...); "document", the language Word and
+    OpenDocument files mark their text with (SourceError when another text
+    file is compared); "guess", to guess it from each file's text; or
+    "default" (the default), a Word or OpenDocument file's own, the others
+    guessed. encoding is that of the text files (Word and OpenDocument files
+    carry their own): a codec's name, or "auto" (the default), UTF-8 unless
+    the file shows it is not, then guessed (decode_text).
+    """
+
+    context: Context = "auto"
+    max_hidden: int | None = MAX_HIDDEN
+    md_filter: str | None = None
+    ignore_whitespace: bool = False
+    comments: str = "markers"
+    empty_comments: bool = False
+    docx_changes: str = "accept"
+    by_sentence: bool = False
+    move_similarity: float | None = None
+    move_algorithm: str | None = None
+    sentence_move_similarity: float | None = None
+    sentence_move_algorithm: str | None = None
+    move_passages: bool = MOVE_PASSAGES
+    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS
+    language: str = DEFAULT
+    encoding: str = AUTO_ENCODING
+
+    def checked(self) -> "Options":
+        """The options with the language and the encoding in canonical form;
+        ValueError for those that make no sense."""
+        if self.comments not in COMMENT_MODES:
+            raise ValueError(f"comments must be one of {', '.join(COMMENT_MODES)}")
+        for value in (self.move_similarity, self.sentence_move_similarity):
+            check_move_similarity(value)
+        for name in (self.move_algorithm, self.sentence_move_algorithm):
+            if name is not None:
+                check_move_algorithm(name)
+        self.moved_passage_settings.check()
+        return replace(
+            self,
+            language=normalize_language(self.language),
+            encoding=check_encoding(self.encoding),
+        )
+
+    def move_settings(self, sentences: bool) -> tuple[float, str]:
+        """The moved-line similarity and algorithm where lines are sentences
+        (or paragraphs, lines): those chosen, else prosediff's defaults."""
+        default_similarity, default_algorithm = move_defaults(sentences)
+        similarity = self.sentence_move_similarity if sentences else self.move_similarity
+        algorithm = self.sentence_move_algorithm if sentences else self.move_algorithm
+        return (
+            default_similarity if similarity is None else similarity,
+            algorithm or default_algorithm,
+        )
+
+
+DEFAULT_OPTIONS = Options()
+
+
 Labels = list[str] | None
 
 
@@ -2290,25 +2395,7 @@ def _check_documents(entries: list[tuple[FileDiff, bytes, bytes]]) -> None:
 
 
 def build_files(
-    entries: list[tuple[FileDiff, bytes, bytes]],
-    *,
-    context: Context,
-    md_filter: str | None,
-    ignore_whitespace: bool,
-    fold: bool,
-    empty_comments: bool = False,
-    drop_comments: bool = False,
-    max_hidden: int | None,
-    docx_changes: str,
-    move_similarity: float | None = None,
-    move_algorithm: str | None = None,
-    by_sentence: bool = False,
-    sentence_move_similarity: float | None = None,
-    sentence_move_algorithm: str | None = None,
-    move_passages: bool = MOVE_PASSAGES,
-    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
-    language: str = DEFAULT,
-    encoding: str = AUTO_ENCODING,
+    entries: list[tuple[FileDiff, bytes, bytes]], options: Options = DEFAULT_OPTIONS
 ) -> list[CommentEntry]:
     """Fill in the rows of every file; returns the comments for the panel.
 
@@ -2317,24 +2404,25 @@ def build_files(
     that carry their styles, languages and kinds; a document that cannot be
     read is listed as a binary file, with the reason.
     """
-    if language == DOCUMENT:
+    if options.language == DOCUMENT:
         _check_documents(entries)
     comments = Comments()
     # to leave the comments out, they are first found, as when folding them
-    fold = fold or drop_comments
+    fold = options.comments != "text"
+    drop_comments = options.comments == "none"
     # each file to compare: its lines, their labels, and its footnotes
     texts: list[
         tuple[FileDiff, list[str], list[str], Labels, Labels, footnotes.Footnotes | None]
     ] = []
     # The languages a document marks are used, or the one given or guessed.
-    marked_languages = language in (DOCUMENT, DEFAULT)
+    marked_languages = options.language in (DOCUMENT, DEFAULT)
 
     def comment(c: CommentMark) -> str:
         """What a document's comment is in its text: a placeholder, folded;
         nothing, when it has no text to show; or the span pandoc writes."""
         if not fold:
             return comment_markdown(c)
-        if not c.text and not empty_comments:
+        if not c.text and not options.empty_comments:
             return ""
         when = COMMENT_DATE.match(c.date)
         mark = comments.placeholder(
@@ -2357,9 +2445,9 @@ def build_files(
         if from_word:
             try:
                 if old_bytes and is_document(fd.old_path):
-                    old_doc = read_document(old_bytes, fd.old_path, docx_changes)
+                    old_doc = read_document(old_bytes, fd.old_path, options.docx_changes)
                 if new_bytes and is_document(fd.new_path):
-                    new_doc = read_document(new_bytes, fd.new_path, docx_changes)
+                    new_doc = read_document(new_bytes, fd.new_path, options.docx_changes)
             except SourceError as e:
                 fd.binary = True
                 fd.note = str(e)
@@ -2373,7 +2461,7 @@ def build_files(
             fd.note = (
                 f"read from {' and '.join(sorted(kinds))}, tracked changes "
                 + {"accept": "accepted", "reject": "rejected", "all": "shown as markup"}[
-                    docx_changes
+                    options.docx_changes
                 ]
             )
         if (old_doc is None and is_binary(old_bytes)) or (new_doc is None and is_binary(new_bytes)):
@@ -2387,20 +2475,20 @@ def build_files(
         old_text = new_text = ""
         old_encoding = new_encoding = ""
         if old_doc is None:
-            old_text, old_encoding = decode_text(old_bytes, encoding)
+            old_text, old_encoding = decode_text(old_bytes, options.encoding)
         if new_doc is None:
-            new_text, new_encoding = decode_text(new_bytes, encoding)
+            new_text, new_encoding = decode_text(new_bytes, options.encoding)
         if read_as := " and ".join(dict.fromkeys(e for e in (old_encoding, new_encoding) if e)):
             fd.note = "; ".join(filter(None, (fd.note, f"read as {read_as}")))
         # Folded before filtering, so a filter cannot cut a comment in two.
         if fold and fd.markdown:
-            old_text = fold_comments(old_text, comments, empty_comments)
-            new_text = fold_comments(new_text, comments, empty_comments)
-        if md_filter and fd.markdown:
+            old_text = fold_comments(old_text, comments, options.empty_comments)
+            new_text = fold_comments(new_text, comments, options.empty_comments)
+        if options.md_filter and fd.markdown:
             if old_text:
-                old_text = run_filter(md_filter, old_text, fd.path)
+                old_text = run_filter(options.md_filter, old_text, fd.path)
             if new_text:
-                new_text = run_filter(md_filter, new_text, fd.path)
+                new_text = run_filter(options.md_filter, new_text, fd.path)
         old_lines = document_lines(old_doc) if old_doc is not None else split_lines(old_text)
         new_lines = document_lines(new_doc) if new_doc is not None else split_lines(new_text)
         if fd.markdown:
@@ -2409,11 +2497,11 @@ def build_files(
             if marked_languages:
                 marked = next((d.language for d in (new_doc, old_doc) if d and d.language), None)
             fd.language, fd.language_source = resolve_language(
-                language, "\n".join(new_lines or old_lines), marked
+                options.language, "\n".join(new_lines or old_lines), marked
             )
         old_labels = new_labels = None
         notes = None
-        if by_sentence and fd.markdown:
+        if options.by_sentence and fd.markdown:
             rules = fd.language or "en"
             old_lines, old_labels = split_sentences(old_lines, rules)
             new_lines, new_labels = split_sentences(new_lines, rules)
@@ -2434,17 +2522,11 @@ def build_files(
             )
         texts.append((fd, old_lines, new_lines, old_labels, new_labels, notes))
 
-    all_ops = git_opcodes([(old, new) for _, old, new, *_ in texts], ignore_whitespace)
+    all_ops = git_opcodes([(old, new) for _, old, new, *_ in texts], options.ignore_whitespace)
     for (fd, old, new, old_labels, new_labels, fn), ops in zip(texts, all_ops, strict=False):
         token = footnotes.use_for_tooltips(fn)
-        # the move settings of how the file is compared: prose sentence by
-        # sentence, or line by line (paragraphs, in prose); None, the default
-        sentences = by_sentence and fd.markdown
-        default_similarity, default_algorithm = move_defaults(sentences)
-        chosen_similarity = sentence_move_similarity if sentences else move_similarity
-        chosen_algorithm = sentence_move_algorithm if sentences else move_algorithm
-        similarity = default_similarity if chosen_similarity is None else chosen_similarity
-        algorithm = chosen_algorithm or default_algorithm
+        # prose compared sentence by sentence, or line by line (paragraphs)
+        similarity, algorithm = options.move_settings(options.by_sentence and fd.markdown)
         pairs = line_pairs(ops, old, new, similarity, algorithm)
         fd.pairs = [(i, j) for _, i, j in pairs]
         if fd.markdown:
@@ -2456,17 +2538,17 @@ def build_files(
         fd.rows, fd.additions, fd.deletions = align(
             old,
             new,
-            context_for(context, fd.markdown),
+            context_for(options.context, fd.markdown),
             ops,
             markdown=fd.markdown,
-            max_hidden=max_hidden,
+            max_hidden=options.max_hidden,
             move_similarity=similarity,
             move_algorithm=algorithm,
             old_labels=old_labels,
             new_labels=new_labels,
             pairs=pairs,
-            move_passages=move_passages,
-            moved_passage_settings=moved_passage_settings,
+            move_passages=options.move_passages,
+            moved_passage_settings=options.moved_passage_settings,
         )
         footnotes.reset_tooltips(token)
         fd.mixed_languages = set_row_languages(fd.rows, old, new, fd.language)
@@ -2578,40 +2660,6 @@ def comment_entries(
 
 # Repository level -------------------------------------------------------------
 
-# What becomes of the comments (--comments): set apart as markers, compared
-# as text, or left out.
-COMMENT_MODES = ("markers", "text", "none")
-
-
-def comment_options(mode: str) -> dict[str, bool]:
-    """The options of compare() and compare_paths() for a comment mode."""
-    return {"fold_comments_md": mode != "text", "drop_comments": mode == "none"}
-
-
-def check_move_similarity(value: float | None) -> None:
-    if value is not None and not 0 < value <= 1:
-        raise ValueError(f"move similarity must be above 0 and at most 1, not {value}")
-
-
-def _checked_options(
-    move_similarity: float | None,
-    sentence_move_similarity: float | None,
-    move_algorithm: str | None,
-    sentence_move_algorithm: str | None,
-    moved_passage_settings: MovedPassageSettings,
-    language: str,
-    encoding: str,
-) -> tuple[str, str]:
-    """Refuse the options of compare() and compare_paths() that make no
-    sense (ValueError); the language and the encoding in canonical form."""
-    for value in (move_similarity, sentence_move_similarity):
-        check_move_similarity(value)
-    for name in (move_algorithm, sentence_move_algorithm):
-        if name is not None:
-            check_move_algorithm(name)
-    moved_passage_settings.check()
-    return normalize_language(language), check_encoding(encoding)
-
 
 def in_paths(path: str, paths: list[str] | None) -> bool:
     if not paths:
@@ -2623,27 +2671,11 @@ def compare(
     repo_path: str | Path,
     base: str,
     target: str | None = None,
-    paths: list[str] | None = None,
-    context: Context = "auto",
-    md_filter: str | None = None,
+    options: Options = DEFAULT_OPTIONS,
     *,
+    paths: list[str] | None = None,
     cached: bool = False,
     untracked: bool = False,
-    ignore_whitespace: bool = False,
-    fold_comments_md: bool = True,
-    empty_comments: bool = False,
-    drop_comments: bool = False,
-    max_hidden: int | None = MAX_HIDDEN,
-    docx_changes: str = "accept",
-    move_similarity: float | None = None,
-    move_algorithm: str | None = None,
-    by_sentence: bool = False,
-    sentence_move_similarity: float | None = None,
-    sentence_move_algorithm: str | None = None,
-    move_passages: bool = MOVE_PASSAGES,
-    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
-    language: str = DEFAULT,
-    encoding: str = AUTO_ENCODING,
 ) -> Comparison:
     """Compare two versions of the repository at repo_path.
 
@@ -2652,52 +2684,9 @@ def compare(
     diff <commit> does, or with the index when cached is set (git diff
     --cached <commit>). untracked adds the untracked files of the working
     tree that .gitignore does not exclude. paths restricts the comparison to
-    those paths. md_filter is a shell command both versions of every
-    Markdown file are piped through before they are compared.
-    ignore_whitespace compares lines as git diff --ignore-all-space does.
-    fold_comments_md (on by default) shows each pandoc comment span of a
-    Markdown file, [note]{.comment-start ...}, as a marker whose tooltip is
-    the comment, and lists the comments in a panel; off, the comment markup
-    is compared as text. Comments without text are left out, unless
-    empty_comments. drop_comments leaves every comment out, in every format.
-    context is the number of unchanged lines shown around each change, in
-    every file; "auto" (the default) is 0 in Markdown files
-    and Word documents, whose lines are paragraphs, and 3 in the others;
-    None shows every line. max_hidden caps
-    the unchanged lines embedded per gap. docx_changes settles the tracked changes of Word
-    documents: "accept", "reject" or "all" (kept as markup).
-    move_similarity is how alike, from 0 to 1, an edited line must be to
-    where it reappears to count as moved (1: only lines moved unchanged), by
-    move_algorithm, one of MOVE_ALGORITHMS, where lines are compared whole
-    (paragraphs, in prose); sentence_move_similarity and
-    sentence_move_algorithm where prose is compared sentence by sentence.
-    None (each) is prosediff's default for that way (move_defaults).
-    move_passages (on by default) also follows the passages of text moved
-    within a line or between two, by the same measure: a run of words
-    removed in one place and added in another, as it was or lightly edited,
-    is shown as moved (mark_passage_moves). moved_passage_settings tunes how
-    those passages are told from chance likeness (MovedPassageSettings).
-    by_sentence compares the prose of Markdown files (and Word documents)
-    sentence by sentence instead of line by line; each sentence is labelled
-    with its line and its place in it ("12.3"). language is that of their
-    prose, whose rules split sentences and hyphenate lines: a code (en, it,
-    ...); "document", the language Word and OpenDocument files mark their
-    text with (SourceError when another text file is compared); "guess", to
-    guess it from each file's text; or "default" (the default), a Word or
-    OpenDocument file's own, the others guessed. encoding is that
-    of the text files (Word and OpenDocument files carry their own): a
-    codec's name, or "auto" (the default), UTF-8 unless the file shows it is
-    not, then guessed (decode_text).
+    those paths. options says how the files are compared and shown (Options).
     """
-    language, encoding = _checked_options(
-        move_similarity,
-        sentence_move_similarity,
-        move_algorithm,
-        sentence_move_algorithm,
-        moved_passage_settings,
-        language,
-        encoding,
-    )
+    options = options.checked()
     if cached and target is not None:
         raise ValueError("cached compares a commit with the index: give no target")
     if untracked and (target is not None or cached):
@@ -2732,26 +2721,7 @@ def compare(
             if in_paths(p, paths):
                 entries.append((FileDiff("untracked", None, p), b"", (root / p).read_bytes()))
 
-    panel = build_files(
-        entries,
-        context=context,
-        md_filter=md_filter,
-        ignore_whitespace=ignore_whitespace,
-        fold=fold_comments_md,
-        empty_comments=empty_comments,
-        drop_comments=drop_comments,
-        max_hidden=max_hidden,
-        docx_changes=docx_changes,
-        move_similarity=move_similarity,
-        move_algorithm=move_algorithm,
-        sentence_move_similarity=sentence_move_similarity,
-        sentence_move_algorithm=sentence_move_algorithm,
-        move_passages=move_passages,
-        moved_passage_settings=moved_passage_settings,
-        by_sentence=by_sentence,
-        language=language,
-        encoding=encoding,
-    )
+    panel = build_files(entries, options)
     files = sorted((fd for fd, _, _ in entries), key=lambda f: f.path)
 
     # The commits the comparison spans. The working tree and the index sit
@@ -2792,25 +2762,9 @@ def _side_revision(path: Path) -> Revision:
 def compare_paths(
     old: str | Path,
     new: str | Path,
-    paths: list[str] | None = None,
-    context: Context = "auto",
-    md_filter: str | None = None,
+    options: Options = DEFAULT_OPTIONS,
     *,
-    ignore_whitespace: bool = False,
-    fold_comments_md: bool = True,
-    empty_comments: bool = False,
-    drop_comments: bool = False,
-    max_hidden: int | None = MAX_HIDDEN,
-    docx_changes: str = "accept",
-    move_similarity: float | None = None,
-    move_algorithm: str | None = None,
-    by_sentence: bool = False,
-    sentence_move_similarity: float | None = None,
-    sentence_move_algorithm: str | None = None,
-    move_passages: bool = MOVE_PASSAGES,
-    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
-    language: str = DEFAULT,
-    encoding: str = AUTO_ENCODING,
+    paths: list[str] | None = None,
     include: str | None = FOLDER_FILES,
 ) -> Comparison:
     """Compare two files, or two folders, outside git.
@@ -2822,17 +2776,10 @@ def compare_paths(
     glob patterns, separated by "|" (by default Word, OpenDocument, Markdown,
     Typst and text files; None or "" for every file), matched against each
     file's name, or its path within the folder for a pattern with a "/",
-    ignoring case. The other options are those of compare().
+    ignoring case. options says how the files are compared and shown
+    (Options).
     """
-    language, encoding = _checked_options(
-        move_similarity,
-        sentence_move_similarity,
-        move_algorithm,
-        sentence_move_algorithm,
-        moved_passage_settings,
-        language,
-        encoding,
-    )
+    options = options.checked()
     old, new = Path(old), Path(new)
     entries: list[tuple[FileDiff, bytes, bytes]] = []
     if old.is_file() and new.is_file():
@@ -2865,26 +2812,7 @@ def compare_paths(
                 raise SourceError(f"no such file or folder: {side}")
         raise SourceError("compare a file with a file, or a folder with a folder")
 
-    panel = build_files(
-        entries,
-        context=context,
-        md_filter=md_filter,
-        ignore_whitespace=ignore_whitespace,
-        fold=fold_comments_md,
-        empty_comments=empty_comments,
-        drop_comments=drop_comments,
-        max_hidden=max_hidden,
-        docx_changes=docx_changes,
-        move_similarity=move_similarity,
-        move_algorithm=move_algorithm,
-        sentence_move_similarity=sentence_move_similarity,
-        sentence_move_algorithm=sentence_move_algorithm,
-        move_passages=move_passages,
-        moved_passage_settings=moved_passage_settings,
-        by_sentence=by_sentence,
-        language=language,
-        encoding=encoding,
-    )
+    panel = build_files(entries, options)
     return Comparison(
         repo_name=old.name if old.name == new.name else f"{old.name} → {new.name}",
         base=_side_revision(old),

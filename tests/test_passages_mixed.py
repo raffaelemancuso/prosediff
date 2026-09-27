@@ -2,7 +2,7 @@
 clauses inside them (split by paragraph), sentences and the clauses inside
 them (split by sentence), each found where it went and nothing else."""
 
-from prosediff import compare_paths, render
+from prosediff import Options, compare_paths, render
 from prosediff.diff import Row, align, git_opcodes, move_defaults
 
 # Six paragraphs of a local newspaper, each on its own subject.
@@ -186,8 +186,10 @@ def test_both_splits_of_one_document(tmp_path):
     )
     (tmp_path / "a.md").write_text(old_text, encoding="utf-8")
     (tmp_path / "b.md").write_text(new_text, encoding="utf-8")
-    paragraphs = compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None)
-    sentences = compare_paths(tmp_path / "a.md", tmp_path / "b.md", context=None, by_sentence=True)
+    paragraphs = compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(context=None))
+    sentences = compare_paths(
+        tmp_path / "a.md", tmp_path / "b.md", Options(context=None, by_sentence=True)
+    )
     # by paragraph: the bakery paragraph moved whole; the nets sentence and
     # the swapped council sentence moved as passages
     assert paragraphs.moved == 1 and paragraphs.moved_passages == 2
