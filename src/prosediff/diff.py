@@ -227,7 +227,7 @@ class Row:
     # HTML report to draw a line between them.
     move_pair: int = 0
     # The passages of the line moved from or to another line (or elsewhere
-    # in this one), on each side: mark_passage_moves.
+    # in this one), on each side: mark_moves.
     old_moves: list["MovedSpan"] = field(default_factory=list)
     new_moves: list["MovedSpan"] = field(default_factory=list)
     # What those moves are, in plain English, and the words edited on the way.
@@ -347,7 +347,7 @@ class FileDiff:
 
     @property
     def moved_passages(self) -> int:
-        """Passages moved within or between lines (mark_passage_moves)."""
+        """Passages moved within or between lines (mark_moves)."""
         return sum(len(r.new_moves) for r in self.rows)
 
     @property
@@ -964,7 +964,7 @@ def slide_ops(ops: list[Opcode], old: str, new: str) -> list[Opcode]:
 
 @dataclass
 class MovedSpan:
-    """A passage of a line moved to or from another place (mark_passage_moves):
+    """A passage of a line moved to or from another place (mark_moves):
     its characters start:end in the line, the number it shares with the
     other end (for the HTML report to draw a line between them), and its
     HTML, the passage compared with the other end."""
@@ -1409,49 +1409,75 @@ def move_scorer(similarity: float, algorithm: str) -> tuple[Callable, Callable]:
     return prepare, at_least
 
 
-def mark_moves(
-    rows: list[Row],
-    style: Styler | None = None,
-    similarity: float = MOVE_SIMILARITY,
-    algorithm: str = MOVE_ALGORITHM,
-) -> None:
-    """Turn a removed line that reappears as an added line into a move.
-
-    First the identical lines (spacing aside), each removed line with the
-    first unmatched identical added line; then the edited ones at least
-    similarity alike (1: none) by algorithm (one of MOVE_ALGORITHMS), the
-    most similar pairs first.
-    """
-    style = style or Styler(False)
-    pairs = 0  # the moves found, numbered for the HTML report
-    removed: dict[str, list[Row]] = defaultdict(list)
-    for r in rows:
-        if r.kind == "delete" and (key := move_key(r.text)):
-            removed[key].append(r)
-    for r in rows:
-        if r.kind == "insert" and (key := move_key(r.text)) and removed.get(key):
-            pairs += 1
-            _make_move(removed[key].pop(0), r, style, pairs)
-
-    outs = [r for r in rows if r.kind == "delete" and move_key(r.text)]
-    ins = [r for r in rows if r.kind == "insert" and move_key(r.text)]
-    if similarity >= 1 or not outs or not ins or len(outs) * len(ins) > MOVE_MAX_CELLS:
-        return
+def line_move_score(similarity: float, algorithm: str) -> Callable[[str, str], float]:
+    """How alike two lines are as a move, 0 to 1: 1 for the same words
+    (spacing aside); else algorithm's score, 0 below similarity (and always
+    at similarity 1); 0 for a line too short to tell a move from chance
+    (move_key). Each line is prepared once."""
     prepare, score = move_scorer(similarity, algorithm)
-    out_items = [prepare(r.text) for r in outs]
-    in_items = [prepare(r.text) for r in ins]
-    candidates = []
-    for a, ta in enumerate(out_items):
-        for b, tb in enumerate(in_items):
-            if s := score(ta, tb):
-                candidates.append((s, a, b))
-    used_out, used_in = set(), set()
-    for _, a, b in sorted(candidates, key=lambda c: (-c[0], c[1], c[2])):
-        if a not in used_out and b not in used_in:
-            used_out.add(a)
-            used_in.add(b)
-            pairs += 1
-            _make_move(outs[a], ins[b], style, pairs)
+    seen: dict[str, tuple] = {}
+
+    def of(line: str) -> tuple:
+        if line not in seen:
+            key = move_key(line)
+            seen[line] = (key, prepare(line) if key and similarity < 1 else None)
+        return seen[line]
+
+    def alike(a: str, b: str) -> float:
+        (key_a, prepared_a), (key_b, prepared_b) = of(a), of(b)
+        if not key_a or not key_b:
+            return 0.0
+        if key_a == key_b:
+            return 1.0
+        return score(prepared_a, prepared_b) if similarity < 1 else 0.0
+
+    return alike
+
+
+def best_pairs(candidates: list[tuple]) -> list[tuple]:
+    """The candidate pairs (rank, a, b, match) taken, as (a, b, match): the
+    lowest rank first (the most alike), each a and each b in one pair at
+    most."""
+    used_a, used_b = set(), set()
+    taken = []
+    for _, a, b, match in sorted(candidates, key=lambda c: c[0]):
+        if a not in used_a and b not in used_b:
+            used_a.add(a)
+            used_b.add(b)
+            taken.append((a, b, match))
+    return taken
+
+
+def candidate_pairs(
+    outs: list,
+    ins: list,
+    words_of: Callable,
+    max_pairs: int,
+    rare_min: int,
+    rare_share: float,
+) -> list[tuple[int, int]]:
+    """The pairs (i, j) of a removed outs[i] and an added ins[j] worth
+    matching: every one, or past max_pairs of them those sharing rare words
+    (words_of: the content words of one; rare, in at most rare_share of
+    them or rare_min), the most rare words shared first, at most max_pairs."""
+    if len(outs) * len(ins) <= max_pairs:
+        return [(i, j) for i in range(len(outs)) for j in range(len(ins))]
+    out_words = [set(words_of(x)) for x in outs]
+    in_words = [set(words_of(x)) for x in ins]
+    df = Counter(w for ws in [*out_words, *in_words] for w in ws)
+    limit = max(rare_min, rare_share * (len(outs) + len(ins)))
+    index: dict[str, list[int]] = defaultdict(list)
+    for j, ws in enumerate(in_words):
+        for w in ws:
+            if df[w] <= limit:
+                index[w].append(j)
+    shared: Counter = Counter()
+    for i, ws in enumerate(out_words):
+        for w in ws:
+            if df[w] <= limit:
+                for j in index[w]:
+                    shared[i, j] += 1
+    return [pair for pair, _ in shared.most_common(max_pairs)]
 
 
 # Moved passages ------------------------------------------------------------------
@@ -1501,7 +1527,7 @@ def _setting(default: float, label: str, help: str, low: int = 1, share: bool = 
 
 @dataclass(frozen=True)
 class MovedPassageSettings:
-    """How moved passages are found (mark_passage_moves); each default is the
+    """How moved passages are found (mark_moves); each default is the
     constant of the same meaning above, chosen with docs/passage_benchmark.py.
     Set from the command line (--passage-NAME, NAME a field with - for _) and
     the GUI's advanced settings, both made from these fields."""
@@ -1607,9 +1633,14 @@ class Passage:
     start: int
     end: int
     # the changes of the row's word diff it spans, to tell a move from an
-    # edit in place (-1: a whole line removed or added)
+    # edit in place (-1: a whole line removed or added, or part of one)
     first_op: int
     last_op: int
+    # a whole line removed or added: it may move as a line (long enough for
+    # move_key), and as a passage (long_enough)
+    whole: bool = False
+    line: bool = False
+    passage: bool = True
 
 
 def _passage(
@@ -1740,55 +1771,68 @@ def _core(
     return ta[i1][0], ta[i2 - 1][1], tb[j1][0], tb[j2 - 1][1]
 
 
-def candidate_pairs(
-    outs: list[Passage],
-    ins: list[Passage],
-    words_of: Callable[[Passage], Counter],
-    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
-) -> list[tuple[Passage, Passage]]:
-    """The pairs of a removed and an added passage worth matching: every one,
-    or past ps.max_pairs of them those sharing rare words (words_of: a
-    passage's content words), the most rare words shared first."""
-    if len(outs) * len(ins) <= ps.max_pairs:
-        return [(a, b) for a in outs for b in ins]
-    words = {p: set(words_of(p)) for p in [*outs, *ins]}
-    df = Counter(w for ws in words.values() for w in ws)
-    limit = max(ps.rare_min, ps.rare_share * len(words))
-    index: dict[str, list[Passage]] = defaultdict(list)
-    for b in ins:
-        for w in words[b]:
-            if df[w] <= limit:
-                index[w].append(b)
-    shared: Counter = Counter()
-    for a in outs:
-        for w in words[a]:
-            if df[w] <= limit:
-                for b in index[w]:
-                    shared[a, b] += 1
-    return [pair for pair, _ in shared.most_common(ps.max_pairs)]
-
-
-def mark_passage_moves(
+def mark_moves(
     rows: list[Row],
     old: list[str],
     new: list[str],
     style: Styler | None = None,
     similarity: float = MOVE_SIMILARITY,
     algorithm: str = MOVE_ALGORITHM,
+    passages: bool = MOVE_PASSAGES,
     ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
 ) -> None:
-    """Find the passages removed in one place and added in another, within
-    a line or between two, that are one passage moved: at least similarity
-    alike by algorithm (as whole lines are, mark_moves), the most similar
-    first, as ps sets them apart from chance likeness. Each end stays in its
-    row, the passage shown as moved there, and its words are no longer
-    counted as removed or added (but for those edited on the way). A row
-    with moved passages keeps, in without_passages, how it looked before."""
+    """Find what moved: removed lines that reappear as added lines and, with
+    passages, the passages removed in one place and added in another, within
+    a line or between two.
+
+    The identical lines (spacing aside) first, each removed line with the
+    first unmatched identical added line. Then one matching of the removed
+    and the added text left: whole lines removed and added, and the runs of
+    changes of the edited lines (passages_of). A pair of whole lines at least
+    similarity alike by algorithm (one of MOVE_ALGORITHMS) is a moved line;
+    any other pair is a moved passage when the part the two share
+    (_core) is at least as alike, and ps tells it from chance likeness. The
+    moved lines are taken first, then the passages, each the most alike
+    first; what is left of a passage around the part that moved is matched
+    again, up to ps.rounds times. Past ps.max_pairs pairs, only those sharing
+    rare words are tried (candidate_pairs).
+
+    A moved line becomes a moved-out and a moved-in row. The ends of a moved
+    passage stay in their rows, the passage shown as moved there, its words
+    no longer counted as removed or added (but for those edited on the way);
+    such a row keeps, in without_passages, how it looked before.
+    """
     style = style or Styler(False)
+    pair = 0  # the moves found, numbered for the HTML report
+    removed: dict[str, list[Row]] = defaultdict(list)
+    for r in rows:
+        if r.kind == "delete" and (key := move_key(r.text)):
+            removed[key].append(r)
+    for r in rows:
+        if r.kind == "insert" and (key := move_key(r.text)) and removed.get(key):
+            pair += 1
+            _make_move(removed[key].pop(0), r, style, pair)
+
     changed = [r for r in rows if r.kind in ("delete", "insert", "replace")]
+    position = {id(r): k for k, r in enumerate(rows)}
     free: list[Passage] = []
     for r in changed:
-        free += passages_of(r, *_row_lines(r, old, new), ps)
+        o, n = _row_lines(r, old, new)
+        if r.kind == "replace":
+            if passages:
+                free += passages_of(r, o, n, ps)
+            continue
+        line = o if r.kind == "delete" else n
+        as_line = similarity < 1 and bool(move_key(line))
+        as_passage = passages and long_enough(line.strip(), ps)
+        if as_line or as_passage:
+            if as_passage:
+                (p,) = passages_of(r, o, n, ps)
+            else:
+                p = Passage(r, r.kind == "delete", 0, len(line), -1, -1)
+            p.whole, p.line, p.passage = True, as_line, as_passage
+            free.append(p)
+    line_score = line_move_score(similarity, algorithm)
     prepare, score = move_scorer(similarity, algorithm)
 
     def line_of(p: Passage) -> str:
@@ -1798,8 +1842,8 @@ def mark_passage_moves(
     tokens: dict[Passage, list[tuple[int, int, str]]] = {}
     counts: dict[Passage, Counter] = {}
 
-    def index(passages: list[Passage]) -> None:
-        for p in passages:
+    def index(found: list[Passage]) -> None:
+        for p in found:
             tokens[p] = _tokens(line_of(p), p.start, p.end)
             counts[p] = Counter(t for *_, t in tokens[p])
 
@@ -1830,7 +1874,7 @@ def mark_passage_moves(
         s = alike(la[a1:a2], lb[b1:b2])
         return (s, a1, a2, b1, b2) if s else None
 
-    def match(a: Passage, b: Passage) -> tuple[float, int, int, int, int] | None:
+    def passage_match(a: Passage, b: Passage) -> tuple[float, int, int, int, int] | None:
         """How alike removed passage a and added passage b are, and the part
         of each that matches: of the whole of both, or of the longer one a
         window as long as the other."""
@@ -1851,7 +1895,16 @@ def mark_passage_moves(
         found = [m for region in regions if (m := scored(a, b, region))]
         return max(found) if found else None
 
-    pair = max((r.move_pair for r in rows), default=0)
+    def match(a: Passage, b: Passage) -> tuple[tuple, tuple | None] | None:
+        """The rank of removed a and added b as a move, and the parts that
+        moved (None: the whole lines); None when they are no move. A moved
+        line ranks before any passage."""
+        if a.line and b.line and (s := line_score(text(a), text(b))):
+            return (0, -s, position[id(a.row)], position[id(b.row)]), None
+        if a.passage and b.passage and (m := passage_match(a, b)):
+            return (1, -m[0], a.start, b.start), m
+        return None
+
     tried: set[tuple[Passage, Passage]] = set()  # the pairs already scored
     for _ in range(ps.rounds):
         outs = [p for p in free if p.old]
@@ -1859,23 +1912,30 @@ def mark_passage_moves(
         if not outs or not ins:
             break
         candidates = []
-        for a, b in candidate_pairs(outs, ins, lambda p: content_words(text(p), ps), ps):
+        for i, j in candidate_pairs(
+            outs,
+            ins,
+            lambda p: content_words(text(p), ps),
+            ps.max_pairs,
+            ps.rare_min,
+            ps.rare_share,
+        ):
+            a, b = outs[i], ins[j]
             if (a, b) in tried:
                 continue
             tried.add((a, b))
             if a.row is b.row and a.first_op <= b.last_op and b.first_op <= a.last_op:
                 continue  # the same change: an edit in place, not a move
-            if m := match(a, b):
-                candidates.append((m, a, b))
-        used: set[Passage] = set()
+            if found := match(a, b):
+                candidates.append((found[0], a, b, found[1]))
+        taken = best_pairs(candidates)
         leftovers: list[Passage] = []
-        for (_, a1, a2, b1, b2), a, b in sorted(
-            candidates, key=lambda c: (-c[0][0], c[1].start, c[2].start)
-        ):
-            if a in used or b in used:
-                continue
-            used |= {a, b}
+        for a, b, m in taken:
             pair += 1
+            if m is None:
+                _make_move(a.row, b.row, style, pair)
+                continue
+            _, a1, a2, b1, b2 = m
             _make_passage_move(a.row, a1, a2, b.row, b1, b2, old, new, style, pair)
             # what is left of the longer one, around the window
             for p, s, e in ((a, a1, a2), (b, b1, b2)):
@@ -1883,8 +1943,9 @@ def mark_passage_moves(
                     ops_spanned = (p.first_op, p.last_op)
                     if rest := _passage(p.row, p.old, line_of(p), lo, hi, ops_spanned, ps):
                         leftovers.append(rest)
-        if not used:
+        if not taken:
             break
+        used = {p for a, b, _ in taken for p in (a, b)}
         free = [p for p in free if p not in used] + leftovers
         index(leftovers)
     for r in changed:
@@ -2039,15 +2100,7 @@ def unpair_moved(
     ]
     if not weak or similarity > 1:
         return pairs
-    prepare, score = move_scorer(similarity, algorithm)
-
-    def alike(a: str, b: str) -> bool:
-        key_a, key_b = move_key(a), move_key(b)
-        if not key_a or not key_b:
-            return False
-        if key_a == key_b:
-            return True
-        return similarity < 1 and bool(score(prepare(a), prepare(b)))
+    alike = line_move_score(similarity, algorithm)
 
     removed = {i for tag, i, j in pairs if j is None and i is not None}
     added = {j for tag, i, j in pairs if i is None and j is not None}
@@ -2092,7 +2145,7 @@ def align(
     (difflib's if not given), pairs the pairing made from it (line_pairs,
     made here if not given). markdown styles the lines for the HTML report's
     formatted view. move_passages also finds the passages moved within a
-    line or between two (mark_passage_moves). The counts are the lines added
+    line or between two (mark_moves). The counts are the lines added
     and removed; moved lines count in neither, nor do lines whose words all
     moved as passages.
     """
@@ -2163,11 +2216,16 @@ def align(
             row.left_label = old_labels[row.left_no - 1] if old_labels else str(row.left_no)
         if row.right_no is not None:
             row.right_label = new_labels[row.right_no - 1] if new_labels else str(row.right_no)
-    mark_moves(rows, style, move_similarity, move_algorithm)
-    if move_passages:
-        mark_passage_moves(
-            rows, old, new, style, move_similarity, move_algorithm, moved_passage_settings
-        )
+    mark_moves(
+        rows,
+        old,
+        new,
+        style,
+        move_similarity,
+        move_algorithm,
+        move_passages,
+        moved_passage_settings,
+    )
     # The stops of the HTML report's next/previous navigation: a run of changed
     # lines of code, but each changed paragraph of prose (its blank lines
     # are left out, so changed paragraphs are neighbours).
@@ -2283,6 +2341,30 @@ def check_move_similarity(value: float | None) -> None:
 
 
 @dataclass(frozen=True)
+class MoveSettings:
+    """When a line counts as moved: at least similarity alike (above 0, at
+    most 1: only lines moved unchanged) to where it reappears, as algorithm
+    (one of MOVE_ALGORITHMS) measures it. None: prosediff's default for
+    such lines, paragraphs or sentences (move_defaults)."""
+
+    similarity: float | None = None
+    algorithm: str | None = None
+
+    def check(self) -> None:
+        check_move_similarity(self.similarity)
+        if self.algorithm is not None:
+            check_move_algorithm(self.algorithm)
+
+    def resolved(self, sentences: bool) -> tuple[float, str]:
+        """The similarity and the algorithm, the defaults filled in."""
+        default_similarity, default_algorithm = move_defaults(sentences)
+        return (
+            default_similarity if self.similarity is None else self.similarity,
+            self.algorithm or default_algorithm,
+        )
+
+
+@dataclass(frozen=True)
 class Options:
     """How files are compared and shown: every option of compare() and
     compare_paths() but what is compared.
@@ -2305,16 +2387,13 @@ class Options:
 
     by_sentence compares the prose of Markdown files (and Word documents)
     sentence by sentence instead of line by line; each sentence is labelled
-    with its line and its place in it ("12.3"). move_similarity is how
-    alike, from 0 to 1, an edited line must be to where it reappears to
-    count as moved (1: only lines moved unchanged), by move_algorithm, one
-    of MOVE_ALGORITHMS, where lines are compared whole (paragraphs, in
-    prose); sentence_move_similarity and sentence_move_algorithm where prose
-    is compared sentence by sentence. None (each) is prosediff's default for
-    that way (move_defaults). move_passages (on by default) also follows the
+    with its line and its place in it ("12.3"). paragraph_moves says when
+    an edited line counts as moved where lines are compared whole
+    (paragraphs, in prose), sentence_moves where prose is compared sentence
+    by sentence (MoveSettings). move_passages (on by default) also follows the
     passages of text moved within a line or between two, by the same
     measure: a run of words removed in one place and added in another, as
-    it was or lightly edited, is shown as moved (mark_passage_moves).
+    it was or lightly edited, is shown as moved (mark_moves).
     moved_passage_settings tunes how those passages are told from chance
     likeness (MovedPassageSettings).
 
@@ -2336,10 +2415,8 @@ class Options:
     empty_comments: bool = False
     docx_changes: str = "accept"
     by_sentence: bool = False
-    move_similarity: float | None = None
-    move_algorithm: str | None = None
-    sentence_move_similarity: float | None = None
-    sentence_move_algorithm: str | None = None
+    paragraph_moves: MoveSettings = MoveSettings()
+    sentence_moves: MoveSettings = MoveSettings()
     move_passages: bool = MOVE_PASSAGES
     moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS
     language: str = DEFAULT
@@ -2350,11 +2427,8 @@ class Options:
         ValueError for those that make no sense."""
         if self.comments not in COMMENT_MODES:
             raise ValueError(f"comments must be one of {', '.join(COMMENT_MODES)}")
-        for value in (self.move_similarity, self.sentence_move_similarity):
-            check_move_similarity(value)
-        for name in (self.move_algorithm, self.sentence_move_algorithm):
-            if name is not None:
-                check_move_algorithm(name)
+        self.paragraph_moves.check()
+        self.sentence_moves.check()
         self.moved_passage_settings.check()
         return replace(
             self,
@@ -2365,13 +2439,7 @@ class Options:
     def move_settings(self, sentences: bool) -> tuple[float, str]:
         """The moved-line similarity and algorithm where lines are sentences
         (or paragraphs, lines): those chosen, else prosediff's defaults."""
-        default_similarity, default_algorithm = move_defaults(sentences)
-        similarity = self.sentence_move_similarity if sentences else self.move_similarity
-        algorithm = self.sentence_move_algorithm if sentences else self.move_algorithm
-        return (
-            default_similarity if similarity is None else similarity,
-            algorithm or default_algorithm,
-        )
+        return (self.sentence_moves if sentences else self.paragraph_moves).resolved(sentences)
 
 
 DEFAULT_OPTIONS = Options()

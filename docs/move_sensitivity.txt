@@ -1,5 +1,5 @@
 prosediff: sensitivity of the moved-line matching to algorithm and threshold
-2026-09-26 17:06:21
+2026-09-28 01:20:56
 
 Paragraphs
 ==========
@@ -40,14 +40,14 @@ recall on the recognisable ones):
 Time to score 250,000 pairs (diff.MOVE_MAX_CELLS, the most diff.mark_moves
 scores; 500 removed x 500 added paragraphs), best of 3 runs:
   algorithm       at best   per pair    at 0.80   per pair
-  tokens           0.97 s     3.9 us     0.65 s     2.6 us
-  chars            1.22 s     4.9 us     0.39 s     1.6 us
-  levenshtein      0.83 s     3.3 us     0.82 s     3.3 us
-  token-sort       0.95 s     3.8 us     1.01 s     4.0 us
-  token-set        8.88 s    35.5 us     8.80 s    35.2 us
+  tokens           4.19 s    16.7 us     3.48 s    13.9 us
+  chars            6.90 s    27.6 us     2.20 s     8.8 us
+  levenshtein      3.36 s    13.5 us     2.57 s    10.3 us
+  token-sort       3.77 s    15.1 us     3.15 s    12.6 us
+  token-set       25.21 s   100.9 us    24.81 s    99.3 us
 
 Within 0.5 points of the best F1: token-sort, token-set.
-Suggested default: token-sort at 0.70 (F1 98.6%, 0.95 s for 250,000 pairs), the fastest of those.
+Suggested default: token-sort at 0.70 (F1 98.6%, 3.77 s for 250,000 pairs), the fastest of those.
 
 tokens, by threshold (recall by kind of edit, %):
   thr     prec.  recall      F1   wrong         w0%       w5%      w10%      w20%      w30%      w40%      w50%     reord reord+10%
@@ -135,8 +135,8 @@ token-set, by threshold (recall by kind of edit, %):
   0.95     99.6    79.5    88.4      11       100.0      96.4      93.8      58.4      20.1       9.4       5.3      99.8      90.0
 
 
-Sentences (--by-sentence)
-=========================
+Sentences (--split sentence)
+============================
 
 Corpus (Project Gutenberg; paragraphs: blocks between blank lines; sentences: split by prosediff.sentences):
   Austen, Pride and Prejudice (en, novel)                          6,352 sentences
@@ -174,14 +174,14 @@ recall on the recognisable ones):
 Time to score 250,000 pairs (diff.MOVE_MAX_CELLS, the most diff.mark_moves
 scores; 500 removed x 500 added sentences), best of 3 runs:
   algorithm       at best   per pair    at 0.80   per pair
-  tokens           0.34 s     1.3 us     0.29 s     1.2 us
-  chars            0.25 s     1.0 us     0.17 s     0.7 us
-  levenshtein      0.30 s     1.2 us     0.24 s     1.0 us
-  token-sort       0.32 s     1.3 us     0.27 s     1.1 us
-  token-set        1.91 s     7.6 us     1.87 s     7.5 us
+  tokens           1.62 s     6.5 us     1.40 s     5.6 us
+  chars            1.34 s     5.3 us     0.85 s     3.4 us
+  levenshtein      1.49 s     6.0 us     1.22 s     4.9 us
+  token-sort       0.56 s     2.2 us     0.49 s     2.0 us
+  token-set        5.80 s    23.2 us     6.24 s    25.0 us
 
 Within 0.5 points of the best F1: token-sort, token-set.
-Suggested default: token-sort at 0.55 (F1 99.2%, 0.32 s for 250,000 pairs), the fastest of those.
+Suggested default: token-sort at 0.55 (F1 99.2%, 0.56 s for 250,000 pairs), the fastest of those.
 
 tokens, by threshold (recall by kind of edit, %):
   thr     prec.  recall      F1   wrong         w0%       w5%      w10%      w20%      w30%      w40%      w50%     reord reord+10%
@@ -273,4 +273,4 @@ Suggested defaults:
   paragraphs  token-sort at 0.70 (F1 98.6%)
   sentences   token-sort at 0.55 (F1 99.2%)
 
-Run time: 154 s.
+Run time: 592 s.

@@ -40,6 +40,7 @@ from prosediff.diff import (
     Context,
     FilterError,
     MovedPassageSettings,
+    MoveSettings,
     Options,
     check_encoding,
     compare,
@@ -319,11 +320,13 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         empty_comments=s.empty_comments,
         docx_changes=s.docx_changes,
         # None: prosediff's defaults
-        move_similarity=s.move_similarity,
-        move_algorithm=s.move_algorithm if s.move_algorithm in MOVE_ALGORITHMS else None,
-        sentence_move_similarity=s.sentence_move_similarity,
-        sentence_move_algorithm=(
-            s.sentence_move_algorithm if s.sentence_move_algorithm in MOVE_ALGORITHMS else None
+        paragraph_moves=MoveSettings(
+            s.move_similarity,
+            s.move_algorithm if s.move_algorithm in MOVE_ALGORITHMS else None,
+        ),
+        sentence_moves=MoveSettings(
+            s.sentence_move_similarity,
+            s.sentence_move_algorithm if s.sentence_move_algorithm in MOVE_ALGORITHMS else None,
         ),
         move_passages=s.move_passages,
         moved_passage_settings=moved_passage_settings_of(s),

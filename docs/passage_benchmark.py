@@ -1,4 +1,4 @@
-"""Benchmark of the moved-passage matching (diff.mark_passage_moves): speed and accuracy.
+"""Benchmark of the moved-passage matching (diff.mark_moves): speed and accuracy.
 
     uv run python docs/passage_benchmark.py [--quick]
 
@@ -35,7 +35,7 @@ is counted apart, as "rejoined", and is neither right nor wrong.
 Precision is the share of the passages reported that are right (rejoined
 ones aside), recall the share of the true moves found. The time is that of diff.align with and
 without moved passages, over all the trials, and of a stress case: STRESS
-paragraphs all edited, the largest job mark_passage_moves meets. The report
+paragraphs all edited, the largest job mark_moves meets. The report
 is printed and written next to this script as passage_benchmark.txt.
 
 The trials (the two versions, the true moves, and the lines' alignment by git)
@@ -360,7 +360,7 @@ def run(quick: bool) -> str:
     data = load_cases()
     trials = TRIALS // 4 if quick else TRIALS
     out = [
-        "Moved passages: speed and accuracy of diff.mark_passage_moves",
+        "Moved passages: speed and accuracy of diff.mark_moves",
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "",
         f"{trials} trials per book and kind of line; {MOVES} moves and {DECOYS} decoys "

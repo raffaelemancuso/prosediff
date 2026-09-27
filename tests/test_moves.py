@@ -2,7 +2,7 @@
 
 import pytest
 
-from prosediff import Options, compare_paths, render
+from prosediff import MoveSettings, Options, compare_paths, render
 from prosediff.diff import MIN_MOVE_CHARS, align, mark_moves
 
 EDITED = "This long sentence travels to the end of the file, almost as it was."
@@ -38,7 +38,7 @@ def test_short_lines_are_not_moves():
     rows, add, rem = align([short, "a"], ["a", short], context=None)
     assert "moved-in" not in {r.kind for r in rows}
     assert (add, rem) == (1, 1)
-    mark_moves([])  # no rows, no moves, no error
+    mark_moves([], [], [])  # no rows, no moves, no error
 
 
 def test_edited_line_moved_is_a_move_with_its_changes():
@@ -92,7 +92,9 @@ def test_move_similarity_validated(tmp_path):
     (tmp_path / "b.md").write_text("y\n")
     for bad in (0, -0.1, 1.5):
         with pytest.raises(ValueError, match="move similarity"):
-            compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(move_similarity=bad))
+            compare_paths(
+                tmp_path / "a.md", tmp_path / "b.md", Options(paragraph_moves=MoveSettings(bad))
+            )
 
 
 def test_where_a_moved_line_went_is_printed(tmp_path):
@@ -152,9 +154,31 @@ def test_two_move_defaults(tmp_path):
     (f,) = compare_paths(old, new, Options(by_sentence=True)).files
     assert "moved-in" in [r.kind for r in f.rows]
     # the paragraph setting leaves sentences alone; their own setting does not
-    (f,) = compare_paths(old, new, Options(by_sentence=True, move_similarity=0.99)).files
+    (f,) = compare_paths(
+        old, new, Options(by_sentence=True, paragraph_moves=MoveSettings(0.99))
+    ).files
     assert "moved-in" in [r.kind for r in f.rows]
     (f,) = compare_paths(
-        old, new, Options(by_sentence=True, sentence_move_similarity=similarity)
+        old, new, Options(by_sentence=True, sentence_moves=MoveSettings(similarity))
     ).files
     assert "moved-in" not in [r.kind for r in f.rows]
+
+
+def test_edited_moves_past_the_pair_limit_share_rare_words(monkeypatch):
+    """Past MOVE_MAX_CELLS pairs of a removed and an added line, the edited
+    moves are still found, among the pairs sharing rare words."""
+    from prosediff import diff
+
+    lines = [
+        "The harbour committee reviewed the fishing quotas for the coming season.",
+        "Volunteers repainted the lighthouse railings before the winter storms.",
+    ]
+    edited = [
+        lines[1].replace("before", "ahead of"),
+        lines[0].replace("coming", "next"),
+    ]
+    old = [*lines, "a", "b"]
+    new = ["a", "b", *edited]
+    monkeypatch.setattr(diff, "MOVE_MAX_CELLS", 3)  # 2 x 2 pairs: past it
+    rows = align(old, new, context=None, move_passages=False)[0]
+    assert sorted(r.right_no for r in rows if r.kind == "moved-in") == [3, 4]
