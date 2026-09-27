@@ -83,3 +83,21 @@ def test_reference_without_definition_keeps_its_label():
     old, new, notes = set_aside(["See [^x] here."], ["See [^x] there."], footnote_similarity)
     assert old[0][4] == new[0][4] and STAND_IN.match(old[0][4])
     assert notes.old[old[0][4]] == notes.new[new[0][4]] == "x"
+
+
+def test_no_stand_in_left_where_moved_passages_are_hidden(tmp_path):
+    """A row with a moved passage keeps how it looked without it, shown when
+    moved passages are hidden: its footnotes get their numbers back too."""
+    sentence = "The committee met twice in March to review the draft budget.[^1]"
+    rest = "\n\nkeep\n\nNumbers came."
+    old = f"Opening remarks were brief. {sentence} Then everyone left.[^2]{rest}\n"
+    new = f"Opening remarks were brief. Then everyone left.[^2]{rest} {sentence}\n"
+    notes = "\n[^1]: The first note.\n\n[^2]: The second note.\n"
+    (tmp_path / "old.md").write_text(old + notes)
+    (tmp_path / "new.md").write_text(new + notes)
+    c = compare_paths(tmp_path / "old.md", tmp_path / "new.md", context=3)
+    (f,) = c.files
+    assert any(r.without_passages for r in f.rows)
+    html = render(c)
+    assert 'class="pv-off"' in html
+    assert not STAND_IN.search(html)

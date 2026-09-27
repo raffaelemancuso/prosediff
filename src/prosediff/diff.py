@@ -2460,8 +2460,10 @@ def build_files(
         if fn is not None and (fn.old or fn.new):
             for r in fd.rows:
                 for row in [r, *r.hidden]:
-                    row.left = footnotes.restore(row.left, fn.old)
-                    row.right = footnotes.restore(row.right, fn.new)
+                    for view in (row, row.without_passages):
+                        if view is not None:
+                            view.left = footnotes.restore(view.left, fn.old)
+                            view.right = footnotes.restore(view.right, fn.new)
 
     panel: list[CommentEntry] = []
     if len(comments):
@@ -2479,8 +2481,10 @@ def build_files(
                     r.first_of_change = True
             for r in fd.rows:
                 for row in [r, *r.hidden]:
-                    row.left = show_comments(row.left, comments)
-                    row.right = show_comments(row.right, comments, added)
+                    for view in (row, row.without_passages):
+                        if view is not None:
+                            view.left = show_comments(view.left, comments)
+                            view.right = show_comments(view.right, comments, added)
     return panel
 
 

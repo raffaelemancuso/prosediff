@@ -195,3 +195,18 @@ def test_comments_panel_statuses_and_links(tmp_path):
     assert by_text["New remark."].icon == NEW_COMMENT_MARK
     assert by_text["Old remark."].icon == COMMENT_MARK
     assert not PLACEHOLDER.search(html)  # every comment became a marker
+
+
+def test_no_placeholder_left_where_moved_passages_are_hidden(tmp_path):
+    """A row with a moved passage keeps how it looked without it, shown when
+    moved passages are hidden: its comments become markers too."""
+    sentence = "The committee met twice in March to review the draft budget."
+    rest = "\n\nkeep\n\nNumbers came."
+    old = f"Opening remarks were brief. {sentence} Then everyone left.{rest}\n"
+    new = f"Opening remarks{NOTE} were brief. Then everyone left.{rest} {sentence}\n"
+    c = compare_paths(*two_folders(tmp_path, "p.md", old, new))
+    (f,) = c.files
+    assert any(r.without_passages for r in f.rows)
+    html = render(c)
+    assert 'class="pv-off"' in html
+    assert not PLACEHOLDER.search(html)
