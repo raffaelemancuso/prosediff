@@ -25,6 +25,8 @@ image is written [image], with its description when it has one.
 import re
 from collections import Counter
 from io import BytesIO
+from itertools import groupby
+from operator import itemgetter
 
 from odfdo import Document, Element
 
@@ -41,8 +43,10 @@ from prosediff.document import (
     NoteRef,
     Span,
     Text,
+    attach_carried,
     comments_in,
     comments_only,
+    join_paragraphs,
     markdown,
     strip,
     to_markdown,
@@ -101,6 +105,12 @@ class OdtError(RuntimeError):
 
 # An inline of a paragraph and the tracked insertion it belongs to (or None).
 Tagged = tuple[object, str | None]
+
+
+def _text_of(el: Element, path: str) -> str:
+    """The text of the element at path under el, "" when there is none."""
+    found = el.get_element(path)
+    return (found.text if found is not None else "") or ""
 
 
 class Reader:
@@ -179,12 +189,10 @@ class Reader:
                 change = region.get_element(f"text:{kind}")
                 if change is None:
                     continue
-                author = change.get_element("office:change-info/dc:creator")
-                date = change.get_element("office:change-info/dc:date")
                 self.regions[cid] = (
                     kind,
-                    (author.text if author is not None else "") or "",
-                    (date.text if date is not None else "") or "",
+                    _text_of(change, "office:change-info/dc:creator"),
+                    _text_of(change, "office:change-info/dc:date"),
                     change,
                 )
 
@@ -218,13 +226,8 @@ class Reader:
         """The inlines of a paragraph, its insertions settled: kept, dropped
         (their comments kept) or wrapped in insertion spans."""
         out: list = []
-        k = 0
-        while k < len(tagged):
-            cid = tagged[k][1]
-            group = []
-            while k < len(tagged) and tagged[k][1] == cid:
-                group.append(tagged[k][0])
-                k += 1
+        for cid, run in groupby(tagged, key=itemgetter(1)):
+            group = [i for i, _ in run]
             if cid is None or self.changes == "accept":
                 out += group
             elif self.changes == "reject":
@@ -238,14 +241,12 @@ class Reader:
 
     def comment(self, el: Element) -> CommentMark:
         self.comment_count += 1
-        author = el.get_element("dc:creator")
-        date = el.get_element("dc:date")
         texts = [p.text_recursive for p in el.get_elements("text:p")]
         return CommentMark(
             str(self.comment_count - 1),
-            (author.text if author is not None else "") or "",
+            _text_of(el, "dc:creator"),
             " ".join(" ".join(texts).split()),
-            ((date.text if date is not None else "") or "")[:19],
+            _text_of(el, "dc:date")[:19],
         )
 
     def text(self, text: str | None, styles: frozenset[str]) -> list[Tagged]:
@@ -306,7 +307,7 @@ class Reader:
                         ),
                         "",
                     )
-                    out.append((Image(f"[image: {descr}]" if descr else "[image]"), where))
+                    out.append((Image.described(descr), where))
             elif tag not in SILENT:
                 # fields (dates, page numbers, cross-references) and the like
                 out += self.inline(child, styles)
@@ -320,14 +321,7 @@ class Reader:
 
     def cell(self, paragraphs: list[Element]) -> list:
         """The inlines of several paragraphs, as one, a space between them."""
-        out: list = []
-        for p in paragraphs:
-            inlines = self.paragraph_inlines(p)
-            if markdown(inlines):
-                if out:
-                    out.append(Text(" "))
-                out += inlines
-        return out
+        return join_paragraphs(self.paragraph_inlines(p) for p in paragraphs)
 
     def paragraph(self, el: Element, item: bool = False) -> Block | None:
         inlines = self.paragraph_inlines(el)
@@ -384,17 +378,8 @@ class Reader:
         body = self.document.body
         self.read_regions(body)
         out = self.blocks(body)
-        if self.carried:
-            if not out:
-                out.append(Block("p"))
-            last = out[-1]
-            if last.kind == "table" and last.rows and last.rows[-1]:
-                last.rows[-1][-1] += self.carried
-            elif last.kind == "table":
-                out.append(Block("p", self.carried))
-            else:
-                last.inlines += self.carried
-            self.carried = []
+        attach_carried(out, self.carried)
+        self.carried = []
         return out
 
 

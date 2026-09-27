@@ -65,6 +65,10 @@ class Image:
 
     text: str
 
+    @classmethod
+    def described(cls, description: str | None) -> "Image":
+        return cls(f"[image: {description}]" if description else "[image]")
+
 
 Inline = Text | Span | CommentMark | NoteRef | Image
 
@@ -135,17 +139,33 @@ def strip(inlines: list) -> list:
     return out
 
 
-def plain(inlines: Iterable) -> str:
-    """The text of inlines, as a reader sees it."""
-    out = []
-    for i in inlines:
-        if isinstance(i, (Text, Image)):
-            out.append(i.text)
-        elif isinstance(i, Span):
-            out.append(plain(i.children))
-        elif isinstance(i, NoteRef):
-            out.append(f"[^{i.number}]")
-    return "".join(out)
+def join_paragraphs(paragraphs: Iterable[list]) -> list:
+    """The inlines of several paragraphs (a table cell's), as one, a space
+    between them; paragraphs without text left out."""
+    out: list = []
+    for inlines in paragraphs:
+        if markdown(inlines):
+            if out:
+                out.append(Text(" "))
+            out += inlines
+    return out
+
+
+def attach_carried(blocks: list[Block], carried: list) -> None:
+    """Join to the last block the comments carried past the last paragraph
+    (those of paragraphs deleted as a whole): to its last table cell, or
+    after a table without cells, in a paragraph of their own."""
+    if not carried:
+        return
+    if not blocks:
+        blocks.append(Block("p"))
+    last = blocks[-1]
+    if last.kind == "table" and last.rows and last.rows[-1]:
+        last.rows[-1][-1] += carried
+    elif last.kind == "table":
+        blocks.append(Block("p", carried))
+    else:
+        last.inlines += carried
 
 
 # Markdown -----------------------------------------------------------------------
@@ -267,9 +287,7 @@ class Line(str):
 
     def cut(self, start: int, end: int) -> "Line":
         """The line from start to end, with its styles."""
-        return Line(
-            str.__getitem__(self, slice(start, end)), self.styles[start:end], self.lang, self.kind
-        )
+        return Line(self[start:end], self.styles[start:end], self.lang, self.kind)
 
     def replaced(self, text: str, styles: list[frozenset[str]]) -> "Line":
         """Another text of the same paragraph."""
@@ -285,14 +303,14 @@ def sub(pattern: re.Pattern, repl: Callable[[re.Match], str], line: str, count: 
     for n, m in enumerate(pattern.finditer(line)):
         if count and n == count:
             break
-        text.append(str.__getitem__(line, slice(pos, m.start())))
+        text.append(line[pos : m.start()])
         styles += line.styles[pos : m.start()]
         new = repl(m)
         style = line.styles[m.start()] if m.end() > m.start() else frozenset()
         text.append(new)
         styles += [style] * len(new)
         pos = m.end()
-    text.append(str.__getitem__(line, slice(pos, None)))
+    text.append(line[pos:])
     styles += line.styles[pos:]
     return line.replaced("".join(text), styles)
 

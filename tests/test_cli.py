@@ -175,10 +175,9 @@ def test_cli_split(tmp_path, capsys):
     assert "data-split=" not in out.read_text(encoding="utf-8")
     for bad in (
         ["--split", "both", "-o", str(tmp_path / "r.diff")],
-        ["--by-sentence"],
         ["--sentence-move-similarity", "1.5"],
     ):
         with pytest.raises(SystemExit):
             main([*files, *bad])
     err = capsys.readouterr().err
-    assert "HTML report" in err and "unrecognized arguments: --by-sentence" in err
+    assert "HTML report" in err and "--sentence-move-similarity: move similarity" in err

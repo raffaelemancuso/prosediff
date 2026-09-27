@@ -87,12 +87,13 @@ def match_footnotes(
     taken = set(matched.values())
     rest_new = [k for k in new if k not in taken]
     candidates = []
-    for a in rest_old:
+    for k, a in enumerate(rest_old):
         for b in rest_new:
             s = similarity(old[a], new[b])
             if s >= FOOTNOTE_SIMILARITY:
-                candidates.append((s, a, b))
-    for _, a, b in sorted(candidates, key=lambda c: (-c[0], rest_old.index(c[1]), c[2])):
+                candidates.append((-s, k, b, a))
+    # the most similar first; on a tie, in the old order, then by new label
+    for *_, b, a in sorted(candidates):
         if a not in matched and b not in taken:
             matched[a] = b
             taken.add(b)
@@ -157,11 +158,17 @@ def set_aside(
     return replace(old, old_map), replace(new, new_map), notes
 
 
+def numbered(text: str, labels: dict[str, str], quote=str) -> str:
+    """Text with each stand-in written as its footnote, [^label] (quote:
+    how the reference is written into it, e.g. escaped for HTML)."""
+    return STAND_IN.sub(lambda m: quote(f"[^{labels.get(m[0], '?')}]"), text)
+
+
 def restore(markup: Markup, labels: dict[str, str]) -> Markup:
     """A side's markup with its own footnote numbers back."""
     if not STAND_IN.search(str(markup)):
         return markup
-    return Markup(STAND_IN.sub(lambda m: str(escape(f"[^{labels.get(m[0], '?')}]")), str(markup)))
+    return Markup(numbered(str(markup), labels, lambda ref: str(escape(ref))))
 
 
 def use_for_tooltips(notes: Footnotes | None):
@@ -179,4 +186,4 @@ def plain(text: str) -> str:
     labels = _labels.get()
     if not labels or not STAND_IN.search(text):
         return text
-    return STAND_IN.sub(lambda m: f"[^{labels.get(m[0], '?')}]", text)
+    return numbered(text, labels)

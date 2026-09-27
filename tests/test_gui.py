@@ -444,6 +444,31 @@ def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
     assert s.old == str(old)
 
 
+def test_a_failed_comparison_shows_an_error(root, tmp_path, monkeypatch):
+    """An error in the comparison's thread reaches the window: an error box,
+    and the Compare button usable again, not a window waiting forever."""
+    shown = []
+    monkeypatch.setattr(gui.messagebox, "showerror", lambda title, text: shown.append(text))
+    app = App(
+        root,
+        Settings(
+            mode="files",
+            old=str(tmp_path / "a.md"),
+            new=str(tmp_path / "gone.md"),
+            open_page=False,
+        ),
+    )
+    app.run()
+    for _ in range(300):  # the comparison runs in a thread: at most 30 s
+        root.update()
+        if not app.button.instate(["disabled"]):
+            break
+        root.after(100)
+    assert not app.button.instate(["disabled"])
+    assert app.status.get() == "Not compared."
+    assert shown and "no such file or folder" in shown[0]
+
+
 def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     """Paragraphs and sentences have their own moved-line settings, shown at
     their defaults and remembered only when changed; comparing both ways

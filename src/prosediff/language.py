@@ -180,6 +180,15 @@ def most_letters(counts: Counter[str]) -> str | None:
     return counts.most_common(1)[0][0] if counts else None
 
 
+def languages_of(letters, paragraphs) -> tuple[str | None, Counter[str]]:
+    """The language most letters of the paragraphs are in, and the letters
+    in each language (letters: those of one paragraph, by language)."""
+    counts: Counter[str] = Counter()
+    for p in paragraphs:
+        counts += letters(p)
+    return most_letters(counts), counts
+
+
 class WordLanguages:
     """The languages the runs of a Word document's paragraphs are marked with.
 
@@ -249,12 +258,7 @@ class WordLanguages:
         return counts
 
     def of(self, paragraphs) -> tuple[str | None, Counter[str]]:
-        """The language most letters of the paragraphs are in, and the
-        letters in each language."""
-        counts: Counter[str] = Counter()
-        for p in paragraphs:
-            counts += self.letters(p)
-        return most_letters(counts), counts
+        return languages_of(self.letters, paragraphs)
 
 
 class OdtLanguages:
@@ -324,12 +328,7 @@ class OdtLanguages:
         return counts
 
     def of(self, paragraphs) -> tuple[str | None, Counter[str]]:
-        """The language most letters of the paragraphs are in, and the
-        letters in each language."""
-        counts: Counter[str] = Counter()
-        for p in paragraphs:
-            counts += self.letters(p)
-        return most_letters(counts), counts
+        return languages_of(self.letters, paragraphs)
 
 
 # How the HTML report shows a language ----------------------------------------------------

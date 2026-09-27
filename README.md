@@ -387,10 +387,10 @@ so that the total similarity is highest without crossing, and the lines left
 in between are paired in order. A line inserted in the middle of an edited
 paragraph thus stands alone instead of shifting every pair below it. Paired
 lines are compared again word by word, with patiencediff's patience diff
-(difflib's when patiencediff is not installed: the same result on all but a
-few lines in thousands, at a fourteenth of the speed; the matchers compared
-are in `docs/word_matcher_benchmark.md`), and a word replaced by a single
-word is compared letter by letter when at least half its letters survive.
+(difflib's result on all but a few lines in thousands, fourteen times as
+fast; the matchers compared are in `docs/word_matcher_benchmark.md`), and a
+word replaced by a single word is compared letter by letter when at least
+half its letters survive.
 Words removed or added between unchanged text slide, as git slides its
 hunks, to where they read best: a removed sentence takes its own full stop,
 not the one of the sentence before it, and starts where the sentence does,

@@ -29,13 +29,9 @@ import git
 import psutil
 from charset_normalizer import from_bytes
 from markupsafe import Markup
+from patiencediff import PatienceSequenceMatcher
 from rapidfuzz import fuzz
 from rapidfuzz.distance import Indel, Levenshtein
-
-try:
-    from patiencediff import PatienceSequenceMatcher
-except ImportError:  # the words are then paired by difflib (_word_matcher)
-    PatienceSequenceMatcher = None
 
 from prosediff import document, footnotes
 from prosediff.comments import (  # noqa: F401  (re-exported)
@@ -68,9 +64,9 @@ from prosediff.sources import (
 )
 
 # The styles of a document's line the text formats write: its formatting,
-# and its tracked changes; and a heading's style (h1 ... h6).
+# and its tracked changes; and a heading's style (h1 ... h6), its level.
 TEXT_MARKS = frozenset(document.FORMATTING) | {"tc-ins", "tc-del"}
-HEADING = re.compile(r"h[1-6]")
+HEADING = re.compile(r"h([1-6])")
 
 # Windows opens a console for a console program (git, cmd.exe) started from
 # a process without one, such as the window of prosediff-gui: a terminal
@@ -254,6 +250,11 @@ class Row:
         return self.kind not in ("equal", "skip")
 
 
+def all_rows(rows: list[Row]) -> list[Row]:
+    """The rows and, after each skip row, the unchanged rows it hides."""
+    return [row for r in rows for row in (r, *r.hidden)]
+
+
 @dataclass
 class RowView:
     """A row's HTML, changes and word counts as they were before its moved
@@ -364,7 +365,7 @@ class FileDiff:
     @property
     def formatted_rows(self) -> int:
         """How many lines' formatting changed."""
-        return sum(bool(row.format_changes) for r in self.rows for row in [r, *r.hidden])
+        return sum(bool(row.format_changes) for row in all_rows(self.rows))
 
     @property
     def without_passages(self) -> Counts:
@@ -676,21 +677,20 @@ FORMATS = {
     "sub": ("made {} subscript", "made {} not subscript"),
     "link": ("made {} a link", "made {} not a link"),
 }
-HEADING_STYLE = re.compile(r"h([1-6])")
 FMT = Markup('<span class="fmt" data-fmt="{}">{}</span>')
 
 
 def formatting(styles: set[str] | frozenset[str]) -> frozenset[str]:
     """The styles of a character that are formatting."""
-    return frozenset(s for s in styles if s in FORMATS or HEADING_STYLE.fullmatch(s))
+    return frozenset(s for s in styles if s in FORMATS or HEADING.fullmatch(s))
 
 
 def describe_format(text: str, old: frozenset[str], new: frozenset[str]) -> list[str]:
     """How the formatting of a piece of text changed, in plain English."""
     q = quote(text)
     out = []
-    old_heading = next((int(s[1]) for s in old if HEADING_STYLE.fullmatch(s)), 0)
-    new_heading = next((int(s[1]) for s in new if HEADING_STYLE.fullmatch(s)), 0)
+    old_heading = next((int(s[1]) for s in old if HEADING.fullmatch(s)), 0)
+    new_heading = next((int(s[1]) for s in new if HEADING.fullmatch(s)), 0)
     if old_heading != new_heading:
         out.append(
             f"made {q} a level {new_heading} heading" if new_heading else f"made {q} not a heading"
@@ -839,20 +839,13 @@ def word_ops(old: str, new: str) -> list[Opcode]:
 WORD_OPS_CACHE = 4096
 
 
-def _word_matcher(a: list[str], b: list[str]):
-    """The words of two lines paired by patiencediff's patience diff (in
-    Rust), or by difflib's when it is not installed: the same pairing but on
-    4 of 2,776 changed lines, 14 times as fast (docs/word_matcher_benchmark.md)."""
-    if PatienceSequenceMatcher is None:
-        return difflib.SequenceMatcher(None, a, b, autojunk=False)
-    return PatienceSequenceMatcher(None, a, b)
-
-
 @lru_cache(maxsize=WORD_OPS_CACHE)
 def _word_ops(old: str, new: str) -> tuple[Opcode, ...]:
     a, b = TOKEN.findall(old), TOKEN.findall(new)
     ao, bo = _offsets(a), _offsets(b)
-    matcher = _word_matcher(a, b)
+    # patiencediff's patience diff (in Rust): difflib's pairing but on 4 of
+    # 2,776 changed lines, 14 times as fast (docs/word_matcher_benchmark.md)
+    matcher = PatienceSequenceMatcher(None, a, b)
     ops = [
         (op, ao[i1], ao[i2], bo[j1], bo[j2])
         for op, i1, i2, j1, j2 in merge_across_spaces(matcher.get_opcodes(), a)
@@ -1098,11 +1091,6 @@ def footnote_similarity(old: str, new: str) -> float:
     return token_similarity(similarity_tokens(old), similarity_tokens(new), 0)
 
 
-def similarity(old: str, new: str) -> float:
-    """Similarity of two lines, 0 to 1; 0 below the pairing threshold."""
-    return token_similarity(similarity_tokens(old), similarity_tokens(new), PAIRING_THRESHOLD)
-
-
 def pair_lines(old: list[str], new: list[str]) -> list[tuple[int | None, int | None]]:
     """Pair the lines of a replaced block, in order.
 
@@ -1314,17 +1302,25 @@ def inserted_row(number: int, line: str, style: Styler) -> Row:
     )
 
 
+def _spaced(line: str) -> str:
+    return " ".join(line.split())
+
+
 def move_key(line: str) -> str | None:
     """What identifies a line as moved: its words, spacing aside."""
-    key = " ".join(line.split())
+    key = _spaced(line)
     return key if len(key.replace(" ", "")) >= MIN_MOVE_CHARS else None
+
+
+def _move_ends(out: Row, into: Row) -> tuple[str, str]:
+    """Where a line or passage moved to (into's line) and came from (out's)."""
+    return into.right_label or f"{into.right_no:,}", out.left_label or f"{out.left_no:,}"
 
 
 def _make_move(out: Row, into: Row, style: Styler, pair: int = 0) -> None:
     out.kind, into.kind = "moved-out", "moved-in"
     out.move_pair = into.move_pair = pair
-    to_line = into.right_label or f"{into.right_no:,}"
-    from_line = out.left_label or f"{out.left_no:,}"
+    to_line, from_line = _move_ends(out, into)
     if move_key(out.text) == move_key(into.text):
         out.changes = [f"moved to line {to_line}"]
         into.changes = [f"moved from line {from_line}"]
@@ -1337,12 +1333,12 @@ def _make_move(out: Row, into: Row, style: Styler, pair: int = 0) -> None:
     out.words_removed, into.words_added = w.words_removed, w.words_added
 
 
-def _spaced(line: str) -> str:
-    return " ".join(line.split())
-
-
 def _sorted_tokens(line: str) -> list[str]:
     return sorted(similarity_tokens(line))
+
+
+def _indel(a, b, cutoff: float) -> float:
+    return Indel.normalized_similarity(a, b, score_cutoff=cutoff)
 
 
 # How alike two lines are for the moved-line matching, 0 to 1, each measure
@@ -1351,15 +1347,9 @@ def _sorted_tokens(line: str) -> list[str]:
 MOVE_ALGORITHMS = {
     # words and punctuation in common, in order: 2 x longest common
     # subsequence / total length
-    "tokens": (
-        similarity_tokens,
-        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
-    ),
+    "tokens": (similarity_tokens, _indel),
     # characters in common, in order (spacing aside)
-    "chars": (
-        _spaced,
-        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
-    ),
+    "chars": (_spaced, _indel),
     # words and punctuation: 1 - edits (insertions, deletions, substitutions)
     # / length of the longer line
     "levenshtein": (
@@ -1367,10 +1357,7 @@ MOVE_ALGORITHMS = {
         lambda a, b, cutoff: Levenshtein.normalized_similarity(a, b, score_cutoff=cutoff),
     ),
     # words and punctuation in common, whatever their order
-    "token-sort": (
-        _sorted_tokens,
-        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
-    ),
+    "token-sort": (_sorted_tokens, _indel),
     # the words both lines share against the rest of each, whatever their
     # order (a line inside a longer one scores high)
     "token-set": (
@@ -1402,6 +1389,21 @@ def check_move_algorithm(name: str) -> None:
         )
 
 
+def move_scorer(similarity: float, algorithm: str) -> tuple[Callable, Callable]:
+    """algorithm's (prepare, score): what a line becomes before it is
+    compared, and the score of two of them, 0 below similarity."""
+    prepare, score = MOVE_ALGORITHMS[algorithm]
+    # "at least similarity": rapidfuzz's cutoff can turn down a score right
+    # at it, so the scores are taken from a little below and then checked
+    cutoff = max(0.0, similarity - MOVE_MARGIN)
+
+    def at_least(a, b) -> float:
+        s = score(a, b, cutoff)
+        return s if s and s >= similarity - MOVE_TOLERANCE else 0.0
+
+    return prepare, at_least
+
+
 def mark_moves(
     rows: list[Row],
     style: Styler | None = None,
@@ -1430,17 +1432,13 @@ def mark_moves(
     ins = [r for r in rows if r.kind == "insert" and move_key(r.text)]
     if similarity >= 1 or not outs or not ins or len(outs) * len(ins) > MOVE_MAX_CELLS:
         return
-    prepare, score = MOVE_ALGORITHMS[algorithm]
+    prepare, score = move_scorer(similarity, algorithm)
     out_items = [prepare(r.text) for r in outs]
     in_items = [prepare(r.text) for r in ins]
-    # "at least similarity": rapidfuzz's cutoff can turn down a score right
-    # at it, so the scores are taken from a little below and then checked
-    cutoff = max(0.0, similarity - MOVE_MARGIN)
     candidates = []
     for a, ta in enumerate(out_items):
         for b, tb in enumerate(in_items):
-            s = score(ta, tb, cutoff)
-            if s and s >= similarity - MOVE_TOLERANCE:
+            if s := score(ta, tb):
                 candidates.append((s, a, b))
     used_out, used_in = set(), set()
     for _, a, b in sorted(candidates, key=lambda c: (-c[0], c[1], c[2])):
@@ -1571,19 +1569,33 @@ class MovedPassageSettings:
     )
 
     def check(self) -> None:
-        """Refuse values that make no sense, naming the setting."""
+        """Refuse values that make no sense (SettingError, naming the setting)."""
         for f in fields(self):
             value = getattr(self, f.name)
             if f.metadata["share"] and not 0 < value <= 1:
-                raise ValueError(f"passage setting {f.name} must be above 0 and at most 1")
+                raise SettingError(f.name, "must be above 0 and at most 1")
             if not f.metadata["share"] and value < f.metadata["low"]:
-                raise ValueError(f"passage setting {f.name} must be {f.metadata['low']} or more")
+                raise SettingError(f.name, f"must be {f.metadata['low']} or more")
+
+
+class SettingError(ValueError):
+    """A moved-passage setting out of range; name is its field's."""
+
+    def __init__(self, name: str, problem: str) -> None:
+        super().__init__(f"passage setting {name} {problem}")
+        self.name = name
 
 
 MOVED_PASSAGE_DEFAULTS = MovedPassageSettings()
 
 
-@dataclass
+def setting_type(f) -> type:
+    """The type of a MovedPassageSettings field's values: float for a
+    share, else int."""
+    return float if f.metadata["share"] else int
+
+
+@dataclass(eq=False)  # each passage is itself, hashed by identity
 class Passage:
     row: Row
     old: bool  # on the old side of the row, or the new
@@ -1734,22 +1746,21 @@ def candidate_pairs(
     passage's content words), the most rare words shared first."""
     if len(outs) * len(ins) <= ps.max_pairs:
         return [(a, b) for a in outs for b in ins]
-    words = {id(p): set(words_of(p)) for p in [*outs, *ins]}
+    words = {p: set(words_of(p)) for p in [*outs, *ins]}
     df = Counter(w for ws in words.values() for w in ws)
     limit = max(ps.rare_min, ps.rare_share * len(words))
     index: dict[str, list[Passage]] = defaultdict(list)
     for b in ins:
-        for w in words[id(b)]:
+        for w in words[b]:
             if df[w] <= limit:
                 index[w].append(b)
     shared: Counter = Counter()
-    by_id = {id(p): p for p in [*outs, *ins]}
     for a in outs:
-        for w in words[id(a)]:
+        for w in words[a]:
             if df[w] <= limit:
                 for b in index[w]:
-                    shared[id(a), id(b)] += 1
-    return [(by_id[a], by_id[b]) for (a, b), _ in shared.most_common(ps.max_pairs)]
+                    shared[a, b] += 1
+    return [pair for pair, _ in shared.most_common(ps.max_pairs)]
 
 
 def mark_passage_moves(
@@ -1772,23 +1783,20 @@ def mark_passage_moves(
     changed = [r for r in rows if r.kind in ("delete", "insert", "replace")]
     free: list[Passage] = []
     for r in changed:
-        o = old[r.left_no - 1] if r.left_no is not None else ""
-        n = new[r.right_no - 1] if r.right_no is not None else ""
-        free += passages_of(r, o, n, ps)
-    prepare, score = MOVE_ALGORITHMS[algorithm]
-    cutoff = max(0.0, similarity - MOVE_MARGIN)
+        free += passages_of(r, *_row_lines(r, old, new), ps)
+    prepare, score = move_scorer(similarity, algorithm)
 
     def line_of(p: Passage) -> str:
         return old[p.row.left_no - 1] if p.old else new[p.row.right_no - 1]
 
     # each passage's words and punctuation, and how many of each
-    tokens: dict[int, list[tuple[int, int, str]]] = {}
-    counts: dict[int, Counter] = {}
+    tokens: dict[Passage, list[tuple[int, int, str]]] = {}
+    counts: dict[Passage, Counter] = {}
 
     def index(passages: list[Passage]) -> None:
         for p in passages:
-            tokens[id(p)] = _tokens(line_of(p), p.start, p.end)
-            counts[id(p)] = Counter(t for *_, t in tokens[id(p)])
+            tokens[p] = _tokens(line_of(p), p.start, p.end)
+            counts[p] = Counter(t for *_, t in tokens[p])
 
     index(free)
 
@@ -1800,10 +1808,7 @@ def mark_passage_moves(
         # passages under MIN_MOVE_CHARS, which would make them all alike)
         if _spaced(a) == _spaced(b):
             return 1.0
-        if similarity >= 1:
-            return 0.0
-        s = score(prepare(a), prepare(b), cutoff)
-        return s if s and s >= similarity - MOVE_TOLERANCE else 0.0
+        return score(prepare(a), prepare(b)) if similarity < 1 else 0.0
 
     def scored(a: Passage, b: Passage, region: tuple[int, int, int, int]):
         """How alike the parts a1:a2 of a and b1:b2 of b are, cut down to
@@ -1824,8 +1829,8 @@ def mark_passage_moves(
         """How alike removed passage a and added passage b are, and the part
         of each that matches: of the whole of both, or of the longer one a
         window as long as the other."""
-        ta, tb = tokens[id(a)], tokens[id(b)]
-        common = sum((counts[id(a)] & counts[id(b)]).values())
+        ta, tb = tokens[a], tokens[b]
+        common = sum((counts[a] & counts[b]).values())
         if common < max(ps.min_words, similarity * min(len(ta), len(tb)) / 2):
             return None
         regions = [(a.start, a.end, b.start, b.end)]
@@ -1842,10 +1847,7 @@ def mark_passage_moves(
         return max(found) if found else None
 
     pair = max((r.move_pair for r in rows), default=0)
-    # the pairs of passages already scored, by id(): every passage is kept
-    # alive, so that no id is reused
-    tried: set[tuple[int, int]] = set()
-    alive = list(free)
+    tried: set[tuple[Passage, Passage]] = set()  # the pairs already scored
     for _ in range(ps.rounds):
         outs = [p for p in free if p.old]
         ins = [p for p in free if not p.old]
@@ -1853,21 +1855,21 @@ def mark_passage_moves(
             break
         candidates = []
         for a, b in candidate_pairs(outs, ins, lambda p: content_words(text(p), ps), ps):
-            if (id(a), id(b)) in tried:
+            if (a, b) in tried:
                 continue
-            tried.add((id(a), id(b)))
+            tried.add((a, b))
             if a.row is b.row and a.first_op <= b.last_op and b.first_op <= a.last_op:
                 continue  # the same change: an edit in place, not a move
             if m := match(a, b):
                 candidates.append((m, a, b))
-        used: set[int] = set()
+        used: set[Passage] = set()
         leftovers: list[Passage] = []
         for (_, a1, a2, b1, b2), a, b in sorted(
             candidates, key=lambda c: (-c[0][0], c[1].start, c[2].start)
         ):
-            if id(a) in used or id(b) in used:
+            if a in used or b in used:
                 continue
-            used |= {id(a), id(b)}
+            used |= {a, b}
             pair += 1
             _make_passage_move(a.row, a1, a2, b.row, b1, b2, old, new, style, pair)
             # what is left of the longer one, around the window
@@ -1878,8 +1880,7 @@ def mark_passage_moves(
                         leftovers.append(rest)
         if not used:
             break
-        free = [p for p in free if id(p) not in used] + leftovers
-        alive += leftovers
+        free = [p for p in free if p not in used] + leftovers
         index(leftovers)
     for r in changed:
         if r.old_moves or r.new_moves:
@@ -1914,8 +1915,7 @@ def _make_passage_move(
     other, and where it went or came from."""
     o, n = old[out.left_no - 1], new[into.right_no - 1]
     a, b = o[a1:a2], n[b1:b2]
-    to_line = into.right_label or f"{into.right_no:,}"
-    from_line = out.left_label or f"{out.left_no:,}"
+    to_line, from_line = _move_ends(out, into)
     a_styles, b_styles = _slice(style(o), a1, a2), _slice(style(n), b1, b2)
     edited = _spaced(a) != _spaced(b)
     if edited:
@@ -1941,11 +1941,17 @@ def _make_passage_move(
     )
 
 
+def _row_lines(row: Row, old: list[str], new: list[str]) -> tuple[str, str]:
+    """A row's old and new line ("" for the side it has none of)."""
+    o = old[row.left_no - 1] if row.left_no is not None else ""
+    n = new[row.right_no - 1] if row.right_no is not None else ""
+    return o, n
+
+
 def _redraw(row: Row, old: list[str], new: list[str], style: Styler) -> None:
     """A row's HTML, changes and word counts again, its moved passages set
     apart."""
-    o = old[row.left_no - 1] if row.left_no is not None else ""
-    n = new[row.right_no - 1] if row.right_no is not None else ""
+    o, n = _row_lines(row, old, new)
     if row.kind == "replace":
         w = word_diff(o, n, style(o), style(n), row.old_moves, row.new_moves)
         row.left, row.right = w.left, w.right
@@ -2028,8 +2034,7 @@ def unpair_moved(
     ]
     if not weak or similarity > 1:
         return pairs
-    prepare, score = MOVE_ALGORITHMS[algorithm]
-    cutoff = max(0.0, similarity - MOVE_MARGIN)
+    prepare, score = move_scorer(similarity, algorithm)
 
     def alike(a: str, b: str) -> bool:
         key_a, key_b = move_key(a), move_key(b)
@@ -2037,9 +2042,7 @@ def unpair_moved(
             return False
         if key_a == key_b:
             return True
-        return similarity < 1 and score(prepare(a), prepare(b), cutoff) >= (
-            similarity - MOVE_TOLERANCE
-        )
+        return similarity < 1 and bool(score(prepare(a), prepare(b)))
 
     removed = {i for tag, i, j in pairs if j is None and i is not None}
     added = {j for tag, i, j in pairs if i is None and j is not None}
@@ -2150,12 +2153,11 @@ def align(
         else:
             rows += equal_rows(i1, j1, n)
 
-    for r in rows:
-        for row in [r, *r.hidden]:
-            if row.left_no is not None:
-                row.left_label = old_labels[row.left_no - 1] if old_labels else str(row.left_no)
-            if row.right_no is not None:
-                row.right_label = new_labels[row.right_no - 1] if new_labels else str(row.right_no)
+    for row in all_rows(rows):
+        if row.left_no is not None:
+            row.left_label = old_labels[row.left_no - 1] if old_labels else str(row.left_no)
+        if row.right_no is not None:
+            row.right_label = new_labels[row.right_no - 1] if new_labels else str(row.right_no)
     mark_moves(rows, style, move_similarity, move_algorithm)
     if move_passages:
         mark_passage_moves(
@@ -2206,13 +2208,12 @@ def set_row_languages(rows: list[Row], old: list[str], new: list[str], language:
     """Each row's language, on each side: that of the paragraph of a
     document it comes from, if marked. Whether any is not the file's."""
     mixed = False
-    for r in rows:
-        for row in [r, *r.hidden]:
-            if row.left_no is not None:
-                row.left_lang = getattr(old[row.left_no - 1], "lang", "")
-            if row.right_no is not None:
-                row.right_lang = getattr(new[row.right_no - 1], "lang", "")
-            mixed = mixed or any(x and x != language for x in (row.left_lang, row.right_lang))
+    for row in all_rows(rows):
+        if row.left_no is not None:
+            row.left_lang = getattr(old[row.left_no - 1], "lang", "")
+        if row.right_no is not None:
+            row.right_lang = getattr(new[row.right_no - 1], "lang", "")
+        mixed = mixed or any(x and x != language for x in (row.left_lang, row.right_lang))
     return mixed
 
 
@@ -2266,6 +2267,28 @@ def without_shared_comments(
     return old, new, old_labels, new_labels
 
 
+Labels = list[str] | None
+
+
+def row_views(rows: list[Row]) -> list["Row | RowView"]:
+    """Every HTML of the rows the report may show: each row's (all_rows),
+    and how it looks with its moved passages hidden."""
+    return [v for row in all_rows(rows) for v in (row, row.without_passages) if v is not None]
+
+
+def _check_documents(entries: list[tuple[FileDiff, bytes, bytes]]) -> None:
+    """For language "document": refuse a text file, which marks none."""
+    for fd, old_bytes, new_bytes in entries:
+        if not (is_document(fd.old_path) or is_document(fd.new_path)) and not (
+            is_binary(old_bytes) or is_binary(new_bytes)
+        ):
+            raise SourceError(
+                f"language document: {fd.path} is not a Word or OpenDocument file, "
+                "the kind that records the language of its text; give a language "
+                "code (en, it, ...) or guess"
+            )
+
+
 def build_files(
     entries: list[tuple[FileDiff, bytes, bytes]],
     *,
@@ -2295,21 +2318,14 @@ def build_files(
     read is listed as a binary file, with the reason.
     """
     if language == DOCUMENT:
-        for fd, old_bytes, new_bytes in entries:
-            if not (is_document(fd.old_path) or is_document(fd.new_path)) and not (
-                is_binary(old_bytes) or is_binary(new_bytes)
-            ):
-                raise SourceError(
-                    f"language document: {fd.path} is not a Word or OpenDocument file, "
-                    "the kind that records the language of its text; give a language "
-                    "code (en, it, ...) or guess"
-                )
+        _check_documents(entries)
     comments = Comments()
     # to leave the comments out, they are first found, as when folding them
     fold = fold or drop_comments
-    texts: list[tuple[FileDiff, list[str], list[str]]] = []
-    labels: dict[int, tuple[list[str] | None, list[str] | None]] = {}
-    notes: dict[int, footnotes.Footnotes] = {}
+    # each file to compare: its lines, their labels, and its footnotes
+    texts: list[
+        tuple[FileDiff, list[str], list[str], Labels, Labels, footnotes.Footnotes | None]
+    ] = []
     # The languages a document marks are used, or the one given or guessed.
     marked_languages = language in (DOCUMENT, DEFAULT)
 
@@ -2396,6 +2412,7 @@ def build_files(
                 language, "\n".join(new_lines or old_lines), marked
             )
         old_labels = new_labels = None
+        notes = None
         if by_sentence and fd.markdown:
             rules = fd.language or "en"
             old_lines, old_labels = split_sentences(old_lines, rules)
@@ -2412,18 +2429,14 @@ def build_files(
                     old_lines, new_lines, old_labels, new_labels, every=drop_comments
                 )
             # Footnote numbers set aside: a renumbered footnote is no change.
-            old_lines, new_lines, notes[id(fd)] = footnotes.set_aside(
+            old_lines, new_lines, notes = footnotes.set_aside(
                 old_lines, new_lines, footnote_similarity
             )
-        labels[id(fd)] = (old_labels, new_labels)
-        texts.append((fd, old_lines, new_lines))
+        texts.append((fd, old_lines, new_lines, old_labels, new_labels, notes))
 
-    all_ops = git_opcodes([(old, new) for _, old, new in texts], ignore_whitespace)
-    for (fd, old, new), ops in zip(texts, all_ops, strict=False):
-        fn = notes.get(id(fd))
+    all_ops = git_opcodes([(old, new) for _, old, new, *_ in texts], ignore_whitespace)
+    for (fd, old, new, old_labels, new_labels, fn), ops in zip(texts, all_ops, strict=False):
         token = footnotes.use_for_tooltips(fn)
-        # the defaults of how the file is compared: prose sentence by sentence,
-        # or line by line (paragraphs, in prose)
         # the move settings of how the file is compared: prose sentence by
         # sentence, or line by line (paragraphs, in prose); None, the default
         sentences = by_sentence and fd.markdown
@@ -2449,8 +2462,8 @@ def build_files(
             max_hidden=max_hidden,
             move_similarity=similarity,
             move_algorithm=algorithm,
-            old_labels=labels[id(fd)][0],
-            new_labels=labels[id(fd)][1],
+            old_labels=old_labels,
+            new_labels=new_labels,
             pairs=pairs,
             move_passages=move_passages,
             moved_passage_settings=moved_passage_settings,
@@ -2458,16 +2471,13 @@ def build_files(
         footnotes.reset_tooltips(token)
         fd.mixed_languages = set_row_languages(fd.rows, old, new, fd.language)
         if fn is not None and (fn.old or fn.new):
-            for r in fd.rows:
-                for row in [r, *r.hidden]:
-                    for view in (row, row.without_passages):
-                        if view is not None:
-                            view.left = footnotes.restore(view.left, fn.old)
-                            view.right = footnotes.restore(view.right, fn.new)
+            for view in row_views(fd.rows):
+                view.left = footnotes.restore(view.left, fn.old)
+                view.right = footnotes.restore(view.right, fn.new)
 
     panel: list[CommentEntry] = []
     if len(comments):
-        for fd, old, new in texts:
+        for fd, old, new, *_ in texts:
             panel += comment_entries(fd, old, new, comments)
             # added since the base: only the new side has them
             added = frozenset(placeholders_in("\n".join(new))) - frozenset(
@@ -2479,12 +2489,9 @@ def build_files(
             for r in fd.rows:
                 if r.kind != "skip" and (placeholders_in(r.left) or placeholders_in(r.right)):
                     r.first_of_change = True
-            for r in fd.rows:
-                for row in [r, *r.hidden]:
-                    for view in (row, row.without_passages):
-                        if view is not None:
-                            view.left = show_comments(view.left, comments)
-                            view.right = show_comments(view.right, comments, added)
+            for view in row_views(fd.rows):
+                view.left = show_comments(view.left, comments)
+                view.right = show_comments(view.right, comments, added)
     return panel
 
 
@@ -2498,7 +2505,7 @@ def line_markdown(line: str) -> str:
     out, k = [], 0
     for key, run in groupby(line.styles, lambda st: st & TEXT_MARKS):
         n = len(list(run))
-        text = document.markdown([document.Text(str.__getitem__(line, slice(k, k + n)), key)])
+        text = document.markdown([document.Text(line[k : k + n], key)])
         if "tc-ins" in key:
             text = f"{{++{text}++}}"
         elif "tc-del" in key:
@@ -2514,7 +2521,7 @@ def diff_line(line: str, notes: dict[str, str]) -> str:
     """A compared line of prose as the text formats write it: its formatting
     in Markdown (line_markdown) and its footnotes by their own numbers; its
     comments stay placeholders, for comment_text."""
-    return footnotes.STAND_IN.sub(lambda m: f"[^{notes.get(m[0], '?')}]", line_markdown(line))
+    return footnotes.numbered(line_markdown(line), notes)
 
 
 def comment_text(line: str, comments: Comments | None) -> str:
@@ -2541,7 +2548,7 @@ def comment_entries(
     old_set = set(placeholders_in("\n".join(old)))
     new_set = set(placeholders_in("\n".join(new)))
     located: dict[tuple[str, str], Row] = {}
-    rows = [row for r in fd.rows for row in ([r, *r.hidden])]
+    rows = all_rows(fd.rows)
     for row in rows:
         for side, markup in (("new", row.right), ("old", row.left)):
             for ph in placeholders_in(markup):
@@ -2571,10 +2578,39 @@ def comment_entries(
 
 # Repository level -------------------------------------------------------------
 
+# What becomes of the comments (--comments): set apart as markers, compared
+# as text, or left out.
+COMMENT_MODES = ("markers", "text", "none")
+
+
+def comment_options(mode: str) -> dict[str, bool]:
+    """The options of compare() and compare_paths() for a comment mode."""
+    return {"fold_comments_md": mode != "text", "drop_comments": mode == "none"}
+
 
 def check_move_similarity(value: float | None) -> None:
     if value is not None and not 0 < value <= 1:
         raise ValueError(f"move similarity must be above 0 and at most 1, not {value}")
+
+
+def _checked_options(
+    move_similarity: float | None,
+    sentence_move_similarity: float | None,
+    move_algorithm: str | None,
+    sentence_move_algorithm: str | None,
+    moved_passage_settings: MovedPassageSettings,
+    language: str,
+    encoding: str,
+) -> tuple[str, str]:
+    """Refuse the options of compare() and compare_paths() that make no
+    sense (ValueError); the language and the encoding in canonical form."""
+    for value in (move_similarity, sentence_move_similarity):
+        check_move_similarity(value)
+    for name in (move_algorithm, sentence_move_algorithm):
+        if name is not None:
+            check_move_algorithm(name)
+    moved_passage_settings.check()
+    return normalize_language(language), check_encoding(encoding)
 
 
 def in_paths(path: str, paths: list[str] | None) -> bool:
@@ -2653,14 +2689,15 @@ def compare(
     codec's name, or "auto" (the default), UTF-8 unless the file shows it is
     not, then guessed (decode_text).
     """
-    for value in (move_similarity, sentence_move_similarity):
-        check_move_similarity(value)
-    for name in (move_algorithm, sentence_move_algorithm):
-        if name is not None:
-            check_move_algorithm(name)
-    moved_passage_settings.check()
-    language = normalize_language(language)
-    encoding = check_encoding(encoding)
+    language, encoding = _checked_options(
+        move_similarity,
+        sentence_move_similarity,
+        move_algorithm,
+        sentence_move_algorithm,
+        moved_passage_settings,
+        language,
+        encoding,
+    )
     if cached and target is not None:
         raise ValueError("cached compares a commit with the index: give no target")
     if untracked and (target is not None or cached):
@@ -2787,14 +2824,15 @@ def compare_paths(
     file's name, or its path within the folder for a pattern with a "/",
     ignoring case. The other options are those of compare().
     """
-    for value in (move_similarity, sentence_move_similarity):
-        check_move_similarity(value)
-    for name in (move_algorithm, sentence_move_algorithm):
-        if name is not None:
-            check_move_algorithm(name)
-    moved_passage_settings.check()
-    language = normalize_language(language)
-    encoding = check_encoding(encoding)
+    language, encoding = _checked_options(
+        move_similarity,
+        sentence_move_similarity,
+        move_algorithm,
+        sentence_move_algorithm,
+        moved_passage_settings,
+        language,
+        encoding,
+    )
     old, new = Path(old), Path(new)
     entries: list[tuple[FileDiff, bytes, bytes]] = []
     if old.is_file() and new.is_file():

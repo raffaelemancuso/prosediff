@@ -5,7 +5,7 @@ from helpers import docx, docx_xml
 
 from prosediff import compare_paths, render
 from prosediff.cli import main
-from prosediff.sources import SourceError, docx_to_markdown
+from prosediff.sources import SourceError, document_to_markdown
 
 
 def test_two_files_with_different_names(tmp_path):
@@ -74,10 +74,10 @@ def test_comment_on_deleted_text_is_kept(tmp_path):
         comments='<w:comment w:id="0" w:author="Anna" w:date="2026-01-01T00:00:00Z">'
         "<w:p><w:r><w:t>Why?</w:t></w:r></w:p></w:comment>",
     )
-    accepted = docx_to_markdown(d.read_bytes(), "a.docx", "accept").decode()
+    accepted = document_to_markdown(d.read_bytes(), "a.docx", "accept").decode()
     assert "gone" not in accepted and "Keep" in accepted and " new" in accepted
     assert '[Why?]{.comment-start id="0" author="Anna"' in accepted
-    rejected = docx_to_markdown(d.read_bytes(), "a.docx", "reject").decode()
+    rejected = document_to_markdown(d.read_bytes(), "a.docx", "reject").decode()
     assert "gone" in rejected and "new" not in rejected and "Why?" in rejected
 
 

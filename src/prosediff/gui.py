@@ -34,20 +34,24 @@ import ttkbootstrap as ttk
 
 from prosediff.diff import (
     AUTO_ENCODING,
+    COMMENT_MODES,
     MOVE_ALGORITHMS,
     Comparison,
     Context,
     FilterError,
     MovedPassageSettings,
     check_encoding,
+    comment_options,
     compare,
     compare_paths,
     move_defaults,
+    setting_type,
 )
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
+    SPLITS,
     TEXT_SUFFIXES,
     default_output,
     format_of,
@@ -152,14 +156,11 @@ HINT_WIDTH = 360
 HINT_DELAY_MS = 400
 # How long the notification of a finished comparison stays up.
 TOAST_MS = 4000
-# What becomes of the comments, as --comments says.
-COMMENT_MODES = ("markers", "text", "none")
-# How prose is compared, as --split says: paragraph by paragraph, sentence
-# by sentence, or both (in the HTML report only).
-SPLITS = ("paragraph", "sentence", "both")
 # The tabs, in their order.
 MODES = ("git", "files", "folders")
 PREFILLED_FILES = (".md", ".docx", ".odt")
+# The space around the fields of the window.
+PAD = {"padx": 6, "pady": 4}
 
 
 def single_file(args: list[str]) -> Path | None:
@@ -279,7 +280,7 @@ def load_settings(path: Path | None = None) -> Settings:
 def moved_passage_settings_of(s: Settings) -> MovedPassageSettings:
     """The moved-passage settings chosen (the advanced settings), prosediff's
     defaults for the others; ValueError, naming it, for a value out of range."""
-    kinds = {f.name: float if f.metadata["share"] else int for f in fields(MovedPassageSettings)}
+    kinds = {f.name: setting_type(f) for f in fields(MovedPassageSettings)}
     chosen = {k: kinds[k](v) for k, v in s.moved_passages.items() if k in kinds}
     settings = MovedPassageSettings(**chosen)
     settings.check()
@@ -314,8 +315,7 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         paths=s.paths or None,
         context=context_of(s),
         ignore_whitespace=s.ignore_whitespace,
-        fold_comments_md=s.comments != "text",
-        drop_comments=s.comments == "none",
+        **comment_options(s.comments),
         empty_comments=s.empty_comments,
         docx_changes=s.docx_changes,
         # None: prosediff's defaults
@@ -416,7 +416,6 @@ class App:
         self.results: queue.Queue = queue.Queue()
         root.title("prosediff: compare two versions")
         root.minsize(780, 0)
-        pad = {"padx": 6, "pady": 4}
         page = ttk.Frame(root, padding=(14, 12, 14, 12))
         page.pack(fill="both", expand=True)
 
@@ -443,79 +442,11 @@ class App:
             ).pack(side="left")
         source = ttk.Labelframe(page, text="Versions", padding=(10, 8))
         source.pack(fill="x")
-        git_side, files_side, folders_side = (ttk.Frame(source) for _ in MODES)
-        self.sides = dict(zip(MODES, (git_side, files_side, folders_side), strict=True))
+        self.sides = {mode: ttk.Frame(source) for mode in MODES}
         for side in self.sides.values():
             side.columnconfigure(1, weight=1)
-
-        # Git repository
-        self.repo = tk.StringVar(value=self.s.repo)
-        ttk.Label(git_side, text="Repository").grid(row=0, column=0, sticky="w", **pad)
-        repo_entry = ttk.Entry(git_side, textvariable=self.repo)
-        repo_entry.grid(row=0, column=1, sticky="ew", **pad)
-        repo_entry.bind("<Return>", lambda e: self.load_repo())
-        repo_entry.bind("<FocusOut>", lambda e: self.load_repo())
-        browse(git_side, self.pick_repo, "Choose the repository").grid(row=0, column=2, **pad)
-        self.base = tk.StringVar()
-        self.target = tk.StringVar()
-        ttk.Label(git_side, text="Base (older)").grid(row=1, column=0, sticky="w", **pad)
-        self.base_box = ttk.Combobox(git_side, textvariable=self.base)
-        self.base_box.grid(row=1, column=1, columnspan=2, sticky="ew", **pad)
-        ttk.Label(git_side, text="Target (newer)").grid(row=2, column=0, sticky="w", **pad)
-        self.target_box = ttk.Combobox(git_side, textvariable=self.target)
-        self.target_box.grid(row=2, column=1, columnspan=2, sticky="ew", **pad)
-        self.target_box.bind("<<ComboboxSelected>>", lambda e: self.update_untracked())
-        hint(
-            self.base_box,
-            "A commit (hash, date, author, subject) or any ref git knows: HEAD~15, a tag.",
-        )
-        hint(self.target_box, "The working tree, the index, a commit or any ref git knows.")
-        ttk.Label(git_side, text="Only these paths").grid(row=3, column=0, sticky="w", **pad)
-        self.paths = tk.StringVar(value="; ".join(self.s.paths))
-        paths_entry = ttk.Entry(git_side, textvariable=self.paths)
-        paths_entry.grid(row=3, column=1, columnspan=2, sticky="ew", **pad)
-        hint(paths_entry, "Optional: files or folders of the repository, separated by ;")
-        self.untracked = tk.BooleanVar(value=self.s.untracked)
-        self.untracked_box = toggle(git_side, "Include untracked files", self.untracked)
-        self.untracked_box.grid(row=4, column=1, sticky="w", **pad)
-
-        # Files, and folders
-        self.old = tk.StringVar(value=self.s.old)
-        self.new = tk.StringVar(value=self.s.new)
-        self.old_folder = tk.StringVar(value=self.s.old_folder)
-        self.new_folder = tk.StringVar(value=self.s.new_folder)
-        for side, pick, old, new, what in (
-            (files_side, self.pick_file, self.old, self.new, "file"),
-            (folders_side, self.pick_folder, self.old_folder, self.new_folder, "folder"),
-        ):
-            for row, (label, var) in enumerate((("Old", old), ("New", new))):
-                ttk.Label(side, text=label).grid(row=row, column=0, sticky="w", **pad)
-                ttk.Entry(side, textvariable=var).grid(row=row, column=1, sticky="ew", **pad)
-                browse(side, lambda v=var, f=pick: f(v), f"Choose the {label.lower()} {what}").grid(
-                    row=row, column=2, **pad
-                )
-            swap_button = ttk.Button(
-                side,
-                image=ttk.Icon("arrow-down-up", size=16),
-                command=lambda a=old, b=new: swap(a, b),
-                bootstyle="secondary-outline",
-            )
-            swap_button.grid(row=0, column=3, rowspan=2, sticky="ns", **pad)
-            hint(swap_button, f"Swap the old and the new {what}")
-        ttk.Label(
-            files_side,
-            text="Any two files: Word, OpenDocument, Markdown, text, whatever their names.",
-            bootstyle="secondary",
-        ).grid(row=2, column=1, sticky="w", padx=6)
-        ttk.Label(folders_side, text="Only").grid(row=2, column=0, sticky="w", **pad)
-        self.include = tk.StringVar(value=self.s.include)
-        include_entry = ttk.Entry(folders_side, textvariable=self.include)
-        include_entry.grid(row=2, column=1, sticky="ew", **pad)
-        hint(
-            include_entry,
-            "The files compared: patterns separated by |, matched against each file's name "
-            "(its path within the folder for a pattern with a /); empty: every file.",
-        )
+        self.build_git_side(self.sides["git"])
+        self.build_path_sides(self.sides["files"], self.sides["folders"])
 
         # Options, in two cards: what is compared, and how it is shown
         cards = ttk.Frame(page)
@@ -525,7 +456,91 @@ class App:
         compared.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         shown = ttk.Labelframe(cards, text="How it is shown", padding=(10, 8))
         shown.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        self.build_compared_card(compared)
+        self.build_shown_card(shown)
+        self.build_advanced(page)
+        self.build_output(page)
+        self.build_bottom(page)
 
+        if self.s.repo:
+            self.load_repo(keep=(self.s.base, self.s.target))
+        self.show_mode()
+        self.update_untracked()
+        self.update_empty_comments()
+
+    def build_git_side(self, git_side: ttk.Frame) -> None:
+        """The fields of a git repository: where, which versions, which paths."""
+        self.repo = tk.StringVar(value=self.s.repo)
+        ttk.Label(git_side, text="Repository").grid(row=0, column=0, sticky="w", **PAD)
+        repo_entry = ttk.Entry(git_side, textvariable=self.repo)
+        repo_entry.grid(row=0, column=1, sticky="ew", **PAD)
+        repo_entry.bind("<Return>", lambda e: self.load_repo())
+        repo_entry.bind("<FocusOut>", lambda e: self.load_repo())
+        browse(git_side, self.pick_repo, "Choose the repository").grid(row=0, column=2, **PAD)
+        self.base = tk.StringVar()
+        self.target = tk.StringVar()
+        ttk.Label(git_side, text="Base (older)").grid(row=1, column=0, sticky="w", **PAD)
+        self.base_box = ttk.Combobox(git_side, textvariable=self.base)
+        self.base_box.grid(row=1, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Label(git_side, text="Target (newer)").grid(row=2, column=0, sticky="w", **PAD)
+        self.target_box = ttk.Combobox(git_side, textvariable=self.target)
+        self.target_box.grid(row=2, column=1, columnspan=2, sticky="ew", **PAD)
+        self.target_box.bind("<<ComboboxSelected>>", lambda e: self.update_untracked())
+        hint(
+            self.base_box,
+            "A commit (hash, date, author, subject) or any ref git knows: HEAD~15, a tag.",
+        )
+        hint(self.target_box, "The working tree, the index, a commit or any ref git knows.")
+        ttk.Label(git_side, text="Only these paths").grid(row=3, column=0, sticky="w", **PAD)
+        self.paths = tk.StringVar(value="; ".join(self.s.paths))
+        paths_entry = ttk.Entry(git_side, textvariable=self.paths)
+        paths_entry.grid(row=3, column=1, columnspan=2, sticky="ew", **PAD)
+        hint(paths_entry, "Optional: files or folders of the repository, separated by ;")
+        self.untracked = tk.BooleanVar(value=self.s.untracked)
+        self.untracked_box = toggle(git_side, "Include untracked files", self.untracked)
+        self.untracked_box.grid(row=4, column=1, sticky="w", **PAD)
+
+    def build_path_sides(self, files_side: ttk.Frame, folders_side: ttk.Frame) -> None:
+        """The fields of two files, and of two folders."""
+        self.old = tk.StringVar(value=self.s.old)
+        self.new = tk.StringVar(value=self.s.new)
+        self.old_folder = tk.StringVar(value=self.s.old_folder)
+        self.new_folder = tk.StringVar(value=self.s.new_folder)
+        for side, pick, old, new, what in (
+            (files_side, self.pick_file, self.old, self.new, "file"),
+            (folders_side, self.pick_folder, self.old_folder, self.new_folder, "folder"),
+        ):
+            for row, (label, var) in enumerate((("Old", old), ("New", new))):
+                ttk.Label(side, text=label).grid(row=row, column=0, sticky="w", **PAD)
+                ttk.Entry(side, textvariable=var).grid(row=row, column=1, sticky="ew", **PAD)
+                browse(side, lambda v=var, f=pick: f(v), f"Choose the {label.lower()} {what}").grid(
+                    row=row, column=2, **PAD
+                )
+            swap_button = ttk.Button(
+                side,
+                image=ttk.Icon("arrow-down-up", size=16),
+                command=lambda a=old, b=new: swap(a, b),
+                bootstyle="secondary-outline",
+            )
+            swap_button.grid(row=0, column=3, rowspan=2, sticky="ns", **PAD)
+            hint(swap_button, f"Swap the old and the new {what}")
+        ttk.Label(
+            files_side,
+            text="Any two files: Word, OpenDocument, Markdown, text, whatever their names.",
+            bootstyle="secondary",
+        ).grid(row=2, column=1, sticky="w", padx=6)
+        ttk.Label(folders_side, text="Only").grid(row=2, column=0, sticky="w", **PAD)
+        self.include = tk.StringVar(value=self.s.include)
+        include_entry = ttk.Entry(folders_side, textvariable=self.include)
+        include_entry.grid(row=2, column=1, sticky="ew", **PAD)
+        hint(
+            include_entry,
+            "The files compared: patterns separated by |, matched against each file's name "
+            "(its path within the folder for a pattern with a /); empty: every file.",
+        )
+
+    def build_compared_card(self, compared: ttk.Labelframe) -> None:
+        """The options of what is compared."""
         self.docx = tk.StringVar(value=self.s.docx_changes)
         field_row(
             compared,
@@ -614,6 +629,8 @@ class App:
             "must be, are shown as moved, not as a deletion and an unrelated insertion.",
         )
 
+    def build_shown_card(self, shown: ttk.Labelframe) -> None:
+        """The options of how it is shown."""
         self.comments = tk.StringVar(
             value=self.s.comments if self.s.comments in COMMENT_MODES else "markers"
         )
@@ -660,6 +677,8 @@ class App:
             "How long lines that wrap are aligned in the HTML report.",
         )
 
+    def build_advanced(self, page: ttk.Frame) -> None:
+        """The advanced settings, hidden until asked for."""
         # Advanced settings, hidden until asked for: how moved passages are
         # told from chance likeness, one field for each of MovedPassageSettings
         self.advanced_button = ttk.Button(
@@ -713,13 +732,14 @@ class App:
         )
         hint(passage_defaults, "Put these settings back to prosediff's defaults.")
 
-        # Output
+    def build_output(self, page: ttk.Frame) -> None:
+        """The output: its format, where it goes, whether it opens."""
         out = ttk.Labelframe(page, text="Output", padding=(10, 8))
         out.pack(fill="x", pady=(10, 0))
         out.columnconfigure(1, weight=1)
-        ttk.Label(out, text="Format").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Label(out, text="Format").grid(row=0, column=0, sticky="w", **PAD)
         formats = ttk.Frame(out)
-        formats.grid(row=0, column=1, columnspan=2, sticky="w", **pad)
+        formats.grid(row=0, column=1, columnspan=2, sticky="w", **PAD)
         self.output_format = tk.StringVar(
             value=self.s.output_format if self.s.output_format in FORMATS else "html"
         )
@@ -739,10 +759,10 @@ class App:
             )
             button.pack(side="left")
             hint(button, tip)
-        ttk.Label(out, text="Save to").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Label(out, text="Save to").grid(row=1, column=0, sticky="w", **PAD)
         self.output = tk.StringVar(value=self.s.output)
         output_entry = ttk.Entry(out, textvariable=self.output)
-        output_entry.grid(row=1, column=1, sticky="ew", **pad)
+        output_entry.grid(row=1, column=1, sticky="ew", **PAD)
         hint(
             output_entry,
             "Empty: comparing two folders, prosediff.html (or .diff, .wdiff) in the new one; "
@@ -754,12 +774,13 @@ class App:
             command=self.pick_output,
             bootstyle="secondary-outline",
         )
-        save.grid(row=1, column=2, **pad)
+        save.grid(row=1, column=2, **PAD)
         hint(save, "Choose where to save it")
         self.open_page = tk.BooleanVar(value=self.s.open_page)
-        toggle(out, "Open when done", self.open_page).grid(row=2, column=1, sticky="w", **pad)
+        toggle(out, "Open when done", self.open_page).grid(row=2, column=1, sticky="w", **PAD)
 
-        # Run
+    def build_bottom(self, page: ttk.Frame) -> None:
+        """The status line and the buttons."""
         bottom = ttk.Frame(page)
         bottom.pack(fill="x", pady=(12, 0))
         self.status = tk.StringVar(value=READY)
@@ -803,13 +824,7 @@ class App:
         self.progress = ttk.Progressbar(
             bottom, mode="indeterminate", bootstyle="striped", length=140
         )
-        root.bind("<Control-Return>", lambda e: self.run())
-
-        if self.s.repo:
-            self.load_repo(keep=(self.s.base, self.s.target))
-        self.show_mode()
-        self.update_untracked()
-        self.update_empty_comments()
+        self.root.bind("<Control-Return>", lambda e: self.run())
 
     def show_mode(self) -> None:
         """Show the fields of what is compared: a repository, files or folders."""
@@ -989,7 +1004,7 @@ class App:
         defaults; a box that holds no number keeps the default."""
         chosen: dict[str, float] = {}
         for f in fields(MovedPassageSettings):
-            kind = float if f.metadata["share"] else int
+            kind = setting_type(f)
             try:
                 value = kind(float(self.passage_vars[f.name].get().replace(",", "")))
             except ValueError:
@@ -1062,7 +1077,7 @@ class App:
                 git.BadName,
                 git.GitCommandError,
                 FilterError,
-                MovedPassageSettings,
+                RuntimeError,  # git diff failed or timed out (git_opcodes)
                 SourceError,
                 ValueError,
                 OSError,

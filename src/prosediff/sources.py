@@ -24,7 +24,6 @@ __all__ = [
     "default_page",
     "describe_side",
     "document_to_markdown",
-    "docx_to_markdown",
     "is_document",
     "patterns",
     "read_document",
@@ -47,15 +46,6 @@ class SourceError(RuntimeError):
     """A side could not be read or converted."""
 
 
-def docx_to_markdown(data: bytes, name: str, changes: str = "accept") -> bytes:
-    """A Word document as Markdown, its tracked changes settled, comments kept.
-
-    changes is "accept" or "reject" (the tracked changes), or "all" to keep
-    them as insertion and deletion spans.
-    """
-    return to_markdown(read_document(data, name, changes)).encode("utf-8")
-
-
 def is_document(path: str | None) -> bool:
     """Whether a path names a Word or OpenDocument text."""
     return bool(path) and Path(path).suffix.lower() in DOCUMENT_SUFFIXES
@@ -63,14 +53,15 @@ def is_document(path: str | None) -> bool:
 
 def document_to_markdown(data: bytes, name: str, changes: str = "accept") -> bytes:
     """A Word document or an OpenDocument text as Markdown, by its name's
-    extension; changes as in docx_to_markdown."""
+    extension, comments kept. changes is "accept" or "reject" (the tracked
+    changes), or "all" to keep them as insertion and deletion spans."""
     return to_markdown(read_document(data, name, changes)).encode("utf-8")
 
 
 def read_document(data: bytes, name: str, changes: str = "accept") -> Document:
     """A Word document or an OpenDocument text as prosediff reads it
     (prosediff.document), by its name's extension; changes as in
-    docx_to_markdown."""
+    document_to_markdown."""
     if Path(name).suffix.lower() == ".odt":
         try:
             return read_odt(data, changes)

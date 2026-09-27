@@ -6,13 +6,13 @@ import argparse
 import sys
 import webbrowser
 from dataclasses import fields
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import git
 
 from prosediff.diff import (
     AUTO_ENCODING,
+    COMMENT_MODES,
     CONTEXT,
     MAX_HIDDEN,
     MOVE_ALGORITHM,
@@ -23,13 +23,25 @@ from prosediff.diff import (
     SENTENCE_MOVE_SIMILARITY,
     FilterError,
     MovedPassageSettings,
+    SettingError,
     check_encoding,
+    check_move_similarity,
+    comment_options,
     compare,
     compare_paths,
+    setting_type,
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
 from prosediff.language import DEFAULT, normalize_language
-from prosediff.render import ALIGNMENTS, FORMATS, default_output, format_of, write_output
+from prosediff.render import (
+    ALIGNMENTS,
+    FORMATS,
+    SPLITS,
+    default_output,
+    format_of,
+    package_version,
+    write_output,
+)
 from prosediff.sources import (
     DOCX_CHANGES,
     FOLDER_FILES,
@@ -39,10 +51,6 @@ from prosediff.sources import (
 )
 
 PROG = "prosediff"
-# How prose is compared: paragraph by paragraph, sentence by sentence, or both.
-SPLITS = ("paragraph", "sentence", "both")
-# What --comments does with the comments: set apart, compared as text, or none.
-COMMENT_MODES = ("markers", "text", "none")
 
 
 def passage_option(name: str) -> str:
@@ -50,14 +58,8 @@ def passage_option(name: str) -> str:
     return "--passage-" + name.replace("_", "-")
 
 
-def package_version() -> str:
-    try:
-        return version(PROG)
-    except PackageNotFoundError:
-        return "unknown"
-
-
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line's options."""
     ap = argparse.ArgumentParser(
         prog=PROG,
         description="Write an HTML report showing the differences between two "
@@ -272,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
         passage_group.add_argument(
             passage_option(f.name),
             dest=f"passage_{f.name}",
-            type=float if f.metadata["share"] else int,
+            type=setting_type(f),
             default=None,
             metavar="X" if f.metadata["share"] else "N",
             help=f"{f.metadata['help']} (default: {f.default:,})",
@@ -326,7 +328,12 @@ def main(argv: list[str] | None = None) -> int:
         help="print a Word document or OpenDocument text as Markdown (pandoc's), "
         "tracked changes as --docx-changes says (git's textconv command)",
     )
-    ap.add_argument("--version", action="version", version=f"%(prog)s {package_version()}")
+    ap.add_argument("--version", action="version", version=f"%(prog)s {package_version('unknown')}")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = build_parser()
     args = ap.parse_args(argv)
 
     mode = next((m for m in ("git", "files", "folders") if getattr(args, m)), None)
@@ -349,48 +356,17 @@ def main(argv: list[str] | None = None) -> int:
     if not args.base:
         ap.error("--git takes REPO and BASE" if args.git else f"--{mode} takes OLD and NEW")
 
-    if args.context is not None and args.context < 0:
-        ap.error("--context must be 0 or more")
-    if args.max_hidden < 0:
-        ap.error("--max-hidden must be 0 or more")
-    try:
-        args.language = normalize_language(args.language)
-    except ValueError as e:
-        ap.error(f"--language: {e}")
-    try:
-        args.encoding = check_encoding(args.encoding)
-    except ValueError as e:
-        ap.error(f"--encoding: {e}")
-    if not args.git:
-        if args.target:
-            ap.error(f"--{mode} compares OLD with NEW: give no TARGET")
-        if args.cached or args.untracked:
-            ap.error("--cached and --untracked need a git repository: they go with --git")
-        old, new = Path(args.repo), Path(args.base)
-        if args.files and old.is_dir() and new.is_dir():
-            ap.error(
-                "OLD and NEW are folders: use --folders (from git difftool -d, set up by "
-                "an earlier prosediff: run prosediff --setup-git again)"
-            )
-        if args.folders and old.is_file() and new.is_file():
-            ap.error("OLD and NEW are files: use --files")
-    if args.include is not None and not args.folders:
-        ap.error("--include picks the files of two folders: it goes with --folders")
-    if args.paths and args.files:
-        ap.error("--path picks files of a repository or of two folders, not of --files")
-    if args.cached and args.target:
-        ap.error("--cached compares BASE with the index: give no TARGET")
-    if args.untracked and (args.target or args.cached):
-        ap.error("--untracked needs the working tree: give no TARGET and no --cached")
+    _check_compare_args(ap, args, mode)
 
     split = args.split or "paragraph"
     fmt = args.format or format_of(args.output)
     if split == "both" and fmt != "html":
         ap.error("--split both is for the HTML report: a diff holds one split")
     for name in ("move_similarity", "sentence_move_similarity"):
-        value = getattr(args, name)
-        if value is not None and not 0 < value <= 1:
-            ap.error(f"--{name.replace('_', '-')} must be above 0 and at most 1")
+        try:
+            check_move_similarity(getattr(args, name))
+        except ValueError as e:
+            ap.error(f"--{name.replace('_', '-')}: {e}")
     chosen = {
         f.name: getattr(args, f"passage_{f.name}")
         for f in fields(MovedPassageSettings)
@@ -399,17 +375,15 @@ def main(argv: list[str] | None = None) -> int:
     passage_settings = MovedPassageSettings(**chosen)
     try:
         passage_settings.check()
-    except ValueError as e:
-        name = str(e).split()[2]
-        ap.error(f"{passage_option(name)}: {e}")
+    except SettingError as e:
+        ap.error(f"{passage_option(e.name)}: {e}")
     comments = args.comments or "markers"
     options = dict(
         paths=args.paths,
         context=None if args.full else ("auto" if args.context is None else args.context),
         md_filter=args.md_filter,
         ignore_whitespace=args.ignore_whitespace,
-        fold_comments_md=comments != "text",
-        drop_comments=comments == "none",
+        **comment_options(comments),
         empty_comments=args.empty_comments,
         max_hidden=args.max_hidden,
         docx_changes=args.docx_changes,
@@ -461,17 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{PROG}: {e}", file=sys.stderr)
         return 1
 
-    # With --open, an HTML report in the temporary folder: git difftool -d gives
-    # two temporary folders, gone once prosediff returns.
-    output = args.output
-    if output is None and args.open:
-        output = default_output(fmt)
-    if output is None and args.folders:
-        output = default_page(Path(args.repo), Path(args.base))
-        if output is not None:
-            output = output.with_suffix(FORMATS[fmt])
-    if output is None:
-        output = Path("diff").with_suffix(FORMATS[fmt])
+    output = _output_path(args, fmt)
     write_output(
         comparison,
         output,
@@ -492,6 +456,61 @@ def main(argv: list[str] | None = None) -> int:
     if args.open:
         webbrowser.open(output.resolve().as_uri())
     return 0
+
+
+def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, mode: str) -> None:
+    """Refuse the options of a comparison that make no sense (ap.error);
+    normalize the language and the encoding."""
+    if args.context is not None and args.context < 0:
+        ap.error("--context must be 0 or more")
+    if args.max_hidden < 0:
+        ap.error("--max-hidden must be 0 or more")
+    try:
+        args.language = normalize_language(args.language)
+    except ValueError as e:
+        ap.error(f"--language: {e}")
+    try:
+        args.encoding = check_encoding(args.encoding)
+    except ValueError as e:
+        ap.error(f"--encoding: {e}")
+    if not args.git:
+        if args.target:
+            ap.error(f"--{mode} compares OLD with NEW: give no TARGET")
+        if args.cached or args.untracked:
+            ap.error("--cached and --untracked need a git repository: they go with --git")
+        old, new = Path(args.repo), Path(args.base)
+        if args.files and old.is_dir() and new.is_dir():
+            ap.error(
+                "OLD and NEW are folders: use --folders (from git difftool -d, set up by "
+                "an earlier prosediff: run prosediff --setup-git again)"
+            )
+        if args.folders and old.is_file() and new.is_file():
+            ap.error("OLD and NEW are files: use --files")
+    if args.include is not None and not args.folders:
+        ap.error("--include picks the files of two folders: it goes with --folders")
+    if args.paths and args.files:
+        ap.error("--path picks files of a repository or of two folders, not of --files")
+    if args.cached and args.target:
+        ap.error("--cached compares BASE with the index: give no TARGET")
+    if args.untracked and (args.target or args.cached):
+        ap.error("--untracked needs the working tree: give no TARGET and no --cached")
+
+
+def _output_path(args: argparse.Namespace, fmt: str) -> Path:
+    """Where the output goes: -o; with --open, a file in the temporary
+    folder (git difftool -d gives two temporary folders, gone once prosediff
+    returns); comparing two folders, the default page of the new one; else
+    diff.html (.diff, .wdiff) here."""
+    output = args.output
+    if output is None and args.open:
+        output = default_output(fmt)
+    if output is None and args.folders:
+        output = default_page(Path(args.repo), Path(args.base))
+        if output is not None:
+            output = output.with_suffix(FORMATS[fmt])
+    if output is None:
+        output = Path("diff").with_suffix(FORMATS[fmt])
+    return output
 
 
 def _setup_git(repo: Path | None) -> int:

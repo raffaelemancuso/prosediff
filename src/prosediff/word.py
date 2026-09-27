@@ -54,8 +54,10 @@ from prosediff.document import (
     NoteRef,
     Span,
     Text,
+    attach_carried,
     comments_in,
     comments_only,
+    join_paragraphs,
     markdown,
     strip,
     to_markdown,
@@ -181,7 +183,7 @@ class Reader:
                 out += self.comment(child.get(qn("w:id")))
             elif tag in (qn("w:drawing"), qn("w:pict"), qn("w:object")):
                 descr = next((d.get("descr") for d in child.iter() if d.get("descr")), "")
-                out.append(Image(f"[image: {descr}]" if descr else "[image]"))
+                out.append(Image.described(descr))
         return out
 
     def children(self, el, paragraph, deleted: bool = False, dropping: bool = False) -> list:
@@ -247,14 +249,7 @@ class Reader:
 
     def cell(self, paragraphs, part=None) -> list:
         """The inlines of several paragraphs, as one, a space between them."""
-        out: list = []
-        for p in paragraphs:
-            inlines = self.paragraph_inlines(p, part)
-            if markdown(inlines):
-                if out:
-                    out.append(Text(" "))
-                out += inlines
-        return out
+        return join_paragraphs(self.paragraph_inlines(p, part) for p in paragraphs)
 
     def paragraph(self, el) -> Block | None:
         inlines = self.paragraph_inlines(el)
@@ -287,17 +282,8 @@ class Reader:
         """The paragraphs and tables of the document; comments carried past
         the last paragraph join it."""
         out = self.blocks(self.document.element.body)
-        if self.carried:
-            if not out:
-                out.append(Block("p"))
-            last = out[-1]
-            if last.kind == "table" and last.rows and last.rows[-1]:
-                last.rows[-1][-1] += self.carried
-            elif last.kind == "table":
-                out.append(Block("p", self.carried))
-            else:
-                last.inlines += self.carried
-            self.carried = []
+        attach_carried(out, self.carried)
+        self.carried = []
         return out
 
     def blocks(self, container) -> list[Block]:

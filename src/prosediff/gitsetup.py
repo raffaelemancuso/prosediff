@@ -23,6 +23,7 @@ from io import BytesIO
 from pathlib import Path
 
 from prosediff.diff import run
+from prosediff.sources import is_document
 
 # git config answers at once (seconds).
 GIT_TIMEOUT = 60
@@ -108,7 +109,7 @@ def document_name(data: bytes, name: str) -> str:
     """The name to read a document under: its own when it says what it is,
     else .odt or .docx by its content (git may hand textconv a file whose
     name has lost its extension)."""
-    if Path(name).suffix.lower() in (".docx", ".odt"):
+    if is_document(name):
         return name
     try:
         with zipfile.ZipFile(BytesIO(data)) as z:

@@ -171,24 +171,6 @@ def test_sentence_removed_takes_its_own_full_stop():
     assert changes(short, long) == [("", f"{SENTENCE} ")]
 
 
-def test_words_paired_by_difflib_without_patiencediff(monkeypatch):
-    """The words are paired by patiencediff, and by difflib when it is not
-    installed: the same changes either way on an ordinary edit."""
-    from prosediff import diff
-
-    old = f"Opening remarks were brief. {SENTENCE} Then everyone left early."
-    new = "Opening remarks were short. Then everyone left."
-    assert diff.PatienceSequenceMatcher is not None
-    diff._word_ops.cache_clear()
-    with_patience = word_ops(old, new)
-    monkeypatch.setattr(diff, "PatienceSequenceMatcher", None)
-    diff._word_ops.cache_clear()
-    try:
-        assert word_ops(old, new) == with_patience
-    finally:
-        diff._word_ops.cache_clear()
-
-
 def test_removal_slides_to_the_line_start_past_an_abbreviation():
     """A sentence removed from the start of a line that begins, as the next
     one does, with an abbreviation ("Mr.") slides to the start of the line:

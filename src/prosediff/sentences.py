@@ -200,9 +200,10 @@ def split_sentences(
             keep(i)
             i += 1
         elif not in_fence and RULE.match(line):
-            for k in range(i, _rule_block_end(lines, i)):
+            end = _rule_block_end(lines, i)
+            for k in range(i, end):
                 keep(k)
-            i = _rule_block_end(lines, i)
+            i = end
         elif in_fence or _is_special(line):
             keep(i)
             i += 1

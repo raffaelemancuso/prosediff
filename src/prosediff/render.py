@@ -8,18 +8,19 @@ from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from prosediff.diff import CONTEXT, Comparison
+from prosediff.diff import CONTEXT, Comparison, all_rows
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
 from prosediff.language import file_language_note, flag_code, paragraph_language_note
 from prosediff.unified import unified
 
 
-def _version() -> str:
+def package_version(default: str = "") -> str:
+    """prosediff's version, or default when it is not installed."""
     try:
         return version("prosediff")
     except PackageNotFoundError:
-        return ""
+        return default
 
 
 _env = Environment(
@@ -35,6 +36,9 @@ _env.globals["paragraph_language_note"] = paragraph_language_note
 
 
 ALIGNMENTS = ("left", "justify")
+# How prose is compared (--split): paragraph by paragraph, sentence by
+# sentence, or both (in the HTML report only).
+SPLITS = ("paragraph", "sentence", "both")
 # What prosediff writes: the HTML report, a unified diff or a word diff; and their
 # files' suffix.
 FORMATS = {"html": ".html", "diff": ".diff", "wdiff": ".wdiff"}
@@ -73,10 +77,9 @@ def page_flags(comparison: Comparison) -> set[str]:
             continue
         codes.add(flag_code(f.language))
         if f.mixed_languages:
-            for r in f.rows:
-                for row in [r, *r.hidden]:
-                    codes.add(flag_code(row.left_lang or f.language))
-                    codes.add(flag_code(row.right_lang or f.language))
+            for row in all_rows(f.rows):
+                codes.add(flag_code(row.left_lang or f.language))
+                codes.add(flag_code(row.right_lang or f.language))
     return codes
 
 
@@ -87,10 +90,9 @@ def set_apart(comparison: Comparison, prefix: str) -> None:
         old = f.anchor
         f.anchor_prefix = prefix
         new = f.anchor
-        for r in f.rows:
-            for row in [r, *r.hidden]:
-                if row.anchor.startswith(old):
-                    row.anchor = new + row.anchor[len(old) :]
+        for row in all_rows(f.rows):
+            if row.anchor.startswith(old):
+                row.anchor = new + row.anchor[len(old) :]
         for e in comparison.comments:
             if e.anchor == old or e.anchor.startswith(old + "-"):
                 e.anchor = new + e.anchor[len(old) :]
@@ -120,7 +122,7 @@ def render(
         paths=paths or [],
         align=align,
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        version=_version(),
+        version=package_version(),
         homepage=HOMEPAGE,
         flag_css=flag_css(
             page_flags(comparison) | (page_flags(sentences) if sentences is not None else set())
