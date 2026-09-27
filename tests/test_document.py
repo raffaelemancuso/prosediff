@@ -2,17 +2,13 @@
 
 import re
 
-from helpers import docx_xml
+from helpers import docx_xml, run, strip_tags
 
 from prosediff import compare_paths, render
 from prosediff.document import Line, concat, lines, sub
 from prosediff.sources import read_document
 
 BOLD = "<w:rPr><w:b/></w:rPr>"
-
-
-def run(text, props=""):
-    return f'<w:r>{props}<w:t xml:space="preserve">{text}</w:t></w:r>'
 
 
 def note(number):
@@ -43,7 +39,7 @@ def test_styles_survive_the_pipeline(tmp_path):
     assert '<span class="s-strong">bold</span>' in html
     classes = " ".join(re.findall(r'class="([^"]*)"', html))
     assert "*stars*" in html and "s-em" not in classes and "s-syn" not in classes
-    assert "**" not in re.sub(r"<[^>]+>", "", html)
+    assert "**" not in strip_tags(html)
 
 
 def test_lines_of_a_document(tmp_path):

@@ -5,7 +5,7 @@ import zipfile
 from html import unescape
 
 import pytest
-from helpers import docx_xml, odt_xml
+from helpers import docx_xml, odt_xml, strip_tags, two_folders
 
 from prosediff import compare_paths, render
 from prosediff.cli import main
@@ -23,14 +23,6 @@ ENGLISH = (
     "Most empirical tests of the Porter Hypothesis have focused on how existing "
     "firms respond to regulation, and much less on the entry of new firms."
 )
-
-
-def pair(tmp_path, name, old, new):
-    (tmp_path / "old").mkdir()
-    (tmp_path / "new").mkdir()
-    (tmp_path / "old" / name).write_text(old, encoding="utf-8")
-    (tmp_path / "new" / name).write_text(new, encoding="utf-8")
-    return tmp_path / "old", tmp_path / "new"
 
 
 def test_normalize_language():
@@ -55,7 +47,7 @@ def test_detect_language():
 
 def test_guessed_per_file_and_hyphenated(tmp_path):
     """guess guesses each prose file's language; the HTML report hyphenates by it."""
-    old, new = pair(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
+    old, new = two_folders(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     c = compare_paths(old, new)
     (f,) = c.files
     assert (f.language, f.language_source) == ("it", "guessed")
@@ -64,13 +56,13 @@ def test_guessed_per_file_and_hyphenated(tmp_path):
     assert "language: it (guessed)" in html
     # soft hyphens, by Italian rules, and the text otherwise intact
     assert "eco\u00adno\u00admia" in html
-    assert "effetti molto diversi" in re.sub(r"<[^>]+>|\u00ad", "", html)
+    assert "effetti molto diversi" in strip_tags(html).replace("\u00ad", "")
 
 
 def test_no_language_no_hyphenation(tmp_path):
     """Prose too short to tell, and code, get no language: nothing is
     hyphenated by guess."""
-    old, new = pair(tmp_path, "note.md", "Hello world\n", "Hello there\n")
+    old, new = two_folders(tmp_path, "note.md", "Hello world\n", "Hello there\n")
     (tmp_path / "old" / "notes.txt").write_text(ENGLISH + "\n", encoding="utf-8")
     (tmp_path / "new" / "notes.txt").write_text(ENGLISH + " More.\n", encoding="utf-8")
     c = compare_paths(old, new)
@@ -80,7 +72,7 @@ def test_no_language_no_hyphenation(tmp_path):
 
 def test_cli_language(tmp_path, capsys):
     """A given language is used as it is, not guessed; a bad one is refused."""
-    old, new = pair(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
+    old, new = two_folders(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     out = tmp_path / "page.html"
     assert main(["--folders", str(old), str(new), "-o", str(out), "--language", "DE"]) == 0
     assert "language: de<" in out.read_text(encoding="utf-8")
@@ -200,7 +192,7 @@ def test_odt_language(tmp_path):
 def test_document_language_refuses_other_files(tmp_path, capsys):
     """ "document" is for Word and OpenDocument files: a Markdown or text file
     is an error; by default it is guessed."""
-    old, new = pair(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
+    old, new = two_folders(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     with pytest.raises(SourceError, match=r"paper\.md is not a Word or OpenDocument"):
         compare_paths(old, new, language="document")
     assert main(["--folders", str(old), str(new), "--language", "document"]) == 1

@@ -57,6 +57,7 @@ prosediff-gui = "prosediff.gui:main"
 dev = [
     "playwright>=1.63.0",
     "pytest>=8.4.0",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.16.9",
 ]
 
@@ -67,9 +68,8 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-# A test stuck this long (seconds) has every thread's traceback printed,
-# so a hang on a CI runner says where it is.
-faulthandler_timeout = 120
+# A test over 120 s fails with every thread's stack printed (pytest-timeout).
+timeout = 120
 
 [tool.ruff]
 line-length = 100

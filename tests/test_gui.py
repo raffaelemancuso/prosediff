@@ -2,14 +2,17 @@
 
 import json
 import sys
-import tkinter as tk
 from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
+pytest.importorskip("tkinter", reason="the GUI tests need a Python built with Tk")
+
+import tkinter as tk
+
 from prosediff import gui
-from prosediff.diff import MovedPassageSettings
+from prosediff.diff import MOVED_PASSAGE_DEFAULTS, MovedPassageSettings
 from prosediff.gui import (
     INDEX,
     WORKTREE,
@@ -143,6 +146,7 @@ def test_generate_files_and_default_output(tmp_path):
     s = Settings(mode="files", old=str(tmp_path / "a.md"), new=str(tmp_path / "b.md"))
     path, c = generate(s)
     assert path.parent.name == "prosediff" and path.suffix == ".html" and len(c.files) == 1
+    assert path.is_relative_to(tmp_path)  # the temporary folder is the test's own (conftest)
     assert c.moved == 0
     s.split = "sentence"
     assert generate(s)[1].moved == 1
@@ -480,7 +484,7 @@ def test_advanced_moved_passage_settings(root, tmp_path):
     assert not app.advanced.winfo_manager()
     # one field for each setting, at its default
     assert set(app.passage_vars) == {f.name for f in fields(MovedPassageSettings)}
-    assert app.passage_vars["max_pairs"].get() == "250,000"
+    assert app.passage_vars["max_pairs"].get() == f"{MOVED_PASSAGE_DEFAULTS.max_pairs:,}"
     assert app.collect().moved_passages == {}
     app.passage_vars["min_words"].set("6")
     app.passage_vars["partial_share"].set("0.5")

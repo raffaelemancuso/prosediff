@@ -1,6 +1,6 @@
 """Footnote numbers set aside: a renumbered footnote is no change."""
 
-import re
+from helpers import strip_tags
 
 from prosediff import compare_paths, render
 from prosediff.diff import footnote_similarity
@@ -15,7 +15,7 @@ NOTES = {
 
 
 def text(rows, side):
-    return [re.sub(r"<[^>]+>", "", str(getattr(r, side))) for r in rows]
+    return [strip_tags(str(getattr(r, side))) for r in rows]
 
 
 def versions(tmp_path, edit_third=""):

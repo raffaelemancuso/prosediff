@@ -18,6 +18,9 @@ from prosediff.diff import (
 )
 
 SENTENCE = "The committee met twice in March to review the draft budget."
+# Three paragraphs, the sentence moved from the first into the last.
+OLD = [f"Opening remarks were brief. {SENTENCE} Then everyone left.", "keep", "Numbers came."]
+NEW = ["Opening remarks were brief. Then everyone left.", "keep", f"Numbers came. {SENTENCE}"]
 
 
 def moved_spans(html: str) -> list[tuple[str, str]]:
@@ -214,9 +217,7 @@ def test_removal_slides_to_the_line_start_past_an_abbreviation():
 
 
 def test_moved_passage_ends_are_whole_sentences():
-    old = [f"Opening remarks were brief. {SENTENCE} Then everyone left.", "keep", "Numbers came."]
-    new = ["Opening remarks were brief. Then everyone left.", "keep", f"Numbers came. {SENTENCE}"]
-    first, _, last = align(old, new, context=None)[0]
+    first, _, last = align(OLD, NEW, context=None)[0]
     assert f'data-move="Moved to line 3">{SENTENCE}</span>' in str(first.left)
     assert f'data-move="Moved from line 1">{SENTENCE}</span>' in str(last.right)
 
@@ -240,9 +241,7 @@ def test_passages_alike_in_little_words_only_are_no_move():
 
 
 def test_rows_keep_how_they_looked_without_passages():
-    old = [f"Opening remarks were brief. {SENTENCE} Then everyone left.", "keep", "Numbers came."]
-    new = ["Opening remarks were brief. Then everyone left.", "keep", f"Numbers came. {SENTENCE}"]
-    first, keep, last = align(old, new, context=None)[0]
+    first, keep, last = align(OLD, NEW, context=None)[0]
     assert keep.without_passages is None
     plain = first.without_passages
     assert plain is not None and "<del>" in str(plain.left) and "moved" not in str(plain.left)
@@ -271,10 +270,8 @@ def test_counts_without_passages(tmp_path):
 def test_many_pairs_are_narrowed_not_given_up():
     """Past max_pairs pairs of passages, the pairs sharing a rare word are
     still tried: the move is found instead of none."""
-    old = [f"Opening remarks were brief. {SENTENCE} Then everyone left.", "keep", "Numbers came."]
-    new = ["Opening remarks were brief. Then everyone left.", "keep", f"Numbers came. {SENTENCE}"]
     narrow = MovedPassageSettings(max_pairs=1)
-    first, _, _ = align(old, new, context=None, moved_passage_settings=narrow)[0]
+    first, _, _ = align(OLD, NEW, context=None, moved_passage_settings=narrow)[0]
     assert moved_spans(str(first.left)) == [("1", "Moved to line 3")]
 
 
@@ -283,14 +280,12 @@ def test_moved_passage_settings(tmp_path):
     for bad in ({"min_words": 0}, {"max_gap": -1}, {"partial_share": 0}, {"rare_share": 2}):
         with pytest.raises(ValueError, match=next(iter(bad))):
             MovedPassageSettings(**bad).check()
-    old = [f"Opening remarks were brief. {SENTENCE} Then everyone left.", "keep", "Numbers came."]
-    new = ["Opening remarks were brief. Then everyone left.", "keep", f"Numbers came. {SENTENCE}"]
     strict = MovedPassageSettings(min_words=20)
-    rows, _, _ = align(old, new, context=None, moved_passage_settings=strict)
+    rows, _, _ = align(OLD, NEW, context=None, moved_passage_settings=strict)
     assert not any(r.old_moves for r in rows)
     # from the command line: one option for each setting
-    (tmp_path / "a.md").write_text("\n\n".join(old) + "\n")
-    (tmp_path / "b.md").write_text("\n\n".join(new) + "\n")
+    (tmp_path / "a.md").write_text("\n\n".join(OLD) + "\n")
+    (tmp_path / "b.md").write_text("\n\n".join(NEW) + "\n")
     out = tmp_path / "r.html"
     args = ["--files", str(tmp_path / "a.md"), str(tmp_path / "b.md"), "-o", str(out)]
     assert main([*args, "--passage-min-words", "20"]) == 0

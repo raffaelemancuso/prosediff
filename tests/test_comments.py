@@ -1,20 +1,12 @@
 """Comments: folding pandoc comment spans into markers, and the comments panel."""
 
-from helpers import END, NOTE
+from helpers import END, NOTE, two_folders
 
 from prosediff import compare, compare_paths, render
 from prosediff.comments import NEW_COMMENT_MARK
 from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
 
 MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
-
-
-def versions(tmp_path, old, new):
-    """Two folders holding the old and the new p.md."""
-    for side, text in (("a", old), ("b", new)):
-        (tmp_path / side).mkdir()
-        (tmp_path / side / "p.md").write_text(text, encoding="utf-8")
-    return tmp_path / "a", tmp_path / "b"
 
 
 def test_fold_comments_replaces_span_with_one_placeholder():
@@ -58,7 +50,7 @@ def test_empty_comments_switch(tmp_path):
     from prosediff.cli import main
 
     empty = '[]{.comment-start id="4" author="Anna" date="2026-09-23T10:00:00Z"}'
-    a, b = versions(tmp_path, "Text.\n", f"Text.{empty}\n")
+    a, b = two_folders(tmp_path, "p.md", "Text.\n", f"Text.{empty}\n")
     assert compare_paths(a, b).comments == []
     c = compare_paths(a, b, empty_comments=True)
     assert [(e.author, e.text, e.status) for e in c.comments] == [("Anna", "", "new")]
@@ -91,8 +83,9 @@ def test_plain_and_show_comments():
 def test_a_comment_on_both_sides_is_not_shown(tmp_path):
     """A comment whose paragraph was deleted lands on the next one: a
     comment both sides have is left out, moved or not."""
-    a, b = versions(
+    a, b = two_folders(
         tmp_path,
+        "p.md",
         f"First paragraph here.{NOTE}\n\nSecond paragraph here.\n",
         f"{NOTE}Second paragraph here, edited.\n",
     )
@@ -123,8 +116,9 @@ def test_a_paragraph_a_comment_only_moved_into_is_not_shown(tmp_path):
     old[19] += NOTE
     new = list(lines)
     new[20] = NOTE + new[20]
-    a, b = versions(
+    a, b = two_folders(
         tmp_path,
+        "p.md",
         "\n\n".join([*old, "The end."]) + "\n",
         "\n\n".join([*new, "The end, edited."]) + "\n",
     )
@@ -141,7 +135,7 @@ def test_a_paragraph_with_only_a_new_comment_is_shown(tmp_path):
     lines = [f"Paragraph {k} of the text." for k in range(40)]
     old = "\n\n".join(lines) + "\n"
     lines[20] += NOTE
-    c = compare_paths(*versions(tmp_path, old, "\n\n".join(lines) + "\n"))
+    c = compare_paths(*two_folders(tmp_path, "p.md", old, "\n\n".join(lines) + "\n"))
     (f,) = c.files
     shown = [r for r in f.rows if r.kind != "skip"]
     row = next(r for r in shown if "Paragraph 20" in str(r.right))
@@ -184,7 +178,7 @@ def test_comments_panel_statuses_and_links(tmp_path):
     cur = list(lines)
     cur[2] += kept
     cur[21] = "Line 21 edited." + new
-    a, b = versions(tmp_path, "\n".join(old) + "\n", "\n".join(cur) + "\n")
+    a, b = two_folders(tmp_path, "p.md", "\n".join(old) + "\n", "\n".join(cur) + "\n")
     c = compare_paths(a, b, fold_comments_md=True)
     status = {e.text: e.status for e in c.comments}
     # the comment both sides have is left out

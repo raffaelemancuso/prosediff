@@ -251,10 +251,7 @@ def test_tracked_and_formatting_changes(browser, tmp_path):
     default, the formatting changes of a document stay out of sight; the
     switch (m) unfolds the lines that have them, marks them and says on
     hover what changed."""
-    from helpers import docx_xml
-
-    def run(text, props=""):
-        return f'<w:r>{props}<w:t xml:space="preserve">{text}</w:t></w:r>'
+    from helpers import docx_xml, run
 
     old, new = tmp_path / "old", tmp_path / "new"
     old.mkdir()

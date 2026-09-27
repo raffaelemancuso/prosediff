@@ -1,3 +1,5 @@
+import tempfile
+
 import git
 import pytest
 
@@ -40,6 +42,20 @@ class RepoBuilder:
 @pytest.fixture
 def builder(tmp_path):
     return RepoBuilder(tmp_path / "repo")
+
+
+@pytest.fixture(autouse=True)
+def own_temp_folder(tmp_path, monkeypatch):
+    """The temporary folder is the test's own for the whole test:
+    render.default_output asks tempfile for it at call time, so the HTML
+    reports made by default go with tmp_path instead of piling up in the
+    system's temporary folder. The environment says the same to the
+    processes a test starts (git difftool running prosediff)."""
+    folder = tmp_path / "tmp"
+    folder.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(folder))
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(folder))
 
 
 def two_versions(builder):

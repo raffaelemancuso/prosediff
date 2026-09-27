@@ -1,5 +1,6 @@
 """Helpers shared by several test files."""
 
+import re
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -177,3 +178,21 @@ def odt_xml(path, body, styles=""):
             "</office:body></office:document-content>",
         )
     return path
+
+
+def run(text, props=""):
+    """A Word run of text, props its w:rPr."""
+    return f'<w:r>{props}<w:t xml:space="preserve">{text}</w:t></w:r>'
+
+
+def strip_tags(html):
+    """The text of some HTML, its tags taken out."""
+    return re.sub(r"<[^>]+>", "", html)
+
+
+def two_folders(tmp_path, name, old, new):
+    """Two folders, old and new, each holding its version of the file name."""
+    for side, text in (("old", old), ("new", new)):
+        (tmp_path / side).mkdir()
+        (tmp_path / side / name).write_text(text, encoding="utf-8")
+    return tmp_path / "old", tmp_path / "new"

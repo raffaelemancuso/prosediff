@@ -1,7 +1,6 @@
 """prosediff --setup-git, --to-markdown and --open: git's own commands
 showing documents as prose, and the HTML report opened in the browser."""
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -9,7 +8,7 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 import pytest
-from helpers import docx, odt_xml
+from helpers import docx, odt_xml, strip_tags
 
 from prosediff.cli import main
 from prosediff.gitsetup import ATTRIBUTES
@@ -54,7 +53,9 @@ def browser(tmp_path, monkeypatch):
 
 
 def git(repo, *args, **kw):
-    """git's output; its output and errors in the message when it fails."""
+    """git's output; its output and errors in the message when it fails.
+    Two minutes without an answer is a failure too."""
+    kw.setdefault("timeout", 120)
     done = subprocess.run(["git", *args], cwd=repo, capture_output=True, encoding="utf-8", **kw)
     assert done.returncode == 0, (
         f"git {' '.join(args)}: {done.returncode}\n{done.stdout}{done.stderr}"
@@ -110,7 +111,7 @@ def test_setup_git_makes_git_diff_and_difftool_show_documents(two_documents, bro
     assert page.startswith("file:") and page.endswith(".html")
     html = Path(url2pathname(urlparse(page).path)).read_text(encoding="utf-8")
     # the changed letters are marked: s<mark>lept</mark>
-    assert "slept" in re.sub(r"<[^>]+>", "", html) and "read from Word" in html
+    assert "slept" in strip_tags(html) and "read from Word" in html
 
 
 def test_setup_git_global_and_outside_a_repository(no_global_git, capsys):

@@ -15,14 +15,21 @@ jobs:
   publish:
     needs: tests
     runs-on: ubuntu-latest
+    # Building and uploading take a minute; a hung upload is stopped rather
+    # than left to hold the release for hours.
+    timeout-minutes: 15
     environment:
       name: pypi
       url: https://pypi.org/project/prosediff/
     permissions:
+      # Listing any permission sets the others to none, so the checkout's
+      # read access is stated here rather than left to rest on the
+      # repository being public.
+      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: The tag matches the version in pyproject.toml
         run: |
           version=$(uv version --short)
