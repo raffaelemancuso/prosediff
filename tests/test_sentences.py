@@ -59,11 +59,11 @@ def test_compare_by_sentence(tmp_path):
     a, b = tmp_path / "a.md", tmp_path / "b.md"
     # paragraph by paragraph: two edited paragraphs, no move
     (f,) = compare_paths(a, b).files
-    assert f.moved == 0
+    assert f.counts.moved == 0
     # sentence by sentence: the sentence moved
     c = compare_paths(a, b, Options(by_sentence=True))
     (f,) = c.files
-    assert f.moved == 1
+    assert f.counts.moved == 1
     out = next(r for r in f.rows if r.kind == "moved-out")
     into = next(r for r in f.rows if r.kind == "moved-in")
     assert (out.left_label, into.right_label) == ("1.2", "3.2")

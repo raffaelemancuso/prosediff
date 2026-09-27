@@ -87,6 +87,25 @@ WORD = re.compile(r"\w+", re.UNICODE)
 CLAUSE = re.compile(r"(?<=[,;:])\s+")
 
 
+def header(title: str) -> list[str]:
+    """The first lines of a report: its title, when it was made, a blank."""
+    return [title, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ""]
+
+
+def write_report(path: Path, text: str) -> None:
+    """The report printed, and written to path (UTF-8, LF)."""
+    print(text)
+    path.write_bytes((text + "\n").encode("utf-8"))
+
+
+def timed_align(old: list[str], new: list[str], ops, **options) -> tuple[list, float]:
+    """diff.align's rows, and how long it took, its caches emptied first."""
+    clear_caches()
+    t0 = time.perf_counter()
+    rows, _, _ = align(old, new, None, ops, **options)
+    return rows, time.perf_counter() - t0
+
+
 def clear_caches() -> None:
     """Forget the word comparisons cached by a previous run, so that each run
     is timed from scratch."""
@@ -202,15 +221,12 @@ def trial(
 
 
 def spans_found(rows, old: list[str], new: list[str]):
-    """The moved passages align reported: pair -> (old line, start, end, new
-    line, start, end), 0-based lines."""
-    ends: dict[int, dict] = {}
-    for r in rows:
-        for m in r.old_moves:
-            ends.setdefault(m.pair, {})["old"] = (r.left_no - 1, m.start, m.end)
-        for m in r.new_moves:
-            ends.setdefault(m.pair, {})["new"] = (r.right_no - 1, m.start, m.end)
-    return [e["old"] + e["new"] for e in ends.values() if "old" in e and "new" in e]
+    """The moved passages align reported: (old line, start, end, new line,
+    start, end), 0-based lines."""
+    return [
+        (a.left_no - 1, ma.start, ma.end, b.right_no - 1, mb.start, mb.end)
+        for a, ma, b, mb in diff.moved_passages(rows)
+    ]
 
 
 def locate(line: str, text: str) -> tuple[int, int] | None:
@@ -360,9 +376,7 @@ def run(quick: bool) -> str:
     data = load_cases()
     trials = TRIALS // 4 if quick else TRIALS
     out = [
-        "Moved passages: speed and accuracy of diff.mark_moves",
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "",
+        *header("Moved passages: speed and accuracy of diff.mark_moves"),
         f"{trials} trials per book and kind of line; {MOVES} moves and {DECOYS} decoys "
         f"each; moved passages with {', '.join(f'{int(r * 100)}%' for r in RATES)} of "
         f"their words replaced; a passage found is right when each end overlaps the "
@@ -384,26 +398,11 @@ def run(quick: bool) -> str:
         }
         for case in trials_of(data, unit, trials):
             old, new, truth, ops = case["old"], case["new"], case["truth"], case["ops"]
-            clear_caches()
-            t0 = time.perf_counter()
-            rows, _, _ = align(
-                old, new, None, ops, move_similarity=similarity, move_algorithm=algorithm
-            )
-            t1 = time.perf_counter()
-            clear_caches()
-            t1b = time.perf_counter()
-            align(
-                old,
-                new,
-                None,
-                ops,
-                move_similarity=similarity,
-                move_algorithm=algorithm,
-                move_passages=False,
-            )
-            t2 = time.perf_counter()
-            tot["t_on"] += t1 - t0
-            tot["t_off"] += t2 - t1b
+            moves = {"move_similarity": similarity, "move_algorithm": algorithm}
+            rows, t_on = timed_align(old, new, ops, **moves)
+            _, t_off = timed_align(old, new, ops, move_passages=False, **moves)
+            tot["t_on"] += t_on
+            tot["t_off"] += t_off
             r, j, f, h, t, ious = score(rows, spans_found(rows, old, new), truth, old, new)
             tot["right"] += r
             tot["rejoined"] += j
@@ -436,14 +435,8 @@ def run(quick: bool) -> str:
         ]
     stress = data["stress"]
     old, new, truth, ops = stress["old"], stress["new"], stress["truth"], stress["ops"]
-    clear_caches()
-    t0 = time.perf_counter()
-    rows, _, _ = align(old, new, None, ops)
-    t1 = time.perf_counter()
-    clear_caches()
-    t2 = time.perf_counter()
-    align(old, new, None, ops, move_passages=False)
-    t3 = time.perf_counter()
+    rows, t_on = timed_align(old, new, ops)
+    _, t_off = timed_align(old, new, ops, move_passages=False)
     r, j, f, h, t, _ = score(rows, spans_found(rows, old, new), truth, old, new)
     out += [
         f"Stress: {len(old):,} paragraphs, {t:,} sentences moved, {STRESS_MOVES:,} decoys, "
@@ -452,14 +445,12 @@ def run(quick: bool) -> str:
         f"  right           : {r:>7,}",
         f"  wrong           : {f - j - r:>7,}",
         f"  moves found     : {h:>7,} of {t:,}",
-        f"  align, passages : {t1 - t0:>9,.2f} s",
-        f"  align, without  : {t3 - t2:>9,.2f} s",
+        f"  align, passages : {t_on:>9,.2f} s",
+        f"  align, without  : {t_off:>9,.2f} s",
         "",
     ]
     return "\n".join(out)
 
 
 if __name__ == "__main__":
-    text = run("--quick" in sys.argv)
-    print(text)
-    REPORT.write_bytes((text + "\n").encode("utf-8"))
+    write_report(REPORT, run("--quick" in sys.argv))

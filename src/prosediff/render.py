@@ -15,6 +15,11 @@ from prosediff.language import file_language_note, flag_code, paragraph_language
 from prosediff.unified import unified
 
 
+def counted(n: int, word: str) -> str:
+    """A count and what it counts, plural but for one: "1,234 lines"."""
+    return f"{n:,} {word}{'' if n == 1 else 's'}"
+
+
 def package_version(default: str = "") -> str:
     """prosediff's version, or default when it is not installed."""
     try:
@@ -30,6 +35,8 @@ _env = Environment(
     lstrip_blocks=True,
 )
 _env.filters["hyphenate"] = hyphenate
+_env.filters["counted"] = lambda n, word: counted(n, word)
+_env.filters["comma"] = lambda n: f"{n:,}"
 _env.globals["flag"] = lambda tag, title=None: flag_html(flag_code(tag), tag, title)
 _env.globals["file_language_note"] = file_language_note
 _env.globals["paragraph_language_note"] = paragraph_language_note
@@ -39,6 +46,14 @@ ALIGNMENTS = ("left", "justify")
 # How prose is compared (--split): paragraph by paragraph, sentence by
 # sentence, or both (in the HTML report only).
 SPLITS = ("paragraph", "sentence", "both")
+
+
+def check_split(split: str, fmt: str) -> None:
+    """Refuse both splits for a diff, which holds one (ValueError)."""
+    if split == "both" and fmt != "html":
+        raise ValueError("both splits are for the HTML report: a diff holds one")
+
+
 # What prosediff writes: the HTML report, a unified diff or a word diff; and their
 # files' suffix.
 FORMATS = {"html": ".html", "diff": ".diff", "wdiff": ".wdiff"}

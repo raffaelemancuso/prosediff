@@ -28,7 +28,6 @@ image is written [image], with its description when it has one, and an
 equation as its text.
 """
 
-from collections import Counter
 from dataclasses import dataclass, field
 from io import BytesIO
 
@@ -50,17 +49,15 @@ from prosediff.document import (
     Block,
     CommentMark,
     Document,
+    DocumentReader,
     Image,
     NoteRef,
     Span,
     Text,
-    attach_carried,
-    comments_in,
-    comments_only,
     join_paragraphs,
     markdown,
+    spaced,
     strip,
-    to_markdown,
 )
 from prosediff.language import WordLanguages, most_letters
 
@@ -111,29 +108,15 @@ class _NotesPart:
 
 
 @dataclass
-class Reader:
+class Reader(DocumentReader):
     document: Document
-    changes: str
     comments: dict = field(default_factory=dict)  # id -> python-docx Comment
     notes: dict = field(default_factory=dict)  # ("footnote"/"endnote", id) -> element
     note_order: list = field(default_factory=list)  # [(kind, id)] as referenced
     shown_comments: set = field(default_factory=set)
-    # comments of a paragraph deleted as a whole, for the next paragraph
-    carried: list = field(default_factory=list)
-    # The languages the text is marked with, when asked for, and the letters
-    # of the whole in each language.
-    languages: WordLanguages | None = None
-    letters: Counter = field(default_factory=Counter)
     # The styles of the paragraph being read that its runs do not restate:
     # a heading's own (its text is bold as a heading, not as bold text).
     plain: frozenset = frozenset()
-
-    def language_of(self, paragraphs) -> str | None:
-        if self.languages is None:
-            return None
-        language, counts = self.languages.of(paragraphs)
-        self.letters += counts
-        return language
 
     # Paragraph content ----------------------------------------------------------
 
@@ -146,7 +129,7 @@ class Reader:
         # as written, like a tracked change's: python-docx's timestamp makes
         # a date without a time midnight
         date = c._comment_elm.get(qn("w:date")) or ""
-        return [CommentMark(cid, c.author or "", " ".join(c.text.split()), date)]
+        return [CommentMark(cid, c.author or "", spaced(c.text), date)]
 
     def note_ref(self, kind: str, nid: str) -> list:
         key = (kind, nid)
@@ -161,7 +144,7 @@ class Reader:
         its comments are kept, so its footnote references are not counted.
         """
         r = Run(el, paragraph)
-        style = (r.style.name or "").lower() if r.style is not None else ""
+        style = _style_name(r)
         styles = set(styles_of(resolve_effective_formatting(r)))
         if style == "strong":
             styles.add(STRONG)
@@ -199,25 +182,13 @@ class Reader:
                 out += self.comment(child.get(qn("w:id")))
             elif tag in INSERTED or tag in DELETED:
                 is_deletion = tag in DELETED
-                keep = self.changes == "all" or (self.changes == "accept") != is_deletion
+                kind = "deletion" if is_deletion else "insertion"
                 inner = self.children(
-                    child, paragraph, deleted=is_deletion, dropping=dropping or not keep
+                    child, paragraph, deleted=is_deletion, dropping=dropping or not self.keeps(kind)
                 )
-                if not keep:
-                    # the text goes, the comments anchored in it stay
-                    out += comments_in(inner)
-                elif self.changes == "all":
-                    if markdown(inner):
-                        out.append(
-                            Span(
-                                "deletion" if is_deletion else "insertion",
-                                inner,
-                                author=child.get(qn("w:author")) or "",
-                                date=child.get(qn("w:date")) or "",
-                            )
-                        )
-                else:
-                    out += inner
+                out += self.settle_change(
+                    kind, inner, child.get(qn("w:author")) or "", child.get(qn("w:date")) or ""
+                )
             elif tag == qn("w:hyperlink"):
                 inner = self.children(child, paragraph, deleted, dropping)
                 rid = child.get(qn("r:id"))
@@ -243,7 +214,7 @@ class Reader:
         relationships)."""
         doc = self.document.part
         p = Paragraph(el, _Story(doc if part is None else _NotesPart(part, doc)))
-        style = (p.style.name or "").lower() if p.style is not None else ""
+        style = _style_name(p)
         self.plain = (
             styles_of(resolve_effective_formatting(p)) if style in HEADING_STYLES else frozenset()
         )
@@ -255,17 +226,11 @@ class Reader:
 
     def paragraph(self, el) -> Block | None:
         inlines = self.paragraph_inlines(el)
-        if not markdown(inlines):
+        if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
             return None
-        # A paragraph deleted as a whole keeps only the comments anchored in
-        # it: as Word merges it into the next paragraph, they go there.
-        if comments_only(inlines):
-            self.carried += inlines
-            return None
-        inlines, self.carried = self.carried + inlines, []
         language = self.language_of([el])
         p = Paragraph(el, _Story(self.document.part))
-        style = (p.style.name or "").lower() if p.style is not None else ""
+        style = _style_name(p)
         if style in HEADING_STYLES:
             return Block("heading", inlines, level=HEADING_STYLES[style], language=language)
         numbered = el.find(f"{qn('w:pPr')}/{qn('w:numPr')}") is not None
@@ -283,10 +248,7 @@ class Reader:
     def body(self) -> list[Block]:
         """The paragraphs and tables of the document; comments carried past
         the last paragraph join it."""
-        out = self.blocks(self.document.element.body)
-        attach_carried(out, self.carried)
-        self.carried = []
-        return out
+        return self.finish(self.blocks(self.document.element.body))
 
     def blocks(self, container) -> list[Block]:
         out: list[Block] = []
@@ -325,6 +287,11 @@ class Reader:
                 )
             )
         return out
+
+
+def _style_name(x) -> str:
+    """The name of a paragraph's or a run's style, lowercase ("" for none)."""
+    return (x.style.name or "").lower() if x.style is not None else ""
 
 
 def styles_of(fmt) -> frozenset[str]:
@@ -404,7 +371,7 @@ def omml_text(el) -> str:
         # spaces around relations and operators, which Word does not store
         for op in "=+×⋅<>≤≥≈−":
             text = text.replace(op, f" {op} ")
-        text = " ".join(text.split())
+        text = spaced(text)
     return text
 
 
@@ -424,12 +391,6 @@ def _notes(document) -> dict:
     return notes
 
 
-def docx_to_markdown(data: bytes, changes: str = "accept") -> str:
-    """A Word document's body as Markdown, its tracked changes settled
-    ("accept", "reject") or kept as markup ("all"), its comments kept."""
-    return to_markdown(read_docx(data, changes))
-
-
 def read_docx(data: bytes, changes: str = "accept") -> Document:
     """A Word document as prosediff reads it (prosediff.document), its
     tracked changes settled ("accept", "reject") or kept as markup ("all"),
@@ -442,7 +403,7 @@ def read_docx(data: bytes, changes: str = "accept") -> Document:
         raise WordError(str(e) or type(e).__name__) from None
     except Exception as e:  # a zip that is not a Word package, broken XML
         raise WordError(f"{type(e).__name__}: {e}") from None
-    reader = Reader(document, changes, languages=WordLanguages(data))
+    reader = Reader(document, changes=changes, languages=WordLanguages(data))
     try:
         reader.comments = {str(c.comment_id): c for c in document.comments}
     except (KeyError, ValueError):

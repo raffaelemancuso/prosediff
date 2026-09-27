@@ -387,13 +387,13 @@ thead.print, .print-note { display: none; }
 
 {% if c.commits %}
 <details class="commits"{% if c.commits_total <= 10 %} open{% endif %}>
-  <summary>{{ "{:,}".format(c.commits_total) }} commit{{ "" if c.commits_total == 1 else "s" }} in between{% if c.target.short in ("working tree", "index") %}, up to HEAD{% endif %}</summary>
+  <summary>{{ c.commits_total | counted("commit") }} in between{% if c.target.short in ("working tree", "index") %}, up to HEAD{% endif %}</summary>
   <ol>
   {% for r in c.commits %}
     <li><code title="{{ r.hexsha }}">{{ r.short }}</code><span class="role">{{ r.date }}</span><span>{{ r.subject }} <span class="role">— {{ r.author }}</span></span></li>
   {% endfor %}
   {% if c.commits_total > c.commits | length %}
-    <li><span></span><span></span><span class="role">… and {{ "{:,}".format(c.commits_total - c.commits | length) }} older</span></li>
+    <li><span></span><span></span><span class="role">… and {{ (c.commits_total - c.commits | length) | comma }} older</span></li>
   {% endif %}
   </ol>
 </details>
@@ -405,21 +405,33 @@ thead.print, .print-note { display: none; }
 {% if off is none %}{{ on }}{% else %}<span class="pv-on">{{ on }}</span><span class="pv-off">{{ off }}</span>{% endif %}
 {%- endmacro %}
 
+{# The two cells of one side of a row: its gutter (flag, number or label)
+   and its text. A hidden row (spoken none) shows no more; a row of the
+   table its sign too, what a screen reader says of it (spoken), and, when
+   it moved, where it went or came from. #}
+{% macro cells(f, r, side, spoken=none, sign="", plain=none) -%}
+{% set left = side == "left" %}{% set no, lang, label = r[side ~ "_no"], r[side ~ "_lang"], r[side ~ "_label"] %}{% set end = "moved-out" if left else "moved-in" %}{% set move = r.changes[0] if spoken is not none and r.kind == end and r.changes else "" %}
+<td class="no {{ "l" if left else "r" }}"{% if move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, no, lang) }}{% if spoken is none %}{{ label or no }}{% else %}{{ (label or no) if no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign }}</span>{% endif %}</td>
+{%- if spoken is none %}<td class="code {{ side }}"{% if lang and lang != f.language %} lang="{{ lang }}"{% endif %}>{{ r[side] | hyphenate(lang or f.language) }}</td>
+{%- else %}<td class="code {{ side }}"{% if lang and lang != f.language %} lang="{{ lang }}"{% endif %}>{% if r.kind in spoken and no is not none %}<span class="sr">{{ spoken[r.kind] }}, {{ "old" if left else "new" }}: </span>{% endif %}{{ pv(r[side] | hyphenate(lang or f.language), plain[side] | hyphenate(lang or f.language) if plain else none) }}{% if move %}<span class="print-note" aria-hidden="true">{{ move | replace(", edited:", "") }}</span>{% endif %}</td>
+{%- endif %}
+{%- endmacro %}
+
 {# A count as the report shows it with moved passages (on) and without
    (off): one number when both are the same, else both, the "Moved passages"
    switch showing one. #}
 {% macro both(on, off) -%}
-{% if on == off %}{{ "{:,}".format(on) }}{% else %}<span class="pv-on">{{ "{:,}".format(on) }}</span><span class="pv-off">{{ "{:,}".format(off) }}</span>{% endif %}
+{% if on == off %}{{ on | comma }}{% else %}<span class="pv-on">{{ on | comma }}</span><span class="pv-off">{{ off | comma }}</span>{% endif %}
 {%- endmacro %}
 
 {% macro counts(x) -%}
-{% set y = x.without_passages %}
-<span class="add" title="lines added">+{{ both(x.additions, y.additions) }}</span>
-<span class="rem" title="lines removed">−{{ both(x.deletions, y.deletions) }}</span>
+{% set n, y = x.counts, x.without_passages %}
+<span class="add" title="lines added">+{{ both(n.additions, y.additions) }}</span>
+<span class="rem" title="lines removed">−{{ both(n.deletions, y.deletions) }}</span>
 <span class="role">lines,</span>
-<span class="add" title="words added">+{{ both(x.words_added, y.words_added) }}</span>
-<span class="rem" title="words removed">−{{ both(x.words_removed, y.words_removed) }}</span>
-<span class="role">words{% if x.moved %}, {{ "{:,}".format(x.moved) }} moved line{{ "" if x.moved == 1 else "s" }}{% endif %}{% if x.moved_passages %}<span class="pv-on">, {{ "{:,}".format(x.moved_passages) }} moved passage{{ "" if x.moved_passages == 1 else "s" }}</span>{% endif %}</span>
+<span class="add" title="words added">+{{ both(n.words_added, y.words_added) }}</span>
+<span class="rem" title="words removed">−{{ both(n.words_removed, y.words_removed) }}</span>
+<span class="role">words{% if n.moved %}, {{ n.moved | counted("moved line") }}{% endif %}{% if n.moved_passages %}<span class="pv-on">, {{ n.moved_passages | counted("moved passage") }}</span>{% endif %}</span>
 {%- endmacro %}
 
 {# What a line is in a comparison: a paragraph or a sentence of prose, or a
@@ -434,7 +446,7 @@ thead.print, .print-note { display: none; }
 {% if c.comments %}
 {% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
 <section class="comments-panel" aria-labelledby="{{ prefix }}comments-title">
-  <h2 id="{{ prefix }}comments-title">Comments: {{ "{:,}".format(new_c | length) }} new, {{ "{:,}".format(gone_c | length) }} removed</h2>
+  <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
   {{ comment_list(new_c + gone_c) }}
 </section>
 {% endif %}
@@ -445,16 +457,16 @@ thead.print, .print-note { display: none; }
 <p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
 {% else %}
 <div class="summary">
-  {% if c.changed_lines or c.inserted_lines or c.deleted_lines or c.moved or c.moved_passages %}
-  {% set y = c.without_passages %}
+  {% set n, y = c.counts, c.without_passages %}
+  {% if n.changed_lines or n.inserted_lines or n.deleted_lines or n.moved or n.moved_passages %}
   <p class="units"><b>{{ unit_name(c, split) | capitalize }}:</b>
-    {{ "{:,}".format(c.changed_lines) }} changed,
-    {{ both(c.inserted_lines, y.inserted_lines) }} inserted,
-    {{ both(c.deleted_lines, y.deleted_lines) }} deleted,
-    {{ "{:,}".format(c.moved) }} moved{% if c.moved_passages %}<span class="pv-on">;
-    {{ "{:,}".format(c.moved_passages) }} passage{{ "" if c.moved_passages == 1 else "s" }} moved within or between them</span>{% endif %}</p>
+    {{ n.changed_lines | comma }} changed,
+    {{ both(n.inserted_lines, y.inserted_lines) }} inserted,
+    {{ both(n.deleted_lines, y.deleted_lines) }} deleted,
+    {{ n.moved | comma }} moved{% if n.moved_passages %}<span class="pv-on">;
+    {{ n.moved_passages | counted("passage") }} moved within or between them</span>{% endif %}</p>
   {% endif %}
-  <span>{{ "{:,}".format(c.files | length) }} file{{ "" if c.files | length == 1 else "s" }} changed:
+  <span>{{ c.files | length | counted("file") }} changed:
   {{ counts(c) }}{% if paths %}, in {{ paths | join(", ") }}{% endif %}</span>
   <button type="button" data-files="open">Expand all</button>
   <button type="button" data-files="close">Collapse all</button>
@@ -475,7 +487,7 @@ thead.print, .print-note { display: none; }
     <span class="path">{% if f.change == "renamed" %}{{ f.old_path }} → {% endif %}{{ f.path }}</span>
     <span class="role">{{ f.change }}</span>
     {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}
-    {% if f.formatted_rows %}<span class="fmt-count">formatting changed in {{ "{:,}".format(f.formatted_rows) }} line{{ "" if f.formatted_rows == 1 else "s" }}</span>{% endif %}
+    {% if f.formatted_rows %}<span class="fmt-count">formatting changed in {{ f.formatted_rows | counted("line") }}</span>{% endif %}
     {% if f.note %}<span class="file-note">{{ f.note }}</span>{% endif %}
     {% if f.language %}<span class="file-note" title="{{ file_language_note(f.language, f.language_source) }}; its sentences are split and its lines hyphenated by it{% if f.mixed_languages %}, where a paragraph is marked with none of its own{% endif %}">{% if not f.mixed_languages %}{{ flag(f.language) }} {% endif %}language: {{ f.language }}{% if f.language_source == "guessed" %} (guessed){% elif f.language_source == "document" %} (from the document){% endif %}</span>{% endif %}
   </summary>
@@ -501,12 +513,12 @@ thead.print, .print-note { display: none; }
     {% if r.kind == "skip" %}
     </tbody>
     {% if r.omitted %}
-    <tbody><tr class="skip"><td colspan="4"><span class="omitted">⋯ {{ "{:,}".format(r.omitted) }} unchanged lines, left out of the HTML report (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
+    <tbody><tr class="skip"><td colspan="4"><span class="omitted">⋯ {{ r.omitted | comma }} unchanged lines, left out of the HTML report (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
     {% else %}
-    <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ "{:,}".format(r.skipped) }} unchanged line{{ "" if r.skipped == 1 else "s" }}</button></td></tr></tbody>
+    <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ r.skipped | counted("unchanged line") }}</button></td></tr></tbody>
     <tbody hidden>
     {% for h in r.hidden %}
-    <tr class="equal{% if h.format_changes %} fmt-row{% endif %}"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}><td class="no l">{{ gutter_flag(f, h.left_no, h.left_lang) }}{{ h.left_label or h.left_no }}</td><td class="code left"{% if h.left_lang and h.left_lang != f.language %} lang="{{ h.left_lang }}"{% endif %}>{{ h.left | hyphenate(h.left_lang or f.language) }}</td><td class="no r">{{ gutter_flag(f, h.right_no, h.right_lang) }}{{ h.right_label or h.right_no }}</td><td class="code right"{% if h.right_lang and h.right_lang != f.language %} lang="{{ h.right_lang }}"{% endif %}>{{ h.right | hyphenate(h.right_lang or f.language) }}</td></tr>
+    <tr class="equal{% if h.format_changes %} fmt-row{% endif %}"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}>{{ cells(f, h, "left") }}{{ cells(f, h, "right") }}</tr>
     {% endfor %}
     </tbody>
     {% endif %}
@@ -516,11 +528,8 @@ thead.print, .print-note { display: none; }
     {% if r.only_moved %}{% set sign = (pv("→", sign[0]), "") if r.kind == "delete" else ("", pv("←", sign[1])) %}{% endif %}
     {% set plain = r.without_passages %}
     <tr class="{{ r.kind }}{% if r.only_moved %} only-moved{% endif %}{% if r.first_of_change %} first-change{% endif %}{% if r.format_changes %} fmt-row{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}{% if r.move_pair %} data-pair="{{ r.move_pair }}"{% endif %}>
-      {% set move = r.changes[0] if r.kind in ("moved-out", "moved-in") and r.changes else "" %}
-      <td class="no l"{% if r.kind == "moved-out" and move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, r.left_no, r.left_lang) }}{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
-      <td class="code left"{% if r.left_lang and r.left_lang != f.language %} lang="{{ r.left_lang }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ pv(r.left | hyphenate(r.left_lang or f.language), plain.left | hyphenate(r.left_lang or f.language) if plain else none) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
-      <td class="no r"{% if r.kind == "moved-in" and move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, r.right_no, r.right_lang) }}{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
-      <td class="code right"{% if r.right_lang and r.right_lang != f.language %} lang="{{ r.right_lang }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ pv(r.right | hyphenate(r.right_lang or f.language), plain.right | hyphenate(r.right_lang or f.language) if plain else none) }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
+      {{ cells(f, r, "left", spoken, sign[0], plain) }}
+      {{ cells(f, r, "right", spoken, sign[1], plain) }}
     </tr>
     {% endif %}
     {% endfor %}
@@ -549,11 +558,11 @@ thead.print, .print-note { display: none; }
 <div id="tip" role="tooltip" hidden></div>
 <div class="toolbar" role="toolbar" aria-label="Changes and views">
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
-  <span class="counter" aria-live="polite" title="{{ "{:,}".format(c.change_count) }} change{{ "" if c.change_count == 1 else "s" }}">{{ "{:,}".format(c.change_count) }}</span>
+  <span class="counter" aria-live="polite" title="{{ c.change_count | counted("change") }}">{{ c.change_count | comma }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
   {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved line to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
-  {% if c.moved_passages or (alt and alt.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="true" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
+  {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="true" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
   <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg></button>

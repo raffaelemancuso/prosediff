@@ -56,7 +56,7 @@ def test_cli_errors(two_commits, tmp_path, capsys):
         (["--files", str(tmp_path / "plain"), str(tmp_path / "nope")], "no such file"),
         (
             ["--git", str(b.path), base, target, "--md-filter", fail, *out],
-            "filter failed on doc.md (exit 3)",
+            "filter on doc.md failed (exit 3)",
         ),
     ]:
         assert main(args) == 1

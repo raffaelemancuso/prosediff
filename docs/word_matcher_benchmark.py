@@ -41,7 +41,6 @@ and the others still run.
 """
 
 import contextlib
-import difflib
 import io
 import os
 import re
@@ -49,8 +48,7 @@ import statistics
 import subprocess
 import sys
 import time
-from datetime import datetime
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 
 import passage_benchmark as pb
@@ -67,16 +65,6 @@ MATCHER_TIMEOUT = 600
 REPEATS = 3  # timed passes of the word pairing, the best kept
 REPEAT_BUDGET = 60  # seconds: no further pass once the passes took this long
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def difflib_opcodes(a: list[str], b: list[str]):
-    return difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
-
-
-def patience_opcodes(a: list[str], b: list[str]):
-    import patiencediff
-
-    return patiencediff.PatienceSequenceMatcher(None, a, b).get_opcodes()
 
 
 def rapidfuzz_opcodes(a: list[str], b: list[str]):
@@ -107,8 +95,7 @@ def from_pairs(pairs, n: int, m: int):
     out, i, j = [], 0, 0
     for x, y in [*pairs, (n, m)]:
         if x > i or y > j:
-            tag = "replace" if x > i and y > j else "delete" if x > i else "insert"
-            out.append((tag, i, x, j, y))
+            out.append((diff.change_tag(i, x, j, y), i, x, j, y))
         if (x, y) == (n, m):
             break
         if out and out[-1][0] == "equal" and out[-1][2] == x and out[-1][4] == y:
@@ -233,10 +220,10 @@ def similar_opcodes(algorithm: str):
 
 
 MATCHERS = {
-    "difflib": difflib_opcodes,
+    "difflib": diff.difflib_opcodes,
     "cydifflib": cydifflib_opcodes,
     "cdifflib": cdifflib_opcodes,
-    "patiencediff": patience_opcodes,
+    "patiencediff": diff.patience_opcodes,
     "rapidfuzz": rapidfuzz_opcodes,
     "Levenshtein": levenshtein_opcodes,
     "histodiff histogram": histodiff_opcodes("histogram"),
@@ -258,18 +245,9 @@ MATCHERS = {
 
 def use(matcher) -> None:
     """Make diff.word_ops pair words with matcher (cached, like the original)."""
-
-    @lru_cache(maxsize=diff.WORD_OPS_CACHE)
-    def _word_ops(old: str, new: str):
-        a, b = diff.TOKEN.findall(old), diff.TOKEN.findall(new)
-        ao, bo = diff._offsets(a), diff._offsets(b)
-        ops = [
-            (op, ao[i1], ao[i2], bo[j1], bo[j2])
-            for op, i1, i2, j1, j2 in diff.merge_across_spaces(matcher(a, b), a)
-        ]
-        return tuple(diff.slide_ops(ops, old, new))
-
-    diff._word_ops = _word_ops
+    diff._word_ops = lru_cache(maxsize=diff.WORD_OPS_CACHE)(
+        partial(diff.word_opcodes, pair=matcher)
+    )
 
 
 def line_pairs() -> list[tuple[str, str]]:
@@ -295,7 +273,7 @@ def measure(name: str) -> list[str]:
     pairs = line_pairs()
     # difflib's pairing, the reference (diff._word_ops pairs with
     # patiencediff when it is installed)
-    use(difflib_opcodes)
+    use(diff.difflib_opcodes)
     reference = [tuple(diff.word_ops(o, n)) for o, n in pairs]
     use(matcher)
     # the best of up to REPEATS passes (each with an empty cache), fewer when
@@ -344,9 +322,7 @@ def main(only: list[str]) -> str:
     extension can) or hangs is reported as failed, and the others still run."""
     names = [name for name in MATCHERS if not only or name in only]
     out = [
-        "Word matchers for diff.word_ops: speed, pieces, and moved passages",
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "",
+        *pb.header("Word matchers for diff.word_ops: speed, pieces, and moved passages"),
         f"{len(line_pairs()):,} changed lines of the trials of docs/passage_benchmark.py.",
         "",
     ]
@@ -378,8 +354,8 @@ if __name__ == "__main__":
         print("\n".join(measure(sys.argv[2])).rstrip("\n"))
         sys.exit(0)
     text = main(sys.argv[1:])
-    print(text)
     # a run of some matchers only has a report of its own
-    out = REPORT if len(sys.argv) == 1 else REPORT.with_name(REPORT.stem + "_partial.txt")
-    out.write_bytes((text + "\n").encode("utf-8"))
+    pb.write_report(
+        REPORT if len(sys.argv) == 1 else REPORT.with_name(REPORT.stem + "_partial.txt"), text
+    )
     sys.exit(0)

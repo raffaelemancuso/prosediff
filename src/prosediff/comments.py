@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from markupsafe import Markup
 
-from prosediff.document import DATE_ATTRIBUTE, short_date
+from prosediff.document import DATE_ATTRIBUTE, short_date, spaced
 
 PUA_FIRST, PUA_LAST = 0xE000, 0xF8FF
 PLACEHOLDER = re.compile(f"[{chr(PUA_FIRST)}-{chr(PUA_LAST)}]")
@@ -154,7 +154,7 @@ def fold_comments(text: str, comments: Comments, keep_empty: bool = False) -> st
                     author = AUTHOR.search(attrs)
                     date = DATE_ATTRIBUTE.search(attrs)
                     # Markdown escapes (\[ \* \_ ...) are not part of the comment
-                    note = ESCAPE.sub(r"\1", " ".join(text[i + 1 : close].split()))
+                    note = ESCAPE.sub(r"\1", spaced(text[i + 1 : close]))
                     if not note and not keep_empty:
                         # a comment with no text says nothing: left out
                         i = end + 1
@@ -201,6 +201,11 @@ def show_comments(markup: Markup, comments: Comments, new: frozenset[str] = froz
         return str(MARKER.format(" new" if is_new else "", c.author, c.date, c.text, label, icon))
 
     return Markup(PLACEHOLDER.sub(marker, str(markup)))
+
+
+def placeholders_of(lines: list[str]) -> set[str]:
+    """The comment placeholders of lines."""
+    return set(placeholders_in("\n".join(lines)))
 
 
 def placeholders_in(markup: Markup | str) -> list[str]:

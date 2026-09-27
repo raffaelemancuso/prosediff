@@ -41,6 +41,7 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
     Comments,
     fold_comments,
     placeholders_in,
+    placeholders_of,
     plain,
     show_comments,
 )
@@ -49,7 +50,9 @@ from prosediff.document import (
     Document,
     Line,
     comment_markdown,
+    quoted_author,
     short_date,
+    spaced,
     sub,
 )
 from prosediff.language import (
@@ -334,34 +337,23 @@ class FileDiff:
         return self.new_path or self.old_path or ""
 
     @property
-    def words_added(self) -> int:
-        return sum(r.words_added for r in self.rows)
-
-    @property
-    def words_removed(self) -> int:
-        return sum(r.words_removed for r in self.rows)
-
-    @property
-    def moved(self) -> int:
-        return sum(r.kind == "moved-in" for r in self.rows)
-
-    @property
-    def moved_passages(self) -> int:
-        """Passages moved within or between lines (mark_moves)."""
-        return sum(len(r.new_moves) for r in self.rows)
-
-    @property
-    def changed_lines(self) -> int:
-        """Lines (paragraphs, sentences) edited in place."""
-        return sum(r.kind == "replace" for r in self.rows)
-
-    @property
-    def inserted_lines(self) -> int:
-        return sum(r.kind == "insert" and not r.only_moved for r in self.rows)
-
-    @property
-    def deleted_lines(self) -> int:
-        return sum(r.kind == "delete" and not r.only_moved for r in self.rows)
+    def counts(self) -> Counts:
+        """What changed: lines and words added and removed, lines and
+        passages moved (moved lines count in neither added nor removed),
+        lines edited, inserted and deleted (not those whose words all moved,
+        as passages)."""
+        rows = self.rows
+        return Counts(
+            additions=self.additions,
+            deletions=self.deletions,
+            words_added=sum(r.words_added for r in rows),
+            words_removed=sum(r.words_removed for r in rows),
+            moved=sum(r.kind == "moved-in" for r in rows),
+            moved_passages=sum(len(r.new_moves) for r in rows),
+            changed_lines=sum(r.kind == "replace" for r in rows),
+            inserted_lines=sum(r.kind == "insert" and not r.only_moved for r in rows),
+            deleted_lines=sum(r.kind == "delete" and not r.only_moved for r in rows),
+        )
 
     @property
     def change_count(self) -> int:
@@ -377,14 +369,13 @@ class FileDiff:
         """Its counts with moved passages hidden: a line whose words all moved
         counts as removed or added again, and the passages' words too."""
         plain = [r.without_passages or r for r in self.rows]
-        return Counts(
+        return replace(
+            self.counts,
             additions=self.additions + sum(r.kind == "insert" and r.only_moved for r in self.rows),
             deletions=self.deletions + sum(r.kind == "delete" and r.only_moved for r in self.rows),
             words_added=sum(p.words_added for p in plain),
             words_removed=sum(p.words_removed for p in plain),
-            moved=self.moved,
             moved_passages=0,
-            changed_lines=self.changed_lines,
             inserted_lines=sum(r.kind == "insert" for r in self.rows),
             deleted_lines=sum(r.kind == "delete" for r in self.rows),
         )
@@ -408,40 +399,9 @@ class Comparison:
     comments: list[CommentEntry] = field(default_factory=list)
 
     @property
-    def additions(self) -> int:
-        return sum(f.additions for f in self.files)
-
-    @property
-    def deletions(self) -> int:
-        return sum(f.deletions for f in self.files)
-
-    @property
-    def words_added(self) -> int:
-        return sum(f.words_added for f in self.files)
-
-    @property
-    def words_removed(self) -> int:
-        return sum(f.words_removed for f in self.files)
-
-    @property
-    def moved(self) -> int:
-        return sum(f.moved for f in self.files)
-
-    @property
-    def moved_passages(self) -> int:
-        return sum(f.moved_passages for f in self.files)
-
-    @property
-    def changed_lines(self) -> int:
-        return sum(f.changed_lines for f in self.files)
-
-    @property
-    def inserted_lines(self) -> int:
-        return sum(f.inserted_lines for f in self.files)
-
-    @property
-    def deleted_lines(self) -> int:
-        return sum(f.deleted_lines for f in self.files)
+    def counts(self) -> Counts:
+        """What changed, in every file (FileDiff.counts)."""
+        return sum((f.counts for f in self.files), Counts())
 
     @property
     def change_count(self) -> int:
@@ -629,19 +589,42 @@ def run(args: str | list[str], *, timeout: float, **options) -> subprocess.Compl
     return subprocess.CompletedProcess(args, proc.returncode, out, err)
 
 
+def run_checked(
+    args: str | list[str],
+    *,
+    what: str,
+    timeout: float,
+    error: type[Exception] = RuntimeError,
+    ok: tuple[int, ...] = (0,),
+    **options,
+) -> subprocess.CompletedProcess:
+    """run(args), a failure raised as error, saying what failed: stopped
+    after timeout seconds, or ended with an exit code not in ok (its
+    standard error then said too)."""
+    try:
+        proc = run(args, timeout=timeout, **options)
+    except subprocess.TimeoutExpired:
+        raise error(f"{what} took more than {timeout:g} seconds, and was stopped") from None
+    if proc.returncode not in ok:
+        err = proc.stderr
+        if isinstance(err, bytes):
+            err = err.decode("utf-8", errors="replace")
+        raise error(
+            f"{what} failed (exit {proc.returncode})" + (f": {err.strip()}" if err.strip() else "")
+        )
+    return proc
+
+
 def run_filter(command: str, text: str, path: str) -> str:
     """Pipe text through a shell command (cmd.exe on Windows, sh elsewhere)."""
-    try:
-        proc = run(command, shell=True, input=text.encode("utf-8"), timeout=FILTER_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        raise FilterError(
-            f"filter took more than {FILTER_TIMEOUT} seconds on {path}, and was stopped"
-        ) from None
-    if proc.returncode != 0:
-        raise FilterError(
-            f"filter failed on {path} (exit {proc.returncode}): "
-            + proc.stderr.decode("utf-8", errors="replace").strip()
-        )
+    proc = run_checked(
+        command,
+        what=f"filter on {path}",
+        timeout=FILTER_TIMEOUT,
+        error=FilterError,
+        shell=True,
+        input=text.encode("utf-8"),
+    )
     return proc.stdout.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
@@ -653,7 +636,7 @@ MAX_QUOTE = 60
 
 
 def quote(text: str) -> str:
-    text = " ".join(footnotes.plain(plain(text)).split())
+    text = spaced(footnotes.plain(plain(text)))
     if len(text) > MAX_QUOTE:
         text = text[: MAX_QUOTE - 1] + "…"
     return f'"{text}"'
@@ -801,6 +784,11 @@ def comments_only(old: str, new: str) -> bool:
     )
 
 
+def change_tag(i1: int, i2: int, j1: int, j2: int) -> str:
+    """The tag of the opcode of a change, old items i1:i2 for new j1:j2."""
+    return "replace" if i2 > i1 and j2 > j1 else "delete" if i2 > i1 else "insert"
+
+
 def merge_across_spaces(ops: list[Opcode], a: list[str]) -> list[Opcode]:
     """Join two changes separated only by whitespace into one change.
 
@@ -821,8 +809,7 @@ def merge_across_spaces(ops: list[Opcode], a: list[str]) -> list[Opcode]:
             nxt = ops[k + 1]
             _, i1, _, j1, _ = merged.pop()
             _, _, i2, _, j2 = nxt
-            tag = "replace" if i2 > i1 and j2 > j1 else "delete" if i2 > i1 else "insert"
-            merged.append((tag, i1, i2, j1, j2))
+            merged.append((change_tag(i1, i2, j1, j2), i1, i2, j1, j2))
             k += 2
         else:
             merged.append(op)
@@ -844,18 +831,28 @@ def word_ops(old: str, new: str) -> list[Opcode]:
 WORD_OPS_CACHE = 4096
 
 
-@lru_cache(maxsize=WORD_OPS_CACHE)
-def _word_ops(old: str, new: str) -> tuple[Opcode, ...]:
+def patience_opcodes(a: list[str], b: list[str]) -> list[Opcode]:
+    """The words of two lines paired by patiencediff's patience diff (in
+    Rust): difflib's pairing but on 4 of 2,776 changed lines, 14 times as
+    fast (docs/word_matcher_benchmark.md)."""
+    return PatienceSequenceMatcher(None, a, b).get_opcodes()
+
+
+def word_opcodes(
+    old: str, new: str, pair: Callable[[list[str], list[str]], list] = patience_opcodes
+) -> tuple[Opcode, ...]:
+    """word_ops, the words paired by pair (tokens, tokens -> opcodes over
+    them); docs/word_matcher_benchmark.py tries other matchers."""
     a, b = TOKEN.findall(old), TOKEN.findall(new)
     ao, bo = _offsets(a), _offsets(b)
-    # patiencediff's patience diff (in Rust): difflib's pairing but on 4 of
-    # 2,776 changed lines, 14 times as fast (docs/word_matcher_benchmark.md)
-    matcher = PatienceSequenceMatcher(None, a, b)
     ops = [
         (op, ao[i1], ao[i2], bo[j1], bo[j2])
-        for op, i1, i2, j1, j2 in merge_across_spaces(matcher.get_opcodes(), a)
+        for op, i1, i2, j1, j2 in merge_across_spaces(pair(a, b), a)
     ]
     return tuple(slide_ops(ops, old, new))
+
+
+_word_ops = lru_cache(maxsize=WORD_OPS_CACHE)(word_opcodes)
 
 
 # Where a change reads best: at the start or end of the line; after the end
@@ -975,6 +972,14 @@ class MovedSpan:
     html: Markup
 
 
+def moved_passages(rows: list[Row]) -> list[tuple[Row, MovedSpan, Row, MovedSpan]]:
+    """The passages the rows show moved, by their number: (the row a passage
+    left, its end there, the row it went to, its end there)."""
+    left = {m.pair: (r, m) for r in rows for m in r.old_moves}
+    ends = [(*left[m.pair], r, m) for r in rows for m in r.new_moves if m.pair in left]
+    return sorted(ends, key=lambda e: e[1].pair)
+
+
 def outside(start: int, end: int, moves: list[MovedSpan]) -> list[tuple[int, int]]:
     """The pieces of characters start:end that no moved passage covers."""
     pieces, at = [], start
@@ -987,6 +992,11 @@ def outside(start: int, end: int, moves: list[MovedSpan]) -> list[tuple[int, int
     if at < end:
         pieces.append((at, end))
     return pieces
+
+
+def _in_order(pieces: list[tuple[int, Markup]]) -> Markup:
+    """The HTML of pieces of a line, (where in the line, HTML), in order."""
+    return Markup("").join(html for _, html in sorted(pieces, key=lambda p: p[0]))
 
 
 def word_diff(
@@ -1069,10 +1079,7 @@ def word_diff(
         if new_part:
             right.append((n1, INS.format(styled(new_part, new_st))))
 
-    def joined(pieces: list[tuple[int, Markup]]) -> Markup:
-        return Markup("").join(html for _, html in sorted(pieces, key=lambda p: p[0]))
-
-    return WordDiff(joined(left), joined(right), changes, added, removed, formats)
+    return WordDiff(_in_order(left), _in_order(right), changes, added, removed, formats)
 
 
 # Line similarity ----------------------------------------------------------------
@@ -1179,13 +1186,7 @@ def opcodes_from_changes(
             # whitespace only; its two sides still have as many lines.
             tag = "equal" if i1 - i == j1 - j else "replace"
             ops.append((tag, i, i1, j, j1))
-        if i2 > i1 and j2 > j1:
-            tag = "replace"
-        elif i2 > i1:
-            tag = "delete"
-        else:
-            tag = "insert"
-        ops.append((tag, i1, i2, j1, j2))
+        ops.append((change_tag(i1, i2, j1, j2), i1, i2, j1, j2))
         i, j = i2, j2
     if i < n_old or j < n_new:
         tag = "equal" if n_old - i == n_new - j else "replace"
@@ -1241,16 +1242,9 @@ def git_opcodes(
         ]
         if ignore_whitespace:
             cmd.append("--ignore-all-space")
-        try:
-            proc = run([*cmd, "a", "b"], cwd=tmp, timeout=GIT_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(
-                f"git diff took more than {GIT_TIMEOUT} seconds, and was stopped"
-            ) from None
-    # git diff --no-index exits 1 when the trees differ.
-    if proc.returncode not in (0, 1):
-        raise RuntimeError(
-            "git diff failed: " + proc.stderr.decode("utf-8", errors="replace").strip()
+        # git diff --no-index exits 1 when the trees differ
+        proc = run_checked(
+            [*cmd, "a", "b"], what="git diff", timeout=GIT_TIMEOUT, ok=(0, 1), cwd=tmp
         )
     current = None
     for line in proc.stdout.decode("utf-8", errors="replace").splitlines():
@@ -1307,13 +1301,9 @@ def inserted_row(number: int, line: str, style: Styler) -> Row:
     )
 
 
-def _spaced(line: str) -> str:
-    return " ".join(line.split())
-
-
 def move_key(line: str) -> str | None:
     """What identifies a line as moved: its words, spacing aside."""
-    key = _spaced(line)
+    key = spaced(line)
     return key if len(key.replace(" ", "")) >= MIN_MOVE_CHARS else None
 
 
@@ -1358,7 +1348,7 @@ MOVE_ALGORITHMS = {
     # the words both lines share against the rest of each, whatever their
     # order (a line inside a longer one scores high)
     "token-set": (
-        _spaced,
+        spaced,
         lambda a, b, cutoff: fuzz.token_set_ratio(a, b, score_cutoff=cutoff * 100) / 100,
     ),
 }
@@ -1590,6 +1580,20 @@ class MovedPassageSettings:
         "Rare word, passages",
         "with too many pairs, a word in at most this many passages is rare",
     )
+
+    @classmethod
+    def from_choices(cls, choices: dict) -> "MovedPassageSettings":
+        """The settings chosen (field name -> value; None or missing: the
+        default), each of its field's type, checked (SettingError)."""
+        settings = cls(
+            **{
+                f.name: setting_type(f)(choices[f.name])
+                for f in fields(cls)
+                if choices.get(f.name) is not None
+            }
+        )
+        settings.check()
+        return settings
 
     def check(self) -> None:
         """Refuse values that make no sense (SettingError, naming the setting)."""
@@ -1847,7 +1851,7 @@ def mark_moves(
     def alike(a: str, b: str) -> float:
         # the same words, spacing aside (not move_key: None for any two
         # passages under MIN_MOVE_CHARS, which would make them all alike)
-        if _spaced(a) == _spaced(b):
+        if spaced(a) == spaced(b):
             return 1.0
         return score(prepare(a), prepare(b)) if similarity < 1 else 0.0
 
@@ -1975,7 +1979,7 @@ def _make_passage_move(
     a, b = o[a1:a2], n[b1:b2]
     to_line, from_line = _move_ends(out, into)
     a_styles, b_styles = _slice(style(o), a1, a2), _slice(style(n), b1, b2)
-    edited = _spaced(a) != _spaced(b)
+    edited = spaced(a) != spaced(b)
     if edited:
         w = word_diff(a, b, a_styles, b_styles)
         left, right = w.left, w.right
@@ -2022,7 +2026,7 @@ def _redraw(row: Row, old: list[str], new: list[str], style: Styler) -> None:
     pieces = [(m.start, m.html) for m in moves] + [
         (a, styled(line[a:b], _slice(style(line), a, b))) for a, b in rest
     ]
-    html = Markup("").join(h for _, h in sorted(pieces, key=lambda p: p[0]))
+    html = _in_order(pieces)
     words = sum(len(WORD.findall(line[a:b])) for a, b in rest)
     row.changes = [*row.changes[:1], *row.move_changes] if words else row.move_changes
     if row.kind == "delete":
@@ -2203,11 +2207,12 @@ def align(
         else:
             rows += equal_rows(i1, j1, n)
 
-    for row in all_rows(rows):
-        if row.left_no is not None:
-            row.left_label = old_labels[row.left_no - 1] if old_labels else str(row.left_no)
-        if row.right_no is not None:
-            row.right_label = new_labels[row.right_no - 1] if new_labels else str(row.right_no)
+    _set_sides(
+        rows,
+        "label",
+        lambda n: old_labels[n - 1] if old_labels else str(n),
+        lambda n: new_labels[n - 1] if new_labels else str(n),
+    )
     mark_moves(
         rows,
         old,
@@ -2259,17 +2264,30 @@ def paragraph_numbers(labels: list[str]) -> list[str]:
     return out
 
 
+def _set_sides(
+    rows: list[Row], attr: str, old: Callable[[int], str], new: Callable[[int], str]
+) -> None:
+    """Set each row's left_attr and right_attr from its line numbers, as old
+    and new give them, on the side it has a line."""
+    for row in all_rows(rows):
+        if row.left_no is not None:
+            setattr(row, f"left_{attr}", old(row.left_no))
+        if row.right_no is not None:
+            setattr(row, f"right_{attr}", new(row.right_no))
+
+
 def set_row_languages(rows: list[Row], old: list[str], new: list[str], language: str) -> bool:
     """Each row's language, on each side: that of the paragraph of a
     document it comes from, if marked. Whether any is not the file's."""
-    mixed = False
-    for row in all_rows(rows):
-        if row.left_no is not None:
-            row.left_lang = getattr(old[row.left_no - 1], "lang", "")
-        if row.right_no is not None:
-            row.right_lang = getattr(new[row.right_no - 1], "lang", "")
-        mixed = mixed or any(x and x != language for x in (row.left_lang, row.right_lang))
-    return mixed
+    _set_sides(
+        rows,
+        "lang",
+        lambda n: getattr(old[n - 1], "lang", ""),
+        lambda n: getattr(new[n - 1], "lang", ""),
+    )
+    return any(
+        x and x != language for row in all_rows(rows) for x in (row.left_lang, row.right_lang)
+    )
 
 
 def remove_marks(line: str, pattern: re.Pattern) -> str:
@@ -2297,7 +2315,7 @@ def without_shared_comments(
     new and removed comments are shown (every: without any comment at all).
     A comment goes with the spaces around it, leaving one where it stood
     between two words; a line left empty goes too, with its label."""
-    in_old, in_new = set(placeholders_in("\n".join(old))), set(placeholders_in("\n".join(new)))
+    in_old, in_new = placeholders_of(old), placeholders_of(new)
     shared = in_old | in_new if every else in_old & in_new
     if not shared:
         return old, new, old_labels, new_labels
@@ -2437,6 +2455,17 @@ class Options:
 DEFAULT_OPTIONS = Options()
 
 
+def compare_split(
+    run: Callable[[Options], "Comparison"], options: Options, split: str
+) -> tuple["Comparison", "Comparison | None"]:
+    """The comparison split says: paragraph by paragraph ("paragraph"),
+    sentence by sentence ("sentence"), or both, the paragraphs first; run
+    makes one comparison from its options."""
+    comparison = run(replace(options, by_sentence=split == "sentence"))
+    sentences = run(replace(options, by_sentence=True)) if split == "both" else None
+    return comparison, sentences
+
+
 Labels = list[str] | None
 
 
@@ -2489,7 +2518,7 @@ def build_files(
             return comment_markdown(c)
         if not c.text and not options.empty_comments:
             return ""
-        mark = comments.placeholder(c.author.replace('"', "'"), c.text, short_date(c.date))
+        mark = comments.placeholder(quoted_author(c.author), c.text, short_date(c.date))
         return mark if mark is not None else comment_markdown(c)
 
     def document_lines(doc: Document | None) -> list[Line]:
@@ -2499,21 +2528,49 @@ def build_files(
                 line.lang = ""
         return found
 
+    def read_side(data: bytes, path: str | None) -> Document | None:
+        """A side of a Word or OpenDocument file, read; None for any other."""
+        if data and is_document(path):
+            return read_document(data, path, options.docx_changes)
+        return None
+
+    def side_lines(fd: FileDiff, data: bytes, doc: Document | None) -> tuple[list[str], str]:
+        """A side's lines, and the encoding its text was read in ("" for a
+        document, or UTF-8)."""
+        if doc is not None:
+            return document_lines(doc), ""
+        text, encoding = decode_text(data, options.encoding)
+        # Folded before filtering, so a filter cannot cut a comment in two.
+        if fold and fd.markdown:
+            text = fold_comments(text, comments, options.empty_comments)
+        if options.md_filter and fd.markdown and text:
+            text = run_filter(options.md_filter, text, fd.path)
+        return split_lines(text), encoding
+
+    def prose_lines(lines: list[str], language: str, from_word: bool) -> tuple[list[str], Labels]:
+        """A side's lines of prose as they are compared: sentence by sentence
+        (by_sentence), the blank lines left out, each labelled with its place
+        (a document's paragraphs numbered)."""
+        labels = None
+        if options.by_sentence:
+            lines, labels = split_sentences(lines, language or "en")
+        lines, labels = without_blank_lines(lines, labels)
+        if from_word:
+            # A document has paragraphs, not lines: they are numbered.
+            labels = paragraph_numbers(labels)
+        return lines, labels
+
     for fd, old_bytes, new_bytes in entries:
         # A Word or OpenDocument side is read into lines of styled text
         # (prosediff.document); a side of any other file is text.
         from_word = is_document(fd.old_path) or is_document(fd.new_path)
-        old_doc = new_doc = None
+        try:
+            old_doc, new_doc = read_side(old_bytes, fd.old_path), read_side(new_bytes, fd.new_path)
+        except SourceError as e:
+            fd.binary = True
+            fd.note = str(e)
+            continue
         if from_word:
-            try:
-                if old_bytes and is_document(fd.old_path):
-                    old_doc = read_document(old_bytes, fd.old_path, options.docx_changes)
-                if new_bytes and is_document(fd.new_path):
-                    new_doc = read_document(new_bytes, fd.new_path, options.docx_changes)
-            except SourceError as e:
-                fd.binary = True
-                fd.note = str(e)
-                continue
             fd.markdown = True
             kinds = {
                 DOCUMENT_SUFFIXES[Path(p).suffix.lower()]
@@ -2534,25 +2591,12 @@ def build_files(
                 fd.new_image = image_uri(fd.new_path, new_bytes)
             continue
         fd.markdown = fd.markdown or fd.path.lower().endswith(".md")
-        old_text = new_text = ""
-        old_encoding = new_encoding = ""
-        if old_doc is None:
-            old_text, old_encoding = decode_text(old_bytes, options.encoding)
-        if new_doc is None:
-            new_text, new_encoding = decode_text(new_bytes, options.encoding)
+        old_lines, old_encoding = side_lines(fd, old_bytes, old_doc)
+        new_lines, new_encoding = side_lines(fd, new_bytes, new_doc)
         if read_as := " and ".join(dict.fromkeys(e for e in (old_encoding, new_encoding) if e)):
             fd.note = "; ".join(filter(None, (fd.note, f"read as {read_as}")))
-        # Folded before filtering, so a filter cannot cut a comment in two.
-        if fold and fd.markdown:
-            old_text = fold_comments(old_text, comments, options.empty_comments)
-            new_text = fold_comments(new_text, comments, options.empty_comments)
-        if options.md_filter and fd.markdown:
-            if old_text:
-                old_text = run_filter(options.md_filter, old_text, fd.path)
-            if new_text:
-                new_text = run_filter(options.md_filter, new_text, fd.path)
-        old_lines = document_lines(old_doc) if old_doc is not None else split_lines(old_text)
-        new_lines = document_lines(new_doc) if new_doc is not None else split_lines(new_text)
+        old_labels = new_labels = None
+        notes = None
         if fd.markdown:
             # One language for both sides: the new one's, unless it is gone.
             marked = None
@@ -2561,19 +2605,8 @@ def build_files(
             fd.language, fd.language_source = resolve_language(
                 options.language, "\n".join(new_lines or old_lines), marked
             )
-        old_labels = new_labels = None
-        notes = None
-        if options.by_sentence and fd.markdown:
-            rules = fd.language or "en"
-            old_lines, old_labels = split_sentences(old_lines, rules)
-            new_lines, new_labels = split_sentences(new_lines, rules)
-        if fd.markdown:
-            old_lines, old_labels = without_blank_lines(old_lines, old_labels)
-            new_lines, new_labels = without_blank_lines(new_lines, new_labels)
-            if from_word:
-                # A document has paragraphs, not lines: they are numbered.
-                old_labels = paragraph_numbers(old_labels)
-                new_labels = paragraph_numbers(new_labels)
+            old_lines, old_labels = prose_lines(old_lines, fd.language, from_word)
+            new_lines, new_labels = prose_lines(new_lines, fd.language, from_word)
             if fold:
                 old_lines, new_lines, old_labels, new_labels = without_shared_comments(
                     old_lines, new_lines, old_labels, new_labels, every=drop_comments
@@ -2624,9 +2657,7 @@ def build_files(
         for fd, old, new, *_ in texts:
             panel += comment_entries(fd, old, new, comments)
             # added since the base: only the new side has them
-            added = frozenset(placeholders_in("\n".join(new))) - frozenset(
-                placeholders_in("\n".join(old))
-            )
+            added = frozenset(placeholders_of(new) - placeholders_of(old))
             # The comments both sides had are gone: a row still showing one
             # has a new or removed comment, and is a stop of the navigation
             # like an edited one.
@@ -2689,8 +2720,7 @@ def comment_entries(
     the first row that shows it (on the new side, or the old for a removed
     one). A comment in a file without changes, or in a run of unchanged
     lines too long to embed, links to the file."""
-    old_set = set(placeholders_in("\n".join(old)))
-    new_set = set(placeholders_in("\n".join(new)))
+    old_set, new_set = placeholders_of(old), placeholders_of(new)
     located: dict[tuple[str, str], Row] = {}
     rows = all_rows(fd.rows)
     for row in rows:

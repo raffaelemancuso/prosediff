@@ -11,6 +11,8 @@ pytest.importorskip("tkinter", reason="the GUI tests need a Python built with Tk
 
 import tkinter as tk
 
+from helpers import two_files
+
 from prosediff import gui
 from prosediff.diff import MOVED_PASSAGE_DEFAULTS, MovedPassageSettings
 from prosediff.gui import (
@@ -22,7 +24,6 @@ from prosediff.gui import (
     generate,
     list_choices,
     load_settings,
-    moved_passage_settings_of,
     save_settings,
     settings_from_args,
 )
@@ -141,15 +142,18 @@ def test_generate_files_and_default_output(tmp_path):
     """Two files make an HTML report in the temporary folder by default, compared
     sentence by sentence when asked; without both files, an error."""
     moved = "Firms that adopted the new technology are compared with the others."
-    (tmp_path / "a.md").write_text(f"First paragraph here. {moved}\n\nSecond paragraph.\n")
-    (tmp_path / "b.md").write_text(f"First paragraph here.\n\nSecond paragraph. {moved}\n")
-    s = Settings(mode="files", old=str(tmp_path / "a.md"), new=str(tmp_path / "b.md"))
+    a, b = two_files(
+        tmp_path,
+        f"First paragraph here. {moved}\n\nSecond paragraph.\n",
+        f"First paragraph here.\n\nSecond paragraph. {moved}\n",
+    )
+    s = Settings(mode="files", old=str(a), new=str(b))
     path, c = generate(s)
     assert path.parent.name == "prosediff" and path.suffix == ".html" and len(c.files) == 1
     assert path.is_relative_to(tmp_path)  # the temporary folder is the test's own (conftest)
-    assert c.moved == 0
+    assert c.counts.moved == 0
     s.split = "sentence"
-    assert generate(s)[1].moved == 1
+    assert generate(s)[1].counts.moved == 1
     s.output_format = "diff"
     path, _ = generate(s)
     assert path.suffix == ".diff" and path.read_text().startswith("--- a/a.md\n+++ b/b.md\n")
@@ -223,13 +227,10 @@ def test_window_rejects_a_folder_that_is_not_a_repository(root, tmp_path):
     assert "Not a git repository" in app.status.get()
 
 
-def test_swap_files(root):
-    app = App(root, Settings(mode="files", old="sent.docx", new="returned.docx"))
-    app.swap_files()
-    s = app.collect()
-    assert (s.old, s.new) == ("returned.docx", "sent.docx")
+def test_swap(root):
+    """The swap buttons exchange the old and the new file, or folder."""
     app = App(root, Settings(mode="folders", old_folder="sent", new_folder="returned"))
-    app.swap_files()
+    gui.swap(app.old_folder, app.new_folder)
     s = app.collect()
     assert (s.mode, s.old_folder, s.new_folder) == ("folders", "returned", "sent")
 
@@ -516,7 +517,7 @@ def test_advanced_moved_passage_settings(root, tmp_path):
     app.passage_vars["rounds"].set("not a number")  # keeps the default
     s = app.collect()
     assert s.moved_passages == {"min_words": 6, "partial_share": 0.5}
-    assert moved_passage_settings_of(s).min_words == 6
+    assert MovedPassageSettings.from_choices(s.moved_passages).min_words == 6
     path = tmp_path / "gui.json"
     assert save_settings(s, path)
     assert load_settings(path).moved_passages == {"min_words": 6, "partial_share": 0.5}
@@ -534,4 +535,4 @@ def test_moved_passage_settings_loaded_and_checked(tmp_path):
     path.write_text(json.dumps({"moved_passages": [1, 2]}), encoding="utf-8")
     assert load_settings(path).moved_passages == {}
     with pytest.raises(ValueError, match="partial_share"):
-        moved_passage_settings_of(Settings(moved_passages={"partial_share": 3}))
+        MovedPassageSettings.from_choices({"partial_share": 3})

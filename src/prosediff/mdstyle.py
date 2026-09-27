@@ -24,7 +24,7 @@ import re
 
 from markupsafe import Markup, escape
 
-from prosediff.document import DATE_ATTRIBUTE, short_date
+from prosediff.document import DATE_ATTRIBUTE, change_marks
 
 HEADING = re.compile(r"^(#{1,6})([ \t]+)")
 QUOTE = re.compile(r"^((?:>[ \t]?)+)")
@@ -72,11 +72,11 @@ def md_styles(line: str) -> list[set[str]]:
         mark(m.start(1), m.end(1), "syn")
         mark(m.start(3), m.end(3), "syn")
         if tracked := TRACKED.match(m[3], 1):
-            mark(m.start(2), m.end(2), "tc-ins" if tracked[1] == "insertion" else "tc-del")
-            if author := AUTHOR.search(m[3]):
-                mark(m.start(2), m.end(2), f"@author={author[1]}")
-            if (date := DATE_ATTRIBUTE.search(m[3])) and (when := short_date(date[1])):
-                mark(m.start(2), m.end(2), f"@date={when}")
+            author, date = AUTHOR.search(m[3]), DATE_ATTRIBUTE.search(m[3])
+            for style in change_marks(
+                tracked[1], author[1] if author else "", date[1] if date else ""
+            ):
+                mark(m.start(2), m.end(2), style)
     for m in CITATION.finditer(line):
         mark(m.start(), m.end(), "cite")
     for pattern, cls in ((STRONG, "strong"), (EMPH, "em")):

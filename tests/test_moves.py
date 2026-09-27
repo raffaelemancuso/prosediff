@@ -1,6 +1,7 @@
 """Moved lines: as they were, spacing aside, or lightly edited."""
 
 import pytest
+from helpers import two_files
 
 from prosediff import MoveSettings, Options, compare_paths, render
 from prosediff.diff import MIN_MOVE_CHARS, align, mark_moves
@@ -88,21 +89,19 @@ def test_move_similarity_threshold():
 
 
 def test_move_similarity_validated(tmp_path):
-    (tmp_path / "a.md").write_text("x\n")
-    (tmp_path / "b.md").write_text("y\n")
+    a, b = two_files(tmp_path, "x\n", "y\n")
     for bad in (0, -0.1, 1.5):
         with pytest.raises(ValueError, match="move similarity"):
-            compare_paths(
-                tmp_path / "a.md", tmp_path / "b.md", Options(paragraph_moves=MoveSettings(bad))
-            )
+            compare_paths(a, b, Options(paragraph_moves=MoveSettings(bad)))
 
 
 def test_where_a_moved_line_went_is_printed(tmp_path):
     """On screen a moved line's tooltip says where it went; on paper, a note
     under it (hidden on screen by the HTML report's style)."""
-    (tmp_path / "a.md").write_text(f"{EDITED}\na\nb\nc\n")
-    (tmp_path / "b.md").write_text(f"a\nb\nc\n{EDITED.replace('almost', 'nearly')}\n")
-    html = render(compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(context=None)))
+    a, b = two_files(
+        tmp_path, f"{EDITED}\na\nb\nc\n", f"a\nb\nc\n{EDITED.replace('almost', 'nearly')}\n"
+    )
+    html = render(compare_paths(a, b, Options(context=None)))
     assert '<span class="print-note" aria-hidden="true">moved to line 4</span>' in html
     assert '<span class="print-note" aria-hidden="true">moved from line 1</span>' in html
 

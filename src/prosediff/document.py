@@ -13,6 +13,7 @@ own commands show (to_markdown()), for --to-markdown and git diff.
 """
 
 import re
+from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
@@ -172,13 +173,90 @@ def attach_carried(blocks: list[Block], carried: list) -> None:
         last.inlines += carried
 
 
+@dataclass(kw_only=True)
+class DocumentReader:
+    """What the Word and OpenDocument readers share: their tracked changes
+    settled as changes says ("accept", "reject", or "all", kept as markup);
+    the comments of a paragraph deleted as a whole carried to the next; and
+    the languages the paragraphs are marked with, when asked for (languages,
+    with an of(paragraphs) giving the language most of their letters are in
+    and the letters in each), and the letters of the whole in each."""
+
+    changes: str
+    languages: object = None
+    letters: Counter = field(default_factory=Counter)
+    # comments of a paragraph deleted as a whole, for the next paragraph
+    carried: list = field(default_factory=list)
+
+    def language_of(self, paragraphs) -> str | None:
+        """The language the paragraphs (elements of the XML) are in."""
+        if self.languages is None:
+            return None
+        language, counts = self.languages.of(paragraphs)
+        self.letters += counts
+        return language
+
+    def keeps(self, kind: str) -> bool:
+        """Whether the text of a tracked change ("insertion", "deletion")
+        stays: accepted insertions, rejected deletions, all shown."""
+        return self.changes == "all" or (self.changes == "accept") == (kind == "insertion")
+
+    def settle_change(self, kind: str, inner: list, author: str = "", date: str = "") -> list:
+        """What a tracked change of the inlines inner leaves: them, a span
+        marking them (with changes "all"; nothing when they hold no text),
+        or, when its text goes, only the comments anchored in it."""
+        if not self.keeps(kind):
+            return comments_in(inner)
+        if self.changes == "all":
+            return [Span(kind, inner, author=author, date=date)] if markdown(inner).strip() else []
+        return inner
+
+    def carry(self, inlines: list) -> list | None:
+        """A paragraph's inlines, the comments carried to it first; None for
+        a paragraph of comments alone (its text deleted as a whole), whose
+        comments go on to the next paragraph, as Word merges it into it."""
+        if comments_only(inlines):
+            self.carried += inlines
+            return None
+        inlines, self.carried = self.carried + inlines, []
+        return inlines
+
+    def finish(self, blocks: list[Block]) -> list[Block]:
+        """The blocks of the body, the comments carried past the last
+        paragraph joined to it."""
+        attach_carried(blocks, self.carried)
+        self.carried = []
+        return blocks
+
+
 # Markdown -----------------------------------------------------------------------
+
+
+def spaced(text: str) -> str:
+    """The text with each run of whitespace one space, none at its edges."""
+    return " ".join(text.split())
+
+
+def quoted_author(author: str) -> str:
+    """An author's name as an attribute's value in double quotes."""
+    return author.replace('"', "'")
+
+
+def change_marks(kind: str, author: str = "", date: str = "") -> set[str]:
+    """The styles of text in a tracked change ("insertion", "deletion"):
+    tc-ins or tc-del, and who made it and when (@author=, @date=)."""
+    marks = {"tc-ins" if kind == "insertion" else "tc-del"}
+    if author:
+        marks.add(f"@author={author}")
+    if when := short_date(date):
+        marks.add(f"@date={when}")
+    return marks
 
 
 def comment_markdown(c: CommentMark) -> str:
     """A comment as pandoc writes it: [text]{.comment-start ...}."""
     note = c.text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-    author = c.author.replace('"', "'")
+    author = quoted_author(c.author)
     return f'[{note}]{{.comment-start id="{c.id}" author="{author}" date="{c.date}"}}'
 
 
@@ -238,8 +316,7 @@ def _markdown_one(i) -> str:
     if i.kind == "link":
         # a link that shows its own address is written once
         return f"[{text}]({i.target})" if i.target and text != i.target else text
-    author = i.author.replace('"', "'")
-    return f'[{text}]{{.{i.kind} author="{author}" date="{i.date}"}}'
+    return f'[{text}]{{.{i.kind} author="{quoted_author(i.author)}" date="{i.date}"}}'
 
 
 def block_markdown(block: Block) -> str:
@@ -372,12 +449,7 @@ def _add(
         elif i.kind == "link":
             _add(out, i.children, styles | {"link"}, comment)
         else:
-            marks = {"tc-ins" if i.kind == "insertion" else "tc-del"}
-            if i.author:
-                marks.add(f"@author={i.author}")
-            if date := short_date(i.date):
-                marks.add(f"@date={date}")
-            _add(out, i.children, styles | marks, comment)
+            _add(out, i.children, styles | change_marks(i.kind, i.author, i.date), comment)
 
 
 def lines(doc: Document, comment: Callable[[CommentMark], str]) -> list[Line]:

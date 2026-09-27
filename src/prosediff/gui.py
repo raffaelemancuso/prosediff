@@ -45,6 +45,7 @@ from prosediff.diff import (
     check_encoding,
     compare,
     compare_paths,
+    compare_split,
     move_defaults,
     setting_type,
 )
@@ -54,6 +55,8 @@ from prosediff.render import (
     FORMATS,
     SPLITS,
     TEXT_SUFFIXES,
+    check_split,
+    counted,
     default_output,
     format_of,
     write_output,
@@ -278,16 +281,6 @@ def load_settings(path: Path | None = None) -> Settings:
     return s
 
 
-def moved_passage_settings_of(s: Settings) -> MovedPassageSettings:
-    """The moved-passage settings chosen (the advanced settings), prosediff's
-    defaults for the others; ValueError, naming it, for a value out of range."""
-    kinds = {f.name: setting_type(f) for f in fields(MovedPassageSettings)}
-    chosen = {k: kinds[k](v) for k, v in s.moved_passages.items() if k in kinds}
-    settings = MovedPassageSettings(**chosen)
-    settings.check()
-    return settings
-
-
 def save_settings(s: Settings, path: Path | None = None) -> bool:
     """Write the settings, when asked (the window's Save options); whether
     they were written."""
@@ -319,41 +312,27 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         comments=s.comments,
         empty_comments=s.empty_comments,
         docx_changes=s.docx_changes,
-        # None: prosediff's defaults
-        paragraph_moves=MoveSettings(
-            s.move_similarity,
-            s.move_algorithm if s.move_algorithm in MOVE_ALGORITHMS else None,
-        ),
-        sentence_moves=MoveSettings(
-            s.sentence_move_similarity,
-            s.sentence_move_algorithm if s.sentence_move_algorithm in MOVE_ALGORITHMS else None,
-        ),
+        paragraph_moves=moves_of(s, False),
+        sentence_moves=moves_of(s, True),
         move_passages=s.move_passages,
-        moved_passage_settings=moved_passage_settings_of(s),
+        moved_passage_settings=MovedPassageSettings.from_choices(s.moved_passages),
         language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
     old, new = sides(s)
     fmt = s.output_format if s.output_format in FORMATS else "html"
     split = s.split if s.split in SPLITS else "paragraph"
-    if split == "both" and fmt != "html":
-        raise ValueError("comparing both ways is for the HTML report: a diff holds one")
+    check_split(split, fmt)
 
-    def run(by_sentence: bool) -> Comparison:
+    def run(options: Options) -> Comparison:
         if s.mode == "files":
             if not old or not new:
                 raise ValueError("choose the old and the new file")
-            return compare_paths(old, new, replace(options, by_sentence=by_sentence), paths=paths)
+            return compare_paths(old, new, options, paths=paths)
         if s.mode == "folders":
             if not old or not new:
                 raise ValueError("choose the old and the new folder")
-            return compare_paths(
-                old,
-                new,
-                replace(options, by_sentence=by_sentence),
-                paths=paths,
-                include=s.include,
-            )
+            return compare_paths(old, new, options, paths=paths, include=s.include)
         if not s.repo or not s.base:
             raise ValueError("choose a repository and a base")
         target = None if s.target in ("worktree", "index", "") else s.target
@@ -361,14 +340,13 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
             s.repo,
             s.base,
             target,
-            replace(options, by_sentence=by_sentence),
+            options,
             paths=paths,
             cached=s.target == "index",
             untracked=s.untracked and s.target in ("worktree", ""),
         )
 
-    comparison = run(split == "sentence")
-    sentences = run(True) if split == "both" else None
+    comparison, sentences = compare_split(run, options, split)
     out = Path(s.output) if s.output else None
     if out is None and s.mode != "git":
         out = default_page(Path(old), Path(new))
@@ -395,18 +373,12 @@ def with_format(path: str, fmt: str) -> str:
     return str(p.with_suffix(FORMATS[fmt]))
 
 
-def move_similarity_of(s: Settings, sentences: bool = False) -> float:
-    """The moved-line similarity chosen for paragraphs (or sentences), or
-    prosediff's default for them."""
-    chosen = s.sentence_move_similarity if sentences else s.move_similarity
-    return move_defaults(sentences)[0] if chosen is None else chosen
-
-
-def move_algorithm_of(s: Settings, sentences: bool = False) -> str:
-    """The moved-line algorithm chosen for paragraphs (or sentences), or
-    prosediff's default for them."""
-    chosen = s.sentence_move_algorithm if sentences else s.move_algorithm
-    return chosen if chosen in MOVE_ALGORITHMS else move_defaults(sentences)[1]
+def moves_of(s: Settings, sentences: bool) -> MoveSettings:
+    """The moved-line settings chosen for paragraphs (or sentences); None
+    for prosediff's default, and for an algorithm it does not know."""
+    similarity = s.sentence_move_similarity if sentences else s.move_similarity
+    algorithm = s.sentence_move_algorithm if sentences else s.move_algorithm
+    return MoveSettings(similarity, algorithm if algorithm in MOVE_ALGORITHMS else None)
 
 
 def sides(s: Settings) -> tuple[str, str]:
@@ -515,16 +487,18 @@ class App:
         self.new = tk.StringVar(value=self.s.new)
         self.old_folder = tk.StringVar(value=self.s.old_folder)
         self.new_folder = tk.StringVar(value=self.s.new_folder)
-        for side, pick, old, new, what in (
-            (files_side, self.pick_file, self.old, self.new, "file"),
-            (folders_side, self.pick_folder, self.old_folder, self.new_folder, "folder"),
+        for side, folder, old, new, what in (
+            (files_side, False, self.old, self.new, "file"),
+            (folders_side, True, self.old_folder, self.new_folder, "folder"),
         ):
             for row, (label, var) in enumerate((("Old", old), ("New", new))):
                 ttk.Label(side, text=label).grid(row=row, column=0, sticky="w", **PAD)
                 ttk.Entry(side, textvariable=var).grid(row=row, column=1, sticky="ew", **PAD)
-                browse(side, lambda v=var, f=pick: f(v), f"Choose the {label.lower()} {what}").grid(
-                    row=row, column=2, **PAD
-                )
+                browse(
+                    side,
+                    lambda v=var, d=folder: self.pick(v, d),
+                    f"Choose the {label.lower()} {what}",
+                ).grid(row=row, column=2, **PAD)
             swap_button = ttk.Button(
                 side,
                 image=ttk.Icon("arrow-down-up", size=16),
@@ -582,10 +556,12 @@ class App:
             "moved between paragraphs is recognised), or both, in one HTML report whose "
             "toolbar switches between the two.",
         )
-        self.move_similarity = tk.DoubleVar(value=move_similarity_of(self.s))
-        self.move_algorithm = tk.StringVar(value=move_algorithm_of(self.s))
-        self.sentence_move_similarity = tk.DoubleVar(value=move_similarity_of(self.s, True))
-        self.sentence_move_algorithm = tk.StringVar(value=move_algorithm_of(self.s, True))
+        similarity, algorithm = moves_of(self.s, False).resolved(False)
+        self.move_similarity = tk.DoubleVar(value=similarity)
+        self.move_algorithm = tk.StringVar(value=algorithm)
+        similarity, algorithm = moves_of(self.s, True).resolved(True)
+        self.sentence_move_similarity = tk.DoubleVar(value=similarity)
+        self.sentence_move_algorithm = tk.StringVar(value=algorithm)
         for row, what, similarity, algorithm, sentences in (
             (2, "paragraphs", self.move_similarity, self.move_algorithm, False),
             (3, "sentences", self.sentence_move_similarity, self.sentence_move_algorithm, True),
@@ -853,22 +829,15 @@ class App:
             self.repo.set(folder)
             self.load_repo()
 
-    def pick_file(self, var: tk.StringVar) -> None:
-        f = filedialog.askopenfilename(title="File")
+    def pick(self, var: tk.StringVar, folder: bool) -> None:
+        """Choose a file (or a folder) for var."""
+        f = (
+            filedialog.askdirectory(title="Folder")
+            if folder
+            else filedialog.askopenfilename(title="File")
+        )
         if f:
             var.set(f)
-
-    def pick_folder(self, var: tk.StringVar) -> None:
-        f = filedialog.askdirectory(title="Folder")
-        if f:
-            var.set(f)
-
-    def swap_files(self) -> None:
-        """Exchange the old and the new file, or folder, of what is shown."""
-        if self.mode.get() == "folders":
-            swap(self.old_folder, self.new_folder)
-        else:
-            swap(self.old, self.new)
 
     def rename_output(self) -> None:
         """Give the Save to file the extension of the format chosen."""
@@ -918,8 +887,7 @@ class App:
         self.update_untracked()
         n = len(commits)
         self.status.set(
-            f"{n:,} commit{'' if n == 1 else 's'} listed"
-            + (", uncommitted changes present." if dirty else ".")
+            f"{counted(n, 'commit')} listed" + (", uncommitted changes present." if dirty else ".")
         )
 
     def label_of(self, ref: str) -> str:
@@ -1040,6 +1008,7 @@ class App:
         """Every option to its default (what is compared and where the output
         goes stay as they are); nothing is saved until asked."""
         d = Settings()
+        paragraphs, sentences = moves_of(d, False).resolved(False), moves_of(d, True).resolved(True)
         for var, value in (
             (self.comments, d.comments),
             (self.empty_comments, d.empty_comments),
@@ -1048,10 +1017,10 @@ class App:
             (self.context, d.context_lines),
             (self.full, d.full),
             (self.ignore_ws, d.ignore_whitespace),
-            (self.move_similarity, move_similarity_of(d)),
-            (self.move_algorithm, move_algorithm_of(d)),
-            (self.sentence_move_similarity, move_similarity_of(d, True)),
-            (self.sentence_move_algorithm, move_algorithm_of(d, True)),
+            (self.move_similarity, paragraphs[0]),
+            (self.move_algorithm, paragraphs[1]),
+            (self.sentence_move_similarity, sentences[0]),
+            (self.sentence_move_algorithm, sentences[1]),
             (self.split, d.split),
             (self.language, d.language),
             (self.encoding, d.encoding),
@@ -1112,10 +1081,8 @@ class App:
             messagebox.showerror("prosediff", str(value) or type(value).__name__)
             return
         path, c = value
-        n = len(c.files)
-        summary = (
-            f"{n:,} file{'' if n == 1 else 's'} changed, +{c.additions:,} −{c.deletions:,} lines"
-        )
+        n, counts = len(c.files), c.counts
+        summary = f"{counted(n, 'file')} changed, +{counts.additions:,} −{counts.deletions:,} lines"
         self.status.set(f"{summary}: {path.name}")
         ttk.ToastNotification(
             "prosediff",
@@ -1212,7 +1179,7 @@ def received(args: list[str]) -> str:
     """The arguments as the program got them, one per line and quoted, so a
     path split at a space or quoted twice shows as such; a path that does
     not exist is marked."""
-    lines = [f"Received {len(args)} argument{'' if len(args) == 1 else 's'}:"]
+    lines = [f"Received {counted(len(args), 'argument')}:"]
     for i, a in enumerate(args, 1):
         missing = "" if Path(a).exists() else "  (not found)"
         lines.append(f"{i}. “{a}”{missing}")

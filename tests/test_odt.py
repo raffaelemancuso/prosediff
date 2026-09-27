@@ -1,10 +1,9 @@
 """Reading OpenDocument texts (.odt) into Markdown (odfdo), as Word documents are."""
 
 import pytest
-from helpers import odt_xml
+from helpers import markdown_of, odt_xml
 
 from prosediff import compare_paths
-from prosediff.odt import odt_to_markdown
 
 STYLES = (
     '<style:style style:name="B" style:family="text">'
@@ -44,7 +43,7 @@ def test_structure(tmp_path):
         "</text:note></text:p>",
         STYLES,
     ).read_bytes()
-    assert odt_to_markdown(d).strip().split("\n\n") == [
+    assert markdown_of(d, "a.odt").strip().split("\n\n") == [
         "# The title",
         "## Methods",
         "Plain, **bold** and *italic* words,  a [link](https://example.org).",
@@ -67,14 +66,14 @@ def test_tracked_changes_three_ways(tmp_path):
         '<text:change-start text:change-id="i1"/>s<text:change-end text:change-id="i1"/>'
         " grow.</text:p>",
     ).read_bytes()
-    assert odt_to_markdown(d, "accept").strip() == "start-ups grow."
-    assert odt_to_markdown(d, "reject").strip() == "start-up entry grow."
+    assert markdown_of(d, "a.odt", "accept").strip() == "start-ups grow."
+    assert markdown_of(d, "a.odt", "reject").strip() == "start-up entry grow."
     date = 'author="Ben" date="2026-02-02T10:00:00"'
-    assert odt_to_markdown(d, "all").strip() == (
+    assert markdown_of(d, "a.odt", "all").strip() == (
         f"start-up[ entry]{{.deletion {date}}}[s]{{.insertion {date}}} grow."
     )
     with pytest.raises(ValueError):
-        odt_to_markdown(d, "maybe")
+        markdown_of(d, "a.odt", "maybe")
 
 
 def test_comment_is_a_span_and_survives_a_rejected_insertion(tmp_path):
@@ -88,9 +87,12 @@ def test_comment_is_a_span_and_survives_a_rejected_insertion(tmp_path):
         '<text:change-end text:change-id="i1"/></text:p>',
     ).read_bytes()
     span = r'[Is \[this\] right?]{.comment-start id="0" author="Anna" date="2026-01-01T09:30:00"}'
-    assert odt_to_markdown(d, "accept").strip().split("\n\n") == ["Kept.", span + "New paragraph."]
+    assert markdown_of(d, "a.odt", "accept").strip().split("\n\n") == [
+        "Kept.",
+        span + "New paragraph.",
+    ]
     # the paragraph goes, its comment joins the one before
-    assert odt_to_markdown(d, "reject").strip() == "Kept." + span
+    assert markdown_of(d, "a.odt", "reject").strip() == "Kept." + span
 
 
 def test_compared_like_a_word_document(tmp_path):

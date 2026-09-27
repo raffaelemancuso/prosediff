@@ -2,8 +2,10 @@
 clauses inside them (split by paragraph), sentences and the clauses inside
 them (split by sentence), each found where it went and nothing else."""
 
+from helpers import two_files
+
 from prosediff import Options, compare_paths, render
-from prosediff.diff import Row, align, git_opcodes, move_defaults
+from prosediff.diff import Row, align, git_opcodes, move_defaults, moved_passages
 
 # Six paragraphs of a local newspaper, each on its own subject.
 HARBOUR = (
@@ -58,13 +60,15 @@ def moves(rows: list[Row], old: list[str], new: list[str]):
     passages as {(old line, new line, old text, new text)}, lines 1-based."""
     outs = {r.move_pair: r.left_no for r in rows if r.kind == "moved-out"}
     lines = {(outs[r.move_pair], r.right_no) for r in rows if r.kind == "moved-in"}
-    ends: dict[int, dict] = {}
-    for r in rows:
-        for m in r.old_moves:
-            ends.setdefault(m.pair, {})["old"] = (r.left_no, old[r.left_no - 1][m.start : m.end])
-        for m in r.new_moves:
-            ends.setdefault(m.pair, {})["new"] = (r.right_no, new[r.right_no - 1][m.start : m.end])
-    passages = {(e["old"][0], e["new"][0], e["old"][1], e["new"][1]) for e in ends.values()}
+    passages = {
+        (
+            a.left_no,
+            b.right_no,
+            old[a.left_no - 1][ma.start : ma.end],
+            new[b.right_no - 1][mb.start : mb.end],
+        )
+        for a, ma, b, mb in moved_passages(rows)
+    }
     return lines, passages
 
 
@@ -184,18 +188,15 @@ def test_both_splits_of_one_document(tmp_path):
         )
         + "\n"
     )
-    (tmp_path / "a.md").write_text(old_text, encoding="utf-8")
-    (tmp_path / "b.md").write_text(new_text, encoding="utf-8")
-    paragraphs = compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(context=None))
-    sentences = compare_paths(
-        tmp_path / "a.md", tmp_path / "b.md", Options(context=None, by_sentence=True)
-    )
+    a, b = two_files(tmp_path, old_text, new_text)
+    paragraphs = compare_paths(a, b, Options(context=None))
+    sentences = compare_paths(a, b, Options(context=None, by_sentence=True))
     # by paragraph: the bakery paragraph moved whole; the nets sentence and
     # the swapped council sentence moved as passages
-    assert paragraphs.moved == 1 and paragraphs.moved_passages == 2
+    assert paragraphs.counts.moved == 1 and paragraphs.counts.moved_passages == 2
     # by sentence: every sentence is a line, so the moves are whole lines:
     # the nets sentence, the proposal and the bakery's two sentences
-    assert sentences.moved >= 3 and sentences.moved_passages == 0
+    assert sentences.counts.moved >= 3 and sentences.counts.moved_passages == 0
     html = render(paragraphs, sentences=sentences, split="both")
     assert 'data-toggle="passages"' in html
-    assert html.count('class="moved"') == 2 * paragraphs.moved_passages
+    assert html.count('class="moved"') == 2 * paragraphs.counts.moved_passages

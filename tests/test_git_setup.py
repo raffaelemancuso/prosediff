@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 import pytest
-from helpers import docx, odt_xml, strip_tags
+from helpers import docx, odt_xml, strip_tags, two_files
 
 from prosediff.cli import main
 from prosediff.gitsetup import ATTRIBUTES
@@ -128,11 +128,10 @@ def test_setup_git_global_and_outside_a_repository(no_global_git, capsys):
 
 
 def test_open_writes_a_fresh_page_and_opens_it(tmp_path, monkeypatch, capsys):
-    (tmp_path / "a.md").write_text("one\n")
-    (tmp_path / "b.md").write_text("two\n")
+    a, b = two_files(tmp_path, "one\n", "two\n")
     opened = []
     monkeypatch.setattr("webbrowser.open", opened.append)
-    files = ["--files", str(tmp_path / "a.md"), str(tmp_path / "b.md")]
+    files = ["--files", str(a), str(b)]
     assert main([*files, "--open"]) == 0
     assert "a.md..b.md" in capsys.readouterr().out
     assert main([*files, "--open"]) == 0

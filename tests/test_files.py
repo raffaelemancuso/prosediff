@@ -1,7 +1,7 @@
 """Comparing outside git (--files): two files, two folders, Word documents."""
 
 import pytest
-from helpers import docx, docx_xml
+from helpers import docx, docx_xml, two_files
 
 from prosediff import Options, compare_paths, render
 from prosediff.cli import main
@@ -104,9 +104,8 @@ def test_inserted_paragraph_does_not_shift_the_pairing(tmp_path):
     old = "Body text.\n\n" + "\n\n".join(notes) + "\n"
     notes[1] += " With a longer explanation added in the new version."
     new = "Body text.\n\nA new closing paragraph.\n\n" + "\n\n".join(notes) + "\n"
-    (tmp_path / "a.md").write_text(old)
-    (tmp_path / "b.md").write_text(new)
-    (f,) = compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(context=3)).files
+    a, b = two_files(tmp_path, old, new)
+    (f,) = compare_paths(a, b, Options(context=3)).files
     rows = [r for r in f.rows if r.kind != "skip"]
     assert [(r.kind, r.left_label, r.right_label) for r in rows] == [
         ("equal", "1", "1"),
@@ -215,9 +214,8 @@ def test_git_runs_without_a_console_window(tmp_path, monkeypatch):
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(diff.subprocess, "Popen", Recording)
-    (tmp_path / "a.md").write_text("Hello world.\n")
-    (tmp_path / "b.md").write_text("Hello there.\n")
-    compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(md_filter="sort"))
+    a, b = two_files(tmp_path, "Hello world.\n", "Hello there.\n")
+    compare_paths(a, b, Options(md_filter="sort"))
     assert seen and set(seen) == {getattr(subprocess, "CREATE_NO_WINDOW", 0)}
 
 
@@ -255,11 +253,10 @@ def test_a_hung_filter_is_stopped(tmp_path, monkeypatch):
     from prosediff.diff import FilterError
 
     monkeypatch.setattr(diff, "FILTER_TIMEOUT", 1)
-    (tmp_path / "a.md").write_text("Hello world.\n")
-    (tmp_path / "b.md").write_text("Hello there.\n")
+    a, b = two_files(tmp_path, "Hello world.\n", "Hello there.\n")
     sleeper = f'"{sys.executable}" -c "import time; time.sleep(30)"'
-    with pytest.raises(FilterError, match=r"more than 1 seconds on b.md"):
-        compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(md_filter=sleeper))
+    with pytest.raises(FilterError, match=r"filter on b.md took more than 1 seconds"):
+        compare_paths(a, b, Options(md_filter=sleeper))
 
 
 def test_a_word_comment_dated_without_a_time_keeps_its_date(tmp_path):

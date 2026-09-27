@@ -23,7 +23,6 @@ image is written [image], with its description when it has one.
 """
 
 import re
-from collections import Counter
 from io import BytesIO
 from itertools import groupby
 from operator import itemgetter
@@ -39,17 +38,15 @@ from prosediff.document import (
     UNDERLINE,
     Block,
     CommentMark,
+    DocumentReader,
     Image,
     NoteRef,
     Span,
     Text,
-    attach_carried,
-    comments_in,
-    comments_only,
     join_paragraphs,
     markdown,
+    spaced,
     strip,
-    to_markdown,
 )
 from prosediff.document import Document as Prose
 from prosediff.language import OdtLanguages, most_letters
@@ -113,31 +110,21 @@ def _text_of(el: Element, path: str) -> str:
     return (found.text if found is not None else "") or ""
 
 
-class Reader:
+class Reader(DocumentReader):
     def __init__(
         self, document: Document, changes: str, languages: OdtLanguages | None = None
     ) -> None:
+        super().__init__(changes=changes, languages=languages)
         self.document = document
-        self.changes = changes
-        # The languages the text is marked with, when asked for, and the
-        # letters of the whole in each language.
-        self.languages = languages
-        self.letters: Counter[str] = Counter()
         # change id -> ("insertion" | "deletion", author, date, region element)
         self.regions: dict[str, tuple[str, str, str, Element]] = {}
         self.open: list[str] = []  # the insertions the walk is inside
         self.notes: list[Block] = []  # footnotes and endnotes, as referenced
         self.comment_count = 0
         self.styles: dict[str, frozenset[str]] = {}
-        # comments of a paragraph deleted as a whole, for the next paragraph
-        self.carried: list = []
 
     def language_of(self, paragraphs: list[Element]) -> str | None:
-        if self.languages is None:
-            return None
-        language, counts = self.languages.of(p._xml_element for p in paragraphs)
-        self.letters += counts
-        return language
+        return super().language_of(p._xml_element for p in paragraphs)
 
     # Styles ------------------------------------------------------------------------
 
@@ -214,13 +201,7 @@ class Reader:
                 inner.append(Text(" "))
             inner += [i for i, _ in self.inline(p, frozenset())]
         self.open = saved
-        if self.changes == "reject":
-            return [(i, None) for i in inner]
-        if self.changes == "all":
-            if not markdown(inner).strip():
-                return []
-            return [(Span("deletion", inner, author=author, date=date), None)]
-        return [(c, None) for c in comments_in(inner)]
+        return [(i, None) for i in self.settle_change("deletion", inner, author, date)]
 
     def settle(self, tagged: list[Tagged]) -> list:
         """The inlines of a paragraph, its insertions settled: kept, dropped
@@ -228,13 +209,11 @@ class Reader:
         out: list = []
         for cid, run in groupby(tagged, key=itemgetter(1)):
             group = [i for i, _ in run]
-            if cid is None or self.changes == "accept":
+            if cid is None:
                 out += group
-            elif self.changes == "reject":
-                out += comments_in(group)
-            elif markdown(group).strip():
+            else:
                 _, author, date, _ = self.regions.get(cid, ("", "", "", None))
-                out.append(Span("insertion", group, author=author, date=date))
+                out += self.settle_change("insertion", group, author, date)
         return out
 
     # Paragraph content ---------------------------------------------------------------
@@ -245,7 +224,7 @@ class Reader:
         return CommentMark(
             str(self.comment_count - 1),
             _text_of(el, "dc:creator"),
-            " ".join(" ".join(texts).split()),
+            spaced(" ".join(texts)),
             _text_of(el, "dc:date")[:19],
         )
 
@@ -325,14 +304,8 @@ class Reader:
 
     def paragraph(self, el: Element, item: bool = False) -> Block | None:
         inlines = self.paragraph_inlines(el)
-        if not markdown(inlines):
+        if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
             return None
-        # A paragraph whose text all went keeps only its comments, for the
-        # next paragraph.
-        if comments_only(inlines):
-            self.carried += inlines
-            return None
-        inlines, self.carried = self.carried + inlines, []
         language = self.language_of([el])
         if el.tag == "text:h":
             level = min(el.get_attribute_integer("text:outline-level") or 1, 6)
@@ -377,16 +350,7 @@ class Reader:
         the last paragraph join it."""
         body = self.document.body
         self.read_regions(body)
-        out = self.blocks(body)
-        attach_carried(out, self.carried)
-        self.carried = []
-        return out
-
-
-def odt_to_markdown(data: bytes, changes: str = "accept") -> str:
-    """An OpenDocument text's body as Markdown, its tracked changes settled
-    ("accept", "reject") or kept as markup ("all"), its comments kept."""
-    return to_markdown(read_odt(data, changes))
+        return self.finish(self.blocks(body))
 
 
 def read_odt(data: bytes, changes: str = "accept") -> Prose:

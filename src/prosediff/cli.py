@@ -5,7 +5,7 @@ git's own commands."""
 import argparse
 import sys
 import webbrowser
-from dataclasses import fields, replace
+from dataclasses import fields
 from pathlib import Path
 
 import git
@@ -30,6 +30,7 @@ from prosediff.diff import (
     check_move_similarity,
     compare,
     compare_paths,
+    compare_split,
     setting_type,
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
@@ -38,6 +39,8 @@ from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
     SPLITS,
+    check_split,
+    counted,
     default_output,
     format_of,
     package_version,
@@ -359,21 +362,19 @@ def main(argv: list[str] | None = None) -> int:
 
     split = args.split or "paragraph"
     fmt = args.format or format_of(args.output)
-    if split == "both" and fmt != "html":
-        ap.error("--split both is for the HTML report: a diff holds one split")
+    try:
+        check_split(split, fmt)
+    except ValueError as e:
+        ap.error(f"--split: {e}")
     for name in ("move_similarity", "sentence_move_similarity"):
         try:
             check_move_similarity(getattr(args, name))
         except ValueError as e:
             ap.error(f"--{name.replace('_', '-')}: {e}")
-    chosen = {
-        f.name: getattr(args, f"passage_{f.name}")
-        for f in fields(MovedPassageSettings)
-        if getattr(args, f"passage_{f.name}") is not None
-    }
-    passage_settings = MovedPassageSettings(**chosen)
     try:
-        passage_settings.check()
+        passage_settings = MovedPassageSettings.from_choices(
+            {f.name: getattr(args, f"passage_{f.name}") for f in fields(MovedPassageSettings)}
+        )
     except SettingError as e:
         ap.error(f"{passage_option(e.name)}: {e}")
     options = Options(
@@ -392,31 +393,22 @@ def main(argv: list[str] | None = None) -> int:
         encoding=args.encoding,
     )
 
-    def run(by_sentence: bool):
+    def run(options: Options):
         if not args.git:
             include = FOLDER_FILES if args.include is None else args.include
-            return compare_paths(
-                args.repo,
-                args.base,
-                replace(options, by_sentence=by_sentence),
-                paths=args.paths,
-                include=include,
-            )
+            return compare_paths(args.repo, args.base, options, paths=args.paths, include=include)
         return compare(
             Path(args.repo),
             args.base,
             args.target,
-            replace(options, by_sentence=by_sentence),
+            options,
             paths=args.paths,
             cached=args.cached,
             untracked=args.untracked,
         )
 
-    sentences = None
     try:
-        comparison = run(split == "sentence")
-        if split == "both":
-            sentences = run(True)
+        comparison, sentences = compare_split(run, options, split)
     except git.InvalidGitRepositoryError:
         print(
             f"{PROG}: not a git repository: {args.repo} "
@@ -447,10 +439,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     c = comparison
-    files = "file" if len(c.files) == 1 else "files"
     print(
-        f"{PROG}: {c.base.short}..{c.target.short}: {len(c.files):,} {files}, "
-        f"+{c.additions:,} -{c.deletions:,} -> {output}"
+        f"{PROG}: {c.base.short}..{c.target.short}: {counted(len(c.files), 'file')}, "
+        f"+{c.counts.additions:,} -{c.counts.deletions:,} -> {output}"
     )
     if args.open:
         webbrowser.open(output.resolve().as_uri())

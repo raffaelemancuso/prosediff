@@ -85,8 +85,8 @@ def test_compare_modified_added_deleted(versions):
     counts = {p: (by_path[p].additions, by_path[p].deletions) for p in ("keep.txt", "new.txt")}
     assert counts == {"keep.txt": (1, 1), "new.txt": (1, 0)}
     assert (by_path["gone.txt"].additions, by_path["gone.txt"].deletions) == (0, 1)
-    assert c.additions == sum(f.additions for f in c.files)
-    assert c.deletions == sum(f.deletions for f in c.files)
+    assert c.counts.additions == sum(f.additions for f in c.files)
+    assert c.counts.deletions == sum(f.deletions for f in c.files)
     assert [f.path for f in c.files] == sorted(by_path)
     assert c.base.subject == "first"
     assert c.target.subject == "second"
@@ -164,12 +164,12 @@ def test_word_counts_per_file_and_total(versions):
     _, _, _, c, by_path = versions
     f = by_path["words.txt"]
     # "two" -> "2 ... four": 1 removed, 2 added; the removed line has 3 words
-    assert (f.words_added, f.words_removed) == (2, 4)
-    assert c.words_added == sum(f.words_added for f in c.files)
-    assert c.words_removed == sum(f.words_removed for f in c.files)
+    assert (f.counts.words_added, f.counts.words_removed) == (2, 4)
+    assert c.counts.words_added == sum(f.counts.words_added for f in c.files)
+    assert c.counts.words_removed == sum(f.counts.words_removed for f in c.files)
     html = render(c)
     assert 'title="words added">+2<' in html and 'title="words removed">−4<' in html
-    total = f'title="words added">+{c.words_added:,}<'
+    total = f'title="words added">+{c.counts.words_added:,}<'
     assert total in html
 
 

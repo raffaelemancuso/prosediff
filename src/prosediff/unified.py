@@ -99,12 +99,10 @@ def file_diff(f: FileDiff, context: int | None = CONTEXT, fmt: str = "diff") -> 
             if fmt == "wdiff":
                 if not changed[k]:
                     out.append(b[j])
-                elif i is None:
-                    out.append(f"{{+{b[j]}+}}")
-                elif j is None:
-                    out.append(f"[-{a[i]}-]")
                 else:
-                    out.append(word_line(a[i], b[j]))
+                    out.append(
+                        word_line(a[i] if i is not None else "", b[j] if j is not None else "")
+                    )
             elif not changed[k]:
                 out.append(f" {b[j]}")
             else:

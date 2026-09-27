@@ -75,7 +75,7 @@ def test_render_thousand_separators(page):
 
 def test_moved_rendered(page):
     c, html = page[3], page[4]
-    assert c.moved == 1
+    assert c.counts.moved == 1
     assert '<tr class="moved-out' in html and '<tr class="moved-in' in html
     assert "1 moved line" in html
 

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 from markupsafe import Markup, escape
 
-from prosediff.document import sub
+from prosediff.document import spaced, sub
 
 # Supplementary Private Use Area-A: apart from the comment placeholders,
 # which use the Private Use Area of the Basic Multilingual Plane.
@@ -56,7 +56,7 @@ def _definitions(lines: list[str]) -> dict[str, str]:
     found = {}
     for line in lines:
         if m := DEFINITION.match(line):
-            found.setdefault(m[1], " ".join(line[m.end() :].split()))
+            found.setdefault(m[1], spaced(line[m.end() :]))
     return found
 
 

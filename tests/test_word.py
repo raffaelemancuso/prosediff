@@ -2,9 +2,9 @@
 
 import docx as python_docx
 import pytest
-from helpers import docx_xml
+from helpers import docx_xml, markdown_of
 
-from prosediff.word import docx_to_markdown, omml_text
+from prosediff.word import omml_text
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def written(tmp_path):
     d.add_comment(commented.runs, text="Is [this] right?", author="Anna", initials="A")
     path = tmp_path / "written.docx"
     d.save(path)
-    return docx_to_markdown(path.read_bytes())
+    return markdown_of(path.read_bytes(), "a.docx")
 
 
 def test_structure(written):
@@ -63,13 +63,13 @@ def test_tracked_changes_three_ways(tmp_path):
         '<w:r><w:t xml:space="preserve"> grow.</w:t></w:r></w:p>',
     ).read_bytes()
     # the space of " entry" goes with it: not "start-up s" (jgm/pandoc#4427)
-    assert docx_to_markdown(d, "accept").strip() == "start-ups grow."
-    assert docx_to_markdown(d, "reject").strip() == "start-up entry grow."
-    assert docx_to_markdown(d, "all").strip() == (
+    assert markdown_of(d, "a.docx", "accept").strip() == "start-ups grow."
+    assert markdown_of(d, "a.docx", "reject").strip() == "start-up entry grow."
+    assert markdown_of(d, "a.docx", "all").strip() == (
         'start-up[ entry]{.deletion author="A" date="D"}[s]{.insertion author="A" date="D"} grow.'
     )
     with pytest.raises(ValueError):
-        docx_to_markdown(d, "maybe")
+        markdown_of(d, "a.docx", "maybe")
 
 
 def test_footnotes_numbered_in_order_and_dropped_with_their_text(tmp_path):
@@ -84,7 +84,7 @@ def test_footnotes_numbered_in_order_and_dropped_with_their_text(tmp_path):
         '<w:footnote w:id="5"><w:p><w:r><w:t>Second note.</w:t></w:r></w:p></w:footnote>'
         '<w:footnote w:id="7"><w:p><w:r><w:t>First note.</w:t></w:r></w:p></w:footnote>',
     ).read_bytes()
-    assert docx_to_markdown(d).strip().split("\n\n") == [
+    assert markdown_of(d, "a.docx").strip().split("\n\n") == [
         "One.[^1] Two.[^2]",
         "[^1]: First note.",
         "[^2]: Second note.",
@@ -98,7 +98,7 @@ def test_equation_as_linear_text(tmp_path):
         "<m:den><m:r><m:t>b</m:t></m:r></m:den></m:f></m:oMath>"
     )
     d = docx_xml(tmp_path / "m.docx", f"<w:p>{math}</w:p>").read_bytes()
-    assert docx_to_markdown(d).strip() == "DV_(it) = β ⋅ (a)/(b)"
+    assert markdown_of(d, "a.docx").strip() == "DV_(it) = β ⋅ (a)/(b)"
 
 
 def test_omml_brackets_and_sums():

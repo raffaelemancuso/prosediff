@@ -4,6 +4,7 @@ within a line or between two, is shown as moved."""
 import re
 
 import pytest
+from helpers import two_files
 
 from prosediff import Options, compare_paths, render
 from prosediff.cli import main
@@ -136,19 +137,22 @@ def test_holes_join_the_runs_of_a_passage():
 def test_move_passages_can_be_turned_off(tmp_path):
     first = "Opening remarks were brief"
     second = "The second part discusses results"
-    (tmp_path / "a.md").write_text(f"{first}. {SENTENCE} Then.\n\n{second}. Good.\n")
-    (tmp_path / "b.md").write_text(f"{first}. Then.\n\n{second}. {SENTENCE} Good.\n")
-    on = compare_paths(tmp_path / "a.md", tmp_path / "b.md")
-    assert on.moved_passages == 1
+    a, b = two_files(
+        tmp_path,
+        f"{first}. {SENTENCE} Then.\n\n{second}. Good.\n",
+        f"{first}. Then.\n\n{second}. {SENTENCE} Good.\n",
+    )
+    on = compare_paths(a, b)
+    assert on.counts.moved_passages == 1
     html = render(on)
     assert len(moved_spans(html)) == 2
     assert "1 moved passage" in html
-    off = compare_paths(tmp_path / "a.md", tmp_path / "b.md", Options(move_passages=False))
-    assert off.moved_passages == 0
+    off = compare_paths(a, b, Options(move_passages=False))
+    assert off.counts.moved_passages == 0
     assert not moved_spans(render(off))
     # and from the command line
     out = tmp_path / "r.html"
-    args = ["--files", str(tmp_path / "a.md"), str(tmp_path / "b.md"), "-o", str(out)]
+    args = ["--files", str(a), str(b), "-o", str(out)]
     assert main(args) == 0
     assert moved_spans(out.read_text(encoding="utf-8"))
     assert main([*args, "--no-move-passages"]) == 0
@@ -234,18 +238,21 @@ def test_rows_keep_how_they_looked_without_passages():
 def test_counts_without_passages(tmp_path):
     first = "Opening remarks were brief"
     second = "The second part discusses results"
-    (tmp_path / "a.md").write_text(f"{first}. {SENTENCE} Then.\n\n{second}. Good.\n")
-    (tmp_path / "b.md").write_text(f"{first}. Then.\n\n{second}. {SENTENCE} Good.\n")
-    c = compare_paths(tmp_path / "a.md", tmp_path / "b.md")
+    a, b = two_files(
+        tmp_path,
+        f"{first}. {SENTENCE} Then.\n\n{second}. Good.\n",
+        f"{first}. Then.\n\n{second}. {SENTENCE} Good.\n",
+    )
+    c = compare_paths(a, b)
     plain = c.without_passages
     words = len(SENTENCE.split())
-    assert (c.moved_passages, plain.moved_passages) == (1, 0)
+    assert (c.counts.moved_passages, plain.moved_passages) == (1, 0)
     # hidden, the moved sentence's words are removed and added again
-    assert plain.words_removed == c.words_removed + words
-    assert plain.words_added == c.words_added + words
+    assert plain.words_removed == c.counts.words_removed + words
+    assert plain.words_added == c.counts.words_added + words
     html = render(c)
     # both counts are in the page, the "Moved passages" switch shows one
-    on, off = f"{c.words_added:,}", f"{plain.words_added:,}"
+    on, off = f"{c.counts.words_added:,}", f"{plain.words_added:,}"
     assert f'<span class="pv-on">{on}</span><span class="pv-off">{off}</span>' in html
 
 
@@ -266,10 +273,9 @@ def test_moved_passage_settings(tmp_path):
     rows, _, _ = align(OLD, NEW, context=None, moved_passage_settings=strict)
     assert not any(r.old_moves for r in rows)
     # from the command line: one option for each setting
-    (tmp_path / "a.md").write_text("\n\n".join(OLD) + "\n")
-    (tmp_path / "b.md").write_text("\n\n".join(NEW) + "\n")
+    a, b = two_files(tmp_path, "\n\n".join(OLD) + "\n", "\n\n".join(NEW) + "\n")
     out = tmp_path / "r.html"
-    args = ["--files", str(tmp_path / "a.md"), str(tmp_path / "b.md"), "-o", str(out)]
+    args = ["--files", str(a), str(b), "-o", str(out)]
     assert main([*args, "--passage-min-words", "20"]) == 0
     assert not moved_spans(out.read_text(encoding="utf-8"))
     assert main([*args, "--passage-min-words", "4"]) == 0

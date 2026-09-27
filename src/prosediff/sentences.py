@@ -147,6 +147,11 @@ def _rule_block_end(lines: list[str], start: int) -> int:
     return last_rule + 1
 
 
+def _cut(line: str, start: int, end: int) -> str:
+    """line[start:end], a Line's with its styles."""
+    return line.cut(start, end) if isinstance(line, Line) else line[start:end]
+
+
 def split_sentences(
     lines: list[str], language: str = "en", line_languages: list[str | None] | None = None
 ) -> tuple[list[str], list[str]]:
@@ -168,6 +173,21 @@ def split_sentences(
         out.append(lines[i])
         labels.append(str(i + 1))
 
+    def split(i: int, prefix: str, rules: str) -> None:
+        """Line i as its sentences, labelled i.1, i.2 ...: after its prefix (a
+        list item's marker, which the first keeps and the others are
+        indented as wide as), by the rules of its language; whole when it
+        has one."""
+        line, p = lines[i], len(prefix)
+        parts = sentence_spans(str(line)[p:], rules)
+        if len(parts) == 1:
+            keep(i)
+            return
+        for k, (a, b) in enumerate(parts):
+            lead = _cut(line, 0, p) if k == 0 else " " * p
+            out.append(concat(lead, _cut(line, p + a, p + b)))
+            labels.append(f"{i + 1}.{k + 1}")
+
     i, n, in_fence = 0, len(lines), False
     # A YAML metadata block is kept as it is, delimiters included.
     if lines and lines[0].strip() == "---":
@@ -185,15 +205,7 @@ def split_sentences(
             if line.kind in UNSPLIT:
                 keep(i)
             else:
-                prefix = BULLET if line.kind == "item" else ""
-                parts = sentence_spans(str(line)[len(prefix) :], line.lang or language)
-                if len(parts) == 1:
-                    keep(i)
-                else:
-                    for k, (a, b) in enumerate(parts):
-                        lead = line.cut(0, len(prefix)) if k == 0 else " " * len(prefix)
-                        out.append(concat(lead, line.cut(len(prefix) + a, len(prefix) + b)))
-                        labels.append(f"{i + 1}.{k + 1}")
+                split(i, BULLET if line.kind == "item" else "", line.lang or language)
             i += 1
         elif FENCE.match(line):
             in_fence = not in_fence
@@ -209,15 +221,7 @@ def split_sentences(
             i += 1
         else:
             item = LIST_ITEM.match(line)
-            prefix = item.group(0) if item else ""
-            indent = " " * len(prefix)
             rules = (line_languages[i] if line_languages else None) or language
-            parts = sentences(line[len(prefix) :], rules)
-            if len(parts) == 1:
-                keep(i)
-            else:
-                for k, part in enumerate(parts):
-                    out.append((prefix if k == 0 else indent) + part)
-                    labels.append(f"{i + 1}.{k + 1}")
+            split(i, item.group(0) if item else "", rules)
             i += 1
     return out, labels

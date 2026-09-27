@@ -16,13 +16,12 @@ or not.
 """
 
 import os
-import subprocess
 import sys
 import zipfile
 from io import BytesIO
 from pathlib import Path
 
-from prosediff.diff import run
+from prosediff.diff import run_checked
 from prosediff.sources import is_document
 
 # git config answers at once (seconds).
@@ -44,13 +43,18 @@ def command() -> str:
 
 def git(*args: str, cwd: Path | None = None) -> str:
     try:
-        done = run(["git", *args], cwd=cwd, text=True, encoding="utf-8", timeout=GIT_TIMEOUT)
+        done = run_checked(
+            ["git", *args],
+            what=f"git {' '.join(args)}",
+            timeout=GIT_TIMEOUT,
+            error=SetupError,
+            ok=(0, 1),  # 1: git config --get found nothing
+            cwd=cwd,
+            text=True,
+            encoding="utf-8",
+        )
     except FileNotFoundError:
         raise SetupError("git is not on PATH") from None
-    except subprocess.TimeoutExpired:
-        raise SetupError(f"git {' '.join(args)} took too long, and was stopped") from None
-    if done.returncode not in (0, 1):  # 1: git config --get found nothing
-        raise SetupError(done.stderr.strip() or f"git {' '.join(args)} failed")
     return done.stdout.strip()
 
 

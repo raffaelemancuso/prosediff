@@ -14,6 +14,15 @@ sync_api = pytest.importorskip("playwright.sync_api")
 NOTE = '[Old remark.]{.comment-start id="1" author="Anna" date="2026-09-23T10:15:00Z"}'
 
 
+def open_report(browser, tmp_path, comparison, **render_options):
+    """The HTML report of comparison, opened in a new page of browser."""
+    out = tmp_path / "page.html"
+    out.write_text(render(comparison, **render_options), encoding="utf-8")
+    page = browser.new_context().new_page()
+    page.goto(out.as_uri())
+    return page
+
+
 @pytest.fixture(scope="module")
 def browser():
     with sync_api.sync_playwright() as p:
@@ -269,11 +278,7 @@ def test_tracked_and_formatting_changes(browser, tmp_path):
         f"<w:p>{run('Some ')}{run('words', '<w:rPr><w:b/></w:rPr>')}{run('.')}</w:p>"
         f"<w:p>{run('New.')}</w:p>",
     )
-    out = tmp_path / "page.html"
-    out.write_text(render(compare_paths(old, new)), encoding="utf-8")
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(out.as_uri())
+    page = open_report(browser, tmp_path, compare_paths(old, new))
     tip = page.locator("#tip")
     tracked = page.locator(".s-tc-ins").first
     assert "underline" in tracked.evaluate("e => getComputedStyle(e).textDecorationLine")
@@ -292,7 +297,7 @@ def test_tracked_and_formatting_changes(browser, tmp_path):
     page.keyboard.press("m")  # hidden: no mark, no count
     assert mark.evaluate("e => getComputedStyle(e).borderBottomStyle") == "none"
     assert not page.locator(".fmt-count").is_visible()
-    context.close()
+    page.context.close()
 
 
 def test_moved_line_numbers_tell_where(browser, tmp_path):
@@ -304,11 +309,7 @@ def test_moved_line_numbers_tell_where(browser, tmp_path):
     edited = "This paragraph is moved further down in the new version of this text."
     old.write_bytes(f"{moved}\n\nFirst kept paragraph.\n\nSecond kept paragraph.\n".encode())
     new.write_bytes(f"First kept paragraph.\n\nSecond kept paragraph.\n\n{edited}\n".encode())
-    out = tmp_path / "page.html"
-    out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(out.as_uri())
+    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
     tip = page.locator("#tip")
     page.locator("tr.moved-out td.no.l").hover()
     # a Markdown file's numbers are its lines, blank ones included
@@ -316,7 +317,7 @@ def test_moved_line_numbers_tell_where(browser, tmp_path):
     assert "edited on the way" in tip.inner_text()
     page.locator("tr.moved-in td.no.r").hover()
     assert tip.locator("b").inner_text() == "Moved from line 1"
-    context.close()
+    page.context.close()
 
 
 def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
@@ -332,17 +333,12 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
         b"The first sentence stays here.\n\n"
         b"A middle paragraph that stays. This sentence moves to the end of the text.\n"
     )
-    out = tmp_path / "page.html"
-    out.write_text(
-        render(
-            compare_paths(old, new, Options(context=None)),
-            sentences=compare_paths(old, new, Options(context=None, by_sentence=True)),
-        ),
-        encoding="utf-8",
+    page = open_report(
+        browser,
+        tmp_path,
+        compare_paths(old, new, Options(context=None)),
+        sentences=compare_paths(old, new, Options(context=None, by_sentence=True)),
     )
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(out.as_uri())
     paragraphs = page.locator('.split[data-split="paragraph"]')
     sentences = page.locator('.split[data-split="sentence"]')
     assert paragraphs.is_visible() and not sentences.is_visible()
@@ -360,7 +356,7 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     sync_api.expect(sentences.locator("svg.move-links")).to_have_count(0)
     page.locator("[data-split-switch]").click()
     assert paragraphs.is_visible()
-    context.close()
+    page.context.close()
 
 
 def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
@@ -371,11 +367,7 @@ def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
     moved = "This sentence moves to the end of the text."
     old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
     new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
-    out = tmp_path / "page.html"
-    out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(out.as_uri())
+    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
     assert "1 moved passage" in page.locator("details.file summary").inner_text()
     tip = page.locator("#tip")
     page.locator("td.left .moved").hover()
@@ -384,7 +376,7 @@ def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
     page.locator("td.right .moved").hover()
     assert tip.locator("b").inner_text() == "Moved from line 1"
     sync_api.expect(page.locator("svg.move-links path")).to_have_count(1)
-    context.close()
+    page.context.close()
 
 
 def test_moved_passages_switch(browser, tmp_path):
@@ -395,11 +387,7 @@ def test_moved_passages_switch(browser, tmp_path):
     moved = "This sentence moves to the end of the text."
     old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
     new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
-    out = tmp_path / "page.html"
-    out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(out.as_uri())
+    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
     switch = page.locator('[data-toggle="passages"]')
     summary = page.locator("details.file summary")
     assert switch.get_attribute("aria-pressed") == "true"
@@ -417,7 +405,7 @@ def test_moved_passages_switch(browser, tmp_path):
     page.keyboard.press("v")
     assert page.locator("td.left .moved").is_visible()
     assert "1 moved passage" in summary.inner_text()
-    context.close()
+    page.context.close()
 
 
 def test_no_moved_passages_switch_without_passages(page):
