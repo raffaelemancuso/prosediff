@@ -1,12 +1,15 @@
 """The window: choosing the sides, generating the HTML report, remembering choices."""
 
+import json
 import sys
 import tkinter as tk
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
 from prosediff import gui
+from prosediff.diff import MovedPassageSettings
 from prosediff.gui import (
     INDEX,
     WORKTREE,
@@ -16,6 +19,7 @@ from prosediff.gui import (
     generate,
     list_choices,
     load_settings,
+    moved_passage_settings_of,
     save_settings,
     settings_from_args,
 )
@@ -200,6 +204,10 @@ def test_window_loads_a_repository(root, history):
     assert app.collect().move_similarity == 0.6
     app.move_similarity.set(3)
     assert app.collect().move_similarity == 1.0
+    # moved passages followed by default, and the switch turns them off
+    assert app.collect().move_passages
+    app.move_passages.set(False)
+    assert not app.collect().move_passages
     # untracked files only make sense with the working tree
     app.target.set(INDEX)
     app.update_untracked()
@@ -456,3 +464,45 @@ def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     s.output_format = "diff"
     with pytest.raises(ValueError, match="HTML report"):
         generate(s)
+
+
+def test_advanced_moved_passage_settings(root, tmp_path):
+    """The advanced settings are hidden until asked for; only the values
+    changed from prosediff's defaults are kept, and saved."""
+    app = App(root, Settings(mode="files"))
+    root.update()
+    assert not app.advanced.winfo_manager()
+    app.toggle_advanced()
+    root.update()
+    assert app.advanced.winfo_manager() == "pack"
+    app.toggle_advanced()
+    root.update()
+    assert not app.advanced.winfo_manager()
+    # one field for each setting, at its default
+    assert set(app.passage_vars) == {f.name for f in fields(MovedPassageSettings)}
+    assert app.passage_vars["max_pairs"].get() == "250,000"
+    assert app.collect().moved_passages == {}
+    app.passage_vars["min_words"].set("6")
+    app.passage_vars["partial_share"].set("0.5")
+    app.passage_vars["rounds"].set("not a number")  # keeps the default
+    s = app.collect()
+    assert s.moved_passages == {"min_words": 6, "partial_share": 0.5}
+    assert moved_passage_settings_of(s).min_words == 6
+    path = tmp_path / "gui.json"
+    assert save_settings(s, path)
+    assert load_settings(path).moved_passages == {"min_words": 6, "partial_share": 0.5}
+    app.reset_passage_settings()
+    assert app.collect().moved_passages == {}
+
+
+def test_moved_passage_settings_loaded_and_checked(tmp_path):
+    path = tmp_path / "gui.json"
+    path.write_text(
+        json.dumps({"moved_passages": {"min_words": 5, "unknown": 3, "rounds": "x"}}),
+        encoding="utf-8",
+    )
+    assert load_settings(path).moved_passages == {"min_words": 5}
+    path.write_text(json.dumps({"moved_passages": [1, 2]}), encoding="utf-8")
+    assert load_settings(path).moved_passages == {}
+    with pytest.raises(ValueError, match="partial_share"):
+        moved_passage_settings_of(Settings(moved_passages={"partial_share": 3}))

@@ -1,0 +1,43 @@
+Moved passages: speed and accuracy of diff.mark_passage_moves
+2026-09-27 10:49:26
+
+60 trials per book and kind of line; 3 moves and 3 decoys each; moved passages with 0%, 0%, 10%, 20% of their words replaced; a passage found is right when each end overlaps the true one by 50% of the shorter.
+
+Lines are paragraphs (similarity 0.7, token-sort)
+  true moves      :     846
+  reported        :     860
+  rejoined        :      28
+  right           :     827
+  wrong           :       5
+  moves found     :     841
+  precision       :   99.4%
+  recall          :   99.4%
+  F1              :   99.4%
+  boundary (IoU)  :   98.7%
+  align, passages :     28.05 s
+  align, without  :     26.46 s
+  passages cost   :      1.59 s
+
+Lines are sentences (similarity 0.55, token-sort)
+  true moves      :     900
+  reported        :     881
+  rejoined        :       1
+  right           :     879
+  wrong           :       1
+  moves found     :     888
+  precision       :   99.9%
+  recall          :   98.7%
+  F1              :   99.3%
+  boundary (IoU)  :   97.8%
+  align, passages :      2.38 s
+  align, without  :      1.87 s
+  passages cost   :      0.51 s
+
+Stress: 400 paragraphs, 30 sentences moved, 30 decoys, every other paragraph with 15% of its words replaced
+  reported        :      41
+  right           :      30
+  wrong           :      11
+  moves found     :      30 of 30
+  align, passages :      7.28 s
+  align, without  :      6.75 s
+

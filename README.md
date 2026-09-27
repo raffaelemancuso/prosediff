@@ -83,15 +83,20 @@ prosediff sits between the two:
   with `--split sentence`, a sentence) moved elsewhere is shown at both ends,
   tinted as a move, with the words edited on the way highlighted; how alike
   it must stay to count as moved is set with `--move-similarity` and
-  `--move-algorithm` (see [Moved lines](#moved-lines-algorithm-and-threshold)). Code diff
-  tools show the same text as one deletion and one unrelated insertion.
+  `--move-algorithm` (see [Moved lines](#moved-lines-algorithm-and-threshold)). So is a
+  passage moved within a paragraph or between two, a sentence taken out of
+  one paragraph and put in another (`--no-move-passages` turns this off).
+  Code diff tools show the same text as one deletion and one unrelated
+  insertion.
 - **It is made for prose**: long lines wrap, changes are highlighted word by
   word and down to the letter within a word, each change is described in
   plain English on hover (`changed "repeat" to "repeated"`), words are
   counted as well as lines, and Markdown can be shown formatted.
-- **It works from git or without it**: two commits, the staged or
-  uncommitted changes, two files or two folders, from the command line,
-  from a window, or from `git difftool`.
+- **It works in a git repository or outside one**: two commits, the staged
+  or uncommitted changes, two files or two folders, from the command line,
+  from a window, or from `git difftool`. The git program itself is needed
+  either way: it aligns the lines of every comparison (see
+  [Usage](#usage)).
 - **The result is one self-contained HTML file**: no server, no network, no
   Word needed to read it. It can be attached to an e-mail, so a co-author
   sees what changed since they last read the paper, and printed or saved as
@@ -108,6 +113,13 @@ prosediff --to-markdown FILE
 ```
 
 (installed: `uv tool install prosediff`; from a checkout: `uv run prosediff ...`)
+
+Requirements: Python 3.11 or later, and [git](https://git-scm.com/) for
+every comparison, `--files` and `--folders` included: prosediff aligns the
+lines of the two versions with `git diff --no-index` (see [How it
+works](#how-it-works)). git must be on `PATH`, or named by the
+`GIT_PYTHON_GIT_EXECUTABLE` environment variable (e.g.
+`C:\Program Files\Git\cmd\git.exe`); without it prosediff does not start.
 
 | Argument / option          | Meaning                                                       |
 |----------------------------|---------------------------------------------------------------|
@@ -134,6 +146,8 @@ prosediff --to-markdown FILE
 | `--encoding NAME`          | the encoding of text and Markdown files, e.g. `utf-8`, `cp1252`, `latin-1` (Word and OpenDocument files carry their own). Default `auto`: UTF-8, unless a file cannot be read as UTF-8 or reads with control characters; then the encoding is guessed with [cchardet](https://pypi.org/project/cchardet/) (Mozilla's uchardet, reliable even on a few words), or, when its guess cannot read the file, with [charset-normalizer](https://pypi.org/project/charset-normalizer/); Windows-1252 is preferred when it reads the text alike, and the file header says which was used. In the GUI, the "Text encoding" box |
 | `--move-similarity X`      | how alike, above 0 and at most 1, an edited paragraph (a line of other files) must be to where it reappears to count as moved, by `--move-algorithm` (default 0.7; 1: only lines moved unchanged). Since 0.5.0 it no longer applies to sentences, which have their own setting below |
 | `--sentence-move-similarity X`, `--sentence-move-algorithm NAME` | the same for sentences, when prose is compared sentence by sentence (default 0.55, `token-sort`). In the GUI, "Moved paragraphs" and "Moved sentences", each a threshold and an algorithm |
+| `--move-passages`, `--no-move-passages` | also follow the passages moved within a paragraph (a line) or between two (default: on): a run of words removed in one place and added in another, gaps of up to two unchanged words allowed, at least four words (and 15 non-space characters) long, as alike as `--move-similarity` (or `--sentence-move-similarity`) and its algorithm say, is shown as moved rather than as a deletion and an unrelated insertion; a passage is also looked for inside a longer one (a sentence moved out of a paragraph deleted or rewritten). In the GUI, "Moved passages" |
+| `--passage-min-words N`, `--passage-min-chars N`, `--passage-max-gap N`, `--passage-shared-words N`, `--passage-content-letters N`, `--passage-edge-run N`, `--passage-partial-share X`, `--passage-rounds N`, `--passage-max-pairs N`, `--passage-rare-share X`, `--passage-rare-min N` | how moved passages are told from chance likeness (advanced; `prosediff --help` says what each does, and its default): the shortest passage (4 words, 15 characters), the unchanged words allowed inside one (2), the words of meaning two passages must share (2, of 4 letters or more), the words in common that can start or end one (2), when a passage is looked for inside a longer one (0.8), the rounds of matching (4), and past how many pairs only those sharing a rare word are tried (250,000; rare: in 1% of the passages, or 20). In the GUI, the fields of "Advanced settings" |
 | `--move-algorithm NAME`    | how that likeness is measured: `token-sort` (default), the words and punctuation two lines have in common whatever their order; `tokens`, in order; `chars`, their characters in common, in order; `levenshtein`, 1 − the words inserted, deleted or replaced over the longer line's; `token-set`, the words both share against the rest of each. See [Moved lines](#moved-lines-algorithm-and-threshold). In the GUI, the list next to "Moved-line similarity" |
 | `--open`                   | open the HTML report in the browser once it is written |
 | `--setup-git`              | set git up to show Word and OpenDocument files as text and to open prosediff HTML reports from `git difftool` (see below), for the repository REPO (default: the current folder) |
@@ -230,7 +244,8 @@ on it, or on its ⓘ):
   is compared ("Compare by": paragraphs, sentences or both), how alike a
   paragraph and a sentence must stay to count as moved and how that is
   measured (a threshold and an algorithm for each, "Moved paragraphs" and
-  "Moved sentences"), the document language (`default`: the one Word and
+  "Moved sentences"), whether passages moved within or between paragraphs
+  are followed too ("Moved passages"), the document language (`default`: the one Word and
   OpenDocument files mark, the others guessed; `document`; `guess`, guessed
   from each file; or a code such as `it`), which splits sentences and
   hyphenates lines, the encoding of text files, and a switch to ignore
@@ -238,6 +253,12 @@ on it, or on its ⓘ):
 - **How it is shown**: the comments (markers, text or none), comments
   without text, context lines or whole files, and the alignment of wrapped
   lines.
+
+Below them, **Advanced settings** (hidden until clicked) holds the settings
+few need to change: how moved passages are told from chance likeness, the
+same as the `--passage-*` options, each explained by its tooltip, with a
+button putting them back to their defaults. Only the values changed from
+the defaults are saved, so the others follow prosediff's defaults.
 
 Under **Output**, the format (HTML report, unified diff or word diff, the
 extension of the file following it) and where to save it (by default,
@@ -280,6 +301,18 @@ back to its default (what is compared and where the output goes stay).
   number tells where it went ("Moved to line 137.3") or where it came from,
   and whether it was edited on the way; a line joins its two places (hovering
   either end lights up both), which `l` hides.
+- A passage moved within a paragraph or between two (a sentence moved into
+  another paragraph, two sentences swapped, a clause moved inside its
+  sentence: at least four words, as alike as a moved line must be) is drawn
+  as a moved line is: tinted in the colour of moves at both ends, its edits
+  on the way highlighted, counted as a moved passage, not as words removed
+  and added. Hovering it tells where it went or came from, a line joins its
+  two places, and on paper where it went is written after it. A paragraph
+  whose words all moved elsewhere counts as neither removed nor added, and
+  its gutter is that of a moved line (`→`, `←`). The toolbar's "Moved
+  passages" switch (`v`, shown when there are any) hides them: each passage
+  is then removed in one place and added in the other, as the plain word
+  diff shows it, and the counts follow.
 - With `--split both`, the comparison paragraph by paragraph and the one
   sentence by sentence in one report, each with its counts, a toolbar button
   (`s`) switching between them.
@@ -300,7 +333,8 @@ back to its default (what is compared and where the output goes stay).
   formatting changed (made bold or italic, underlined, struck through, made
   superscript, subscript, a link or a heading) is marked in amber, what
   changed shown on hover, the unchanged lines holding such changes
-  unfolded, and each file's header says in how many lines; a spacing
+  unfolded, and each file's header says in how many lines; `v` for the
+  moved passages, on by default (see above); a spacing
   stepper, − and + either side of the value
   (or `[` and `]`, or the arrow keys on the value, an ARIA spinbutton), for
   less or more space between the paragraphs of Markdown and
@@ -352,10 +386,37 @@ total length, computed by rapidfuzz), lines at least half similar are paired
 so that the total similarity is highest without crossing, and the lines left
 in between are paired in order. A line inserted in the middle of an edited
 paragraph thus stands alone instead of shifting every pair below it. Paired
-lines are compared again word by word, and a word replaced by a single word
-is compared letter by letter when at least half its letters survive. Moved
+lines are compared again word by word, with patiencediff's patience diff
+(difflib's when patiencediff is not installed: the same result on all but a
+few lines in thousands, at a fourteenth of the speed; the matchers compared
+are in `docs/word_matcher_benchmark.md`), and a word replaced by a single
+word is compared letter by letter when at least half its letters survive.
+Words removed or added between unchanged text slide, as git slides its
+hunks, to where they read best: a removed sentence takes its own full stop,
+not the one of the sentence before it, and starts where the sentence does,
+or where the line does (a full stop may be an abbreviation's, as in "Mr.";
+one followed by a footnote reference or a closing quote still ends its
+sentence). Moved
 lines are found among the lines left removed and added, identical ones
-first, then the most similar pairs. The HTML report is rendered with Jinja2.
+first, then the most similar pairs. Moved passages are then found among the
+words still removed and added: each changed line's runs of changes (joined
+across gaps of up to two unchanged words), and each line removed or added
+whole, are scored against those of the other side by the moved-line
+measure, a shorter passage also against the best-matching window of a
+longer one (rapidfuzz's partial alignment), each match trimmed to the runs
+of at least two tokens both share and widened over a word edited next to
+its edge. A match needs at least four words and 15 characters, and two
+words of four letters or more in common (passages alike in their articles
+and prepositions alone are chance); the most similar pairs are taken first,
+and what is left of a passage around a match is matched again. A removed
+and an added passage that are the same change of one line are an edit in
+place, never a move. Past 250,000 pairs of passages (a long document revised
+throughout), only the pairs sharing a rare word are tried. All of these
+limits can be changed (`--passage-*`, or the GUI's advanced settings);
+their defaults were chosen with `docs/passage_benchmark.py`, which simulates
+revisions of books from Project Gutenberg and measures the moved passages
+found, their precision, recall and bounds, and their cost in time. The HTML
+report is rendered with Jinja2.
 
 ### Moved lines: algorithm and threshold
 
@@ -496,3 +557,10 @@ the OpenDocument tests as raw XML. The git tests keep git's global and
 system settings out of the way. `.github/workflows/tests.yml` runs
 the linter, and the tests on Windows, Linux and macOS with Python 3.11 and
 3.14.
+
+Two benchmarks guide the defaults: `docs/passage_benchmark.py` (moved
+passages, report `docs/passage_benchmark.txt`) and
+`docs/word_matcher_benchmark.py` (the word matchers, report and
+recommendation in `docs/word_matcher_benchmark.md`). Their test set is kept
+in `docs/benchmark_data/`: the Project Gutenberg books, as served, and the
+simulated revisions made from them, so no run downloads or rebuilds them.

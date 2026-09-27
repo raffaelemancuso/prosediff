@@ -6,7 +6,8 @@ changed file (histogram algorithm, one git process for all files); within a
 block of replaced lines, each old line is paired with its most similar new
 line and the two are compared word by word, and letter by letter within a
 changed word. A removed line that reappears elsewhere in the file, as it was
-or lightly edited, is shown as moved.
+or lightly edited, is shown as moved, and so is a passage removed from one
+place and added in another, within a line or between two.
 """
 
 import base64
@@ -15,8 +16,10 @@ import difflib
 import re
 import subprocess
 import tempfile
-from collections import defaultdict
-from dataclasses import dataclass, field
+from collections import Counter, defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, field, fields
+from functools import lru_cache
 from itertools import groupby
 from pathlib import Path
 from typing import Literal
@@ -28,6 +31,11 @@ from charset_normalizer import from_bytes
 from markupsafe import Markup
 from rapidfuzz import fuzz
 from rapidfuzz.distance import Indel, Levenshtein
+
+try:
+    from patiencediff import PatienceSequenceMatcher
+except ImportError:  # the words are then paired by difflib (_word_matcher)
+    PatienceSequenceMatcher = None
 
 from prosediff import document, footnotes
 from prosediff.comments import (  # noqa: F401  (re-exported)
@@ -217,6 +225,25 @@ class Row:
     # The same number on the two rows of a moved line (0: not moved), for the
     # HTML report to draw a line between them.
     move_pair: int = 0
+    # The passages of the line moved from or to another line (or elsewhere
+    # in this one), on each side: mark_passage_moves.
+    old_moves: list["MovedSpan"] = field(default_factory=list)
+    new_moves: list["MovedSpan"] = field(default_factory=list)
+    # What those moves are, in plain English, and the words edited on the way.
+    move_changes: list[str] = field(default_factory=list)
+    passage_words_removed: int = 0
+    passage_words_added: int = 0
+    # How the row looked before its passages were shown as moved (None: it
+    # has none): the HTML report shows it when moved passages are hidden,
+    # each passage then removed or added in its own place.
+    without_passages: "RowView | None" = None
+
+    @property
+    def only_moved(self) -> bool:
+        """A line removed or added whose words all moved, as passages."""
+        return (self.kind == "delete" and bool(self.old_moves) and not self.words_removed) or (
+            self.kind == "insert" and bool(self.new_moves) and not self.words_added
+        )
 
     @property
     def skipped(self) -> int:
@@ -225,6 +252,38 @@ class Row:
     @property
     def changed(self) -> bool:
         return self.kind not in ("equal", "skip")
+
+
+@dataclass
+class RowView:
+    """A row's HTML, changes and word counts as they were before its moved
+    passages were set apart (Row.without_passages)."""
+
+    left: Markup
+    right: Markup
+    changes: list[str]
+    words_added: int
+    words_removed: int
+
+
+@dataclass
+class Counts:
+    """The counts of a file or a comparison as the HTML report shows them
+    with moved passages hidden: each passage removed and added in place."""
+
+    additions: int = 0
+    deletions: int = 0
+    words_added: int = 0
+    words_removed: int = 0
+    moved: int = 0
+    moved_passages: int = 0
+    changed_lines: int = 0
+    inserted_lines: int = 0
+    deleted_lines: int = 0
+
+    def __add__(self, other: "Counts") -> "Counts":
+        pairs = zip(vars(self).values(), vars(other).values(), strict=True)
+        return Counts(*(a + b for a, b in pairs))
 
 
 @dataclass
@@ -281,17 +340,22 @@ class FileDiff:
         return sum(r.kind == "moved-in" for r in self.rows)
 
     @property
+    def moved_passages(self) -> int:
+        """Passages moved within or between lines (mark_passage_moves)."""
+        return sum(len(r.new_moves) for r in self.rows)
+
+    @property
     def changed_lines(self) -> int:
         """Lines (paragraphs, sentences) edited in place."""
         return sum(r.kind == "replace" for r in self.rows)
 
     @property
     def inserted_lines(self) -> int:
-        return sum(r.kind == "insert" for r in self.rows)
+        return sum(r.kind == "insert" and not r.only_moved for r in self.rows)
 
     @property
     def deleted_lines(self) -> int:
-        return sum(r.kind == "delete" for r in self.rows)
+        return sum(r.kind == "delete" and not r.only_moved for r in self.rows)
 
     @property
     def change_count(self) -> int:
@@ -301,6 +365,23 @@ class FileDiff:
     def formatted_rows(self) -> int:
         """How many lines' formatting changed."""
         return sum(bool(row.format_changes) for r in self.rows for row in [r, *r.hidden])
+
+    @property
+    def without_passages(self) -> Counts:
+        """Its counts with moved passages hidden: a line whose words all moved
+        counts as removed or added again, and the passages' words too."""
+        plain = [r.without_passages or r for r in self.rows]
+        return Counts(
+            additions=self.additions + sum(r.kind == "insert" and r.only_moved for r in self.rows),
+            deletions=self.deletions + sum(r.kind == "delete" and r.only_moved for r in self.rows),
+            words_added=sum(p.words_added for p in plain),
+            words_removed=sum(p.words_removed for p in plain),
+            moved=self.moved,
+            moved_passages=0,
+            changed_lines=self.changed_lines,
+            inserted_lines=sum(r.kind == "insert" for r in self.rows),
+            deleted_lines=sum(r.kind == "delete" for r in self.rows),
+        )
 
     @property
     def anchor(self) -> str:
@@ -341,6 +422,10 @@ class Comparison:
         return sum(f.moved for f in self.files)
 
     @property
+    def moved_passages(self) -> int:
+        return sum(f.moved_passages for f in self.files)
+
+    @property
     def changed_lines(self) -> int:
         return sum(f.changed_lines for f in self.files)
 
@@ -355,6 +440,11 @@ class Comparison:
     @property
     def change_count(self) -> int:
         return sum(f.change_count for f in self.files)
+
+    @property
+    def without_passages(self) -> Counts:
+        """Its counts with moved passages hidden (FileDiff.without_passages)."""
+        return sum((f.without_passages for f in self.files), Counts())
 
     def comments_with(self, status: str) -> list[CommentEntry]:
         return [c for c in self.comments if c.status == status]
@@ -740,39 +830,228 @@ def word_ops(old: str, new: str) -> list[Opcode]:
     characters: the one word pairing of prosediff, that of the HTML report's
     changed lines and of the word diff. Changes separated only by whitespace
     are one change."""
+    return list(_word_ops(old, new))
+
+
+# Almost all the time of a comparison is spent here, and a changed line is
+# compared word by word up to three times (drawn, searched for moved
+# passages, drawn again around them): each pair of lines is compared once.
+WORD_OPS_CACHE = 4096
+
+
+def _word_matcher(a: list[str], b: list[str]):
+    """The words of two lines paired by patiencediff's patience diff (in
+    Rust), or by difflib's when it is not installed: the same pairing but on
+    4 of 2,776 changed lines, 14 times as fast (docs/word_matcher_benchmark.md)."""
+    if PatienceSequenceMatcher is None:
+        return difflib.SequenceMatcher(None, a, b, autojunk=False)
+    return PatienceSequenceMatcher(None, a, b)
+
+
+@lru_cache(maxsize=WORD_OPS_CACHE)
+def _word_ops(old: str, new: str) -> tuple[Opcode, ...]:
     a, b = TOKEN.findall(old), TOKEN.findall(new)
     ao, bo = _offsets(a), _offsets(b)
-    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    return [
+    matcher = _word_matcher(a, b)
+    ops = [
         (op, ao[i1], ao[i2], bo[j1], bo[j2])
         for op, i1, i2, j1, j2 in merge_across_spaces(matcher.get_opcodes(), a)
     ]
+    return tuple(slide_ops(ops, old, new))
 
 
-def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles = None) -> WordDiff:
+# Where a change reads best: at the start or end of the line; after the end
+# of a sentence, ending with one; failing that, after and with a comma.
+SENTENCE_END = frozenset(".!?;:")
+CLAUSE_END = frozenset(",")
+# What may follow the end of a sentence and still belong to it: footnote
+# references ("A.[^1]", or the stand-in footnotes.set_aside puts for its
+# number) and closing quotes and brackets ("yes.”", "above.)").
+AFTER_END = re.compile(rf"(?:\[\^[^\]\s]*\]|{footnotes.STAND_IN.pattern}|[)\]}}\"'”’»])+$")
+
+
+def _ends(text: str) -> int:
+    """3 when text ends a sentence, 1 a clause, else 0 (footnote references
+    and closing quotes and brackets after its last sign aside)."""
+    text = AFTER_END.sub("", text)
+    if text and text[-1] in SENTENCE_END:
+        return 3
+    if text and text[-1] in CLAUSE_END:
+        return 1
+    return 0
+
+
+def _edge_score(line: str, start: int, end: int) -> int:
+    """How well the change start:end of line sits on the bounds a reader
+    sees: the line starting or ending with it scores most, a sentence a
+    little less (its full stop may be an abbreviation's, as in "Mr."), a
+    clause less, a word cut in two never."""
+    before = line[:start].rstrip()
+    score = 4 if not before else _ends(before)
+    score += 4 if end >= len(line.rstrip()) else _ends(line[start:end].rstrip())
+    if start < end and line[start].isspace():
+        score -= 1  # starting with the space of the text before it
+    for at in (start, end):
+        if 0 < at < len(line) and line[at - 1].isalnum() and line[at].isalnum():
+            score -= 5
+    return score
+
+
+def slide_ops(ops: list[Opcode], old: str, new: str) -> list[Opcode]:
+    """Words removed (or added) between two runs of unchanged text slid to
+    where they read best, as git slides a diff's hunks. A removal can start
+    anywhere its text repeats around it: a sentence removed from between two
+    others is ". The committee met ... budget" as difflib finds it, the full
+    stop of the sentence before it and not its own, and a sentence moved
+    next to another starting with the same word may be found as "council
+    met ... afternoon. The". Of all the places it can slide to (text the same
+    on both sides of it), the one whose edges score best (_edge_score) is
+    taken, the nearest on a tie: "The committee met ... budget. ", which
+    reads, and moves as a passage, as a sentence. Only a pure removal or
+    addition slides."""
+    ops = list(ops)
+    out: list[Opcode] = []
+    for k, (tag, o1, o2, n1, n2) in enumerate(ops):
+        if tag not in ("delete", "insert"):
+            out.append((tag, o1, o2, n1, n2))
+            continue
+        prev = out[-1] if out and out[-1][0] == "equal" else None
+        nxt = ops[k + 1] if k + 1 < len(ops) and ops[k + 1][0] == "equal" else None
+        side = 1 if tag == "delete" else 3  # the side the change has text on
+        line = old if tag == "delete" else new
+        start, end = (o1, o2) if tag == "delete" else (n1, n2)
+        # how far it can slide: within the unchanged runs next to it, leaving
+        # a character of each between it and another change
+        # (all of the run before, when it starts the line; all of the run
+        # after, when it ends it)
+        if not prev:
+            low = start
+        elif prev[1] == 0 and prev[3] == 0:
+            low = 0
+        else:
+            low = prev[side] + 1
+        last = k + 1 == len(ops) - 1
+        high = nxt[side + 1] - (0 if last else 1) if nxt else end
+        left = 0
+        while start - left - 1 >= low and line[start - left - 1] == line[end - left - 1]:
+            left += 1
+        right = 0
+        while end + right < high and line[start + right] == line[end + right]:
+            right += 1
+        best = min(
+            range(-left, right + 1),
+            key=lambda s: (-_edge_score(line, start + s, end + s), abs(s), -s),
+        )
+        if not best:
+            out.append((tag, o1, o2, n1, n2))
+            continue
+        # the unchanged runs around it give or take the text slid past (the
+        # same on both sides): the one before ends, the one after starts,
+        # where the change now does
+        if prev:
+            out.pop()
+            if prev[2] + best > prev[1] or prev[4] + best > prev[3]:
+                out.append(("equal", prev[1], prev[2] + best, prev[3], prev[4] + best))
+        else:
+            out.append(("equal", o1, o1 + best, n1, n1 + best))
+        out.append((tag, o1 + best, o2 + best, n1 + best, n2 + best))
+        if nxt:
+            _, e1, e2, f1, f2 = nxt
+            ops[k + 1] = ("equal", e1 + best, e2, f1 + best, f2)
+        elif best < 0:
+            # at the end of the line: the text slid past is unchanged after it
+            out.append(("equal", o2 + best, o2, n2 + best, n2))
+    return [op for op in out if op[0] != "equal" or op[2] > op[1] or op[4] > op[3]]
+
+
+@dataclass
+class MovedSpan:
+    """A passage of a line moved to or from another place (mark_passage_moves):
+    its characters start:end in the line, the number it shares with the
+    other end (for the HTML report to draw a line between them), and its
+    HTML, the passage compared with the other end."""
+
+    start: int
+    end: int
+    pair: int
+    html: Markup
+
+
+def outside(start: int, end: int, moves: list[MovedSpan]) -> list[tuple[int, int]]:
+    """The pieces of characters start:end that no moved passage covers."""
+    pieces, at = [], start
+    for m in sorted(moves, key=lambda m: m.start):
+        if m.end <= at or m.start >= end:
+            continue
+        if m.start > at:
+            pieces.append((at, m.start))
+        at = max(at, m.end)
+    if at < end:
+        pieces.append((at, end))
+    return pieces
+
+
+def word_diff(
+    old: str,
+    new: str,
+    old_styles: Styles = None,
+    new_styles: Styles = None,
+    old_moves: list[MovedSpan] | None = None,
+    new_moves: list[MovedSpan] | None = None,
+) -> WordDiff:
     """Both lines as HTML, the changed tokens wrapped in <del> and <ins>.
 
     Changes separated only by whitespace are one change. A word changed into
     a similar word ("repeat" -> "repeated") is marked class="partial", with
     only the changed letters in <mark>. The styles, if given, are the
-    Markdown styles of each character of the two lines.
+    Markdown styles of each character of the two lines. The passages moved
+    (old_moves, new_moves) show as their own HTML, and are no change of the
+    line.
     """
-    left, right, changes, formats = [], [], [], []
+    old_moves, new_moves = old_moves or [], new_moves or []
+    # (where in the line, HTML): the pieces of each side, put in order at the end
+    left: list[tuple[int, Markup]] = [(m.start, m.html) for m in old_moves]
+    right: list[tuple[int, Markup]] = [(m.start, m.html) for m in new_moves]
+    changes, formats = [], []
     added = removed = 0
     for op, o1, o2, n1, n2 in word_ops(old, new):
         old_part, new_part = old[o1:o2], new[n1:n2]
         old_st, new_st = _slice(old_styles, o1, o2), _slice(new_styles, n1, n2)
+        old_pieces, new_pieces = outside(o1, o2, old_moves), outside(n1, n2, new_moves)
+        if old_pieces != ([(o1, o2)] if o2 > o1 else []) or new_pieces != (
+            [(n1, n2)] if n2 > n1 else []
+        ):
+            # partly moved: what is left of it is the change
+            old_rest = "".join(old[a:b] for a, b in old_pieces)
+            new_rest = "".join(new[a:b] for a, b in new_pieces)
+            change = (
+                op != "equal"
+                and (old_rest.strip() or new_rest.strip())
+                and not comments_only(old_rest, new_rest)
+            )
+            if change:
+                removed += len(WORD.findall(old_rest))
+                added += len(WORD.findall(new_rest))
+                changes.append(describe(old_rest, new_rest))
+            for pieces, text, styles, out, tag in (
+                (old_pieces, old, old_styles, left, DEL),
+                (new_pieces, new, new_styles, right, INS),
+            ):
+                for a, b in pieces:
+                    html = styled(text[a:b], _slice(styles, a, b))
+                    out.append((a, tag.format(html) if change and text[a:b].strip() else html))
+            continue
         if op == "equal" or comments_only(old_part, new_part):
             # Comment markers are not text: whether a comment is new, gone or
             # moved (to the next paragraph, when its own was deleted) shows in
             # its icon and in the comments panel, not as a changed word.
             if op == "equal" and (marked := format_marks(old_part, old_st, new_st)):
-                left.append(marked[0])
-                right.append(marked[1])
+                left.append((o1, marked[0]))
+                right.append((n1, marked[1]))
                 formats += marked[2]
                 continue
-            left.append(styled(old_part, old_st))
-            right.append(styled(new_part, new_st))
+            left.append((o1, styled(old_part, old_st)))
+            right.append((n1, styled(new_part, new_st)))
             continue
         removed += len(WORD.findall(old_part))
         added += len(WORD.findall(new_part))
@@ -784,14 +1063,18 @@ def word_diff(old: str, new: str, old_styles: Styles = None, new_styles: Styles 
         ):
             marks = char_marks(old_part, new_part, old_st, new_st)
         if marks:
-            left.append(PARTIAL_DEL.format(marks[0]))
-            right.append(PARTIAL_INS.format(marks[1]))
+            left.append((o1, PARTIAL_DEL.format(marks[0])))
+            right.append((n1, PARTIAL_INS.format(marks[1])))
             continue
         if old_part:
-            left.append(DEL.format(styled(old_part, old_st)))
+            left.append((o1, DEL.format(styled(old_part, old_st))))
         if new_part:
-            right.append(INS.format(styled(new_part, new_st)))
-    return WordDiff(Markup("").join(left), Markup("").join(right), changes, added, removed, formats)
+            right.append((n1, INS.format(styled(new_part, new_st))))
+
+    def joined(pieces: list[tuple[int, Markup]]) -> Markup:
+        return Markup("").join(html for _, html in sorted(pieces, key=lambda p: p[0]))
+
+    return WordDiff(joined(left), joined(right), changes, added, removed, formats)
 
 
 # Line similarity ----------------------------------------------------------------
@@ -1168,6 +1451,524 @@ def mark_moves(
             _make_move(outs[a], ins[b], style, pairs)
 
 
+# Moved passages ------------------------------------------------------------------
+
+# A passage is a run of text removed from (or added to) a line: the changes
+# of its word diff, separated by at most MAX_HOLE_WORDS unchanged words (a
+# moved sentence lands next to words it happens to share with its new
+# place), at least MIN_PASSAGE_WORDS words long (and MIN_PASSAGE_CHARS
+# characters, spaces aside). A passage shorter than PARTIAL_SHARE of the other is also
+# looked for inside it, as a window of it as long as itself: a sentence
+# moved out of a paragraph deleted or rewritten. What is left of a passage
+# around such a window is matched again, up to PASSAGE_ROUNDS times.
+MIN_PASSAGE_WORDS = 4
+MIN_PASSAGE_CHARS = 15
+# Two passages are one moved only if they share MIN_SHARED_CONTENT words of
+# CONTENT_LETTERS letters or more: short ones alike in their articles and
+# prepositions alone ("in several members of the same", "in both of the
+# same") are not (docs/passage_benchmark.py).
+MIN_SHARED_CONTENT = 2
+CONTENT_LETTERS = 4
+MAX_HOLE_WORDS = 2
+PARTIAL_SHARE = 0.8
+PASSAGE_ROUNDS = 4
+MOVE_PASSAGES = True
+# The smallest run of words and punctuation two passages share that can
+# start or end the part of them that moved: a word or two in common by
+# chance at an edge is not.
+MIN_EDGE_RUN = 2
+# Past MOVE_MAX_CELLS pairs of removed and added passages (a long document
+# revised throughout), not every pair is tried: only those sharing a rare
+# word (of CONTENT_LETTERS letters or more, in at most RARE_SHARE of the
+# passages or RARE_MIN of them), most rare words shared first, at most
+# MOVE_MAX_CELLS of them. A passage moved keeps most of its words, rare ones
+# included; two passages alike by chance seldom share one.
+RARE_SHARE = 0.01
+RARE_MIN = 20
+
+
+def _setting(default: float, label: str, help: str, low: int = 1, share: bool = False):
+    """A field of MovedPassageSettings: its default, its label in the GUI,
+    what it does (the command line's help, the GUI's tooltip), its least
+    value (low), or a share, above 0 and at most 1."""
+    return field(
+        default=default, metadata={"label": label, "help": help, "low": low, "share": share}
+    )
+
+
+@dataclass(frozen=True)
+class MovedPassageSettings:
+    """How moved passages are found (mark_passage_moves); each default is the
+    constant of the same meaning above, chosen with docs/passage_benchmark.py.
+    Set from the command line (--passage-NAME, NAME a field with - for _) and
+    the GUI's advanced settings, both made from these fields."""
+
+    min_words: int = _setting(
+        MIN_PASSAGE_WORDS,
+        "Shortest passage, words",
+        "the fewest words a moved passage has: shorter runs of words alike are taken for chance",
+    )
+    min_chars: int = _setting(
+        MIN_PASSAGE_CHARS,
+        "Shortest passage, characters",
+        "the fewest characters, spaces aside, a moved passage has",
+    )
+    max_gap: int = _setting(
+        MAX_HOLE_WORDS,
+        "Unchanged words inside a passage",
+        "how many unchanged words may sit between two changes of one passage (a "
+        "moved sentence lands next to words it happens to share with its new place), "
+        "and between the edge of a passage and a word edited next to it",
+        low=0,
+    )
+    shared_words: int = _setting(
+        MIN_SHARED_CONTENT,
+        "Words two passages share",
+        "how many words of --passage-content-letters letters or more two passages must "
+        "share to be one passage moved: not only their articles and prepositions",
+    )
+    content_letters: int = _setting(
+        CONTENT_LETTERS,
+        "Letters of a shared word",
+        "how many letters a word needs to count among the words two passages share",
+    )
+    edge_run: int = _setting(
+        MIN_EDGE_RUN,
+        "Words in common at an edge",
+        "the fewest words and punctuation in a row, the same in both passages, that "
+        "can start or end the part of them that moved",
+    )
+    partial_share: float = _setting(
+        PARTIAL_SHARE,
+        "Passage looked for inside a longer one",
+        "a passage shorter than this share of the other (0 to 1) is also looked for "
+        "inside it: a sentence moved out of a paragraph deleted or rewritten",
+        share=True,
+    )
+    rounds: int = _setting(
+        PASSAGE_ROUNDS,
+        "Rounds of matching",
+        "how many times what is left of a passage around a part of it found moved is matched again",
+    )
+    max_pairs: int = _setting(
+        MOVE_MAX_CELLS,
+        "Pairs of passages tried",
+        "past this many pairs of a removed and an added passage (a long document "
+        "revised throughout), only the pairs sharing a rare word are tried, at most "
+        "this many",
+    )
+    rare_share: float = _setting(
+        RARE_SHARE,
+        "Rare word, share of passages",
+        "with too many pairs, a word is rare when it is in at most this share of the "
+        "passages (0 to 1) or --passage-rare-min of them",
+        share=True,
+    )
+    rare_min: int = _setting(
+        RARE_MIN,
+        "Rare word, passages",
+        "with too many pairs, a word in at most this many passages is rare",
+    )
+
+    def check(self) -> None:
+        """Refuse values that make no sense, naming the setting."""
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if f.metadata["share"] and not 0 < value <= 1:
+                raise ValueError(f"passage setting {f.name} must be above 0 and at most 1")
+            if not f.metadata["share"] and value < f.metadata["low"]:
+                raise ValueError(f"passage setting {f.name} must be {f.metadata['low']} or more")
+
+
+MOVED_PASSAGE_DEFAULTS = MovedPassageSettings()
+
+
+@dataclass
+class Passage:
+    row: Row
+    old: bool  # on the old side of the row, or the new
+    start: int
+    end: int
+    # the changes of the row's word diff it spans, to tell a move from an
+    # edit in place (-1: a whole line removed or added)
+    first_op: int
+    last_op: int
+
+
+def _passage(
+    row: Row,
+    old: bool,
+    line: str,
+    start: int,
+    end: int,
+    ops: tuple[int, int],
+    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
+) -> Passage | None:
+    """The passage start:end of the line, its spaces trimmed; None when too
+    short to be told from a chance likeness."""
+    while start < end and line[start].isspace():
+        start += 1
+    while end > start and line[end - 1].isspace():
+        end -= 1
+    return Passage(row, old, start, end, *ops) if long_enough(line[start:end], ps) else None
+
+
+def long_enough(text: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS) -> bool:
+    """Whether a passage is long enough to be told from a chance likeness."""
+    return len(WORD.findall(text)) >= ps.min_words and len("".join(text.split())) >= ps.min_chars
+
+
+def content_words(text: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS) -> Counter:
+    """The words of text long enough to carry meaning (ps.content_letters or
+    more), case aside: what two passages must share, beyond "of the" and
+    "in the", to be one passage moved."""
+    return Counter(w.casefold() for w in WORD.findall(text) if len(w) >= ps.content_letters)
+
+
+def shares_content(a: str, b: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS) -> bool:
+    shared = content_words(a, ps) & content_words(b, ps)
+    return sum(shared.values()) >= ps.shared_words
+
+
+def passages_of(
+    row: Row, old_line: str, new_line: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS
+) -> list[Passage]:
+    """The passages removed from and added to one changed row: a line
+    removed or added whole is one passage, an edited one has its runs of
+    changes (holes of up to ps.max_gap words allowed)."""
+    whole = (-1, -1)
+    if row.kind == "delete":
+        return [p for p in [_passage(row, True, old_line, 0, len(old_line), whole, ps)] if p]
+    if row.kind == "insert":
+        return [p for p in [_passage(row, False, new_line, 0, len(new_line), whole, ps)] if p]
+    ops = word_ops(old_line, new_line)
+    found = []
+    for old in (True, False):
+        line = old_line if old else new_line
+        # the changed runs of this side: (start, end, index of the change)
+        runs = [
+            (o1, o2, k) if old else (n1, n2, k)
+            for k, (tag, o1, o2, n1, n2) in enumerate(ops)
+            if tag != "equal"
+            and (o2 > o1 if old else n2 > n1)
+            and not comments_only(old_line[o1:o2], new_line[n1:n2])
+        ]
+        group: list[tuple[int, int, int]] = []
+        for run in [*runs, None]:
+            if run and (not group or len(WORD.findall(line[group[-1][1] : run[0]])) <= ps.max_gap):
+                group.append(run)
+                continue
+            if group:
+                ops_spanned = (group[0][2], group[-1][2])
+                if p := _passage(row, old, line, group[0][0], group[-1][1], ops_spanned, ps):
+                    found.append(p)
+            group = [run] if run else []
+    return found
+
+
+def _tokens(line: str, start: int, end: int) -> list[tuple[int, int, str]]:
+    """The words and punctuation of line[start:end], and where each sits."""
+    return [
+        (start + m.start(), start + m.end(), m.group())
+        for m in TOKEN.finditer(line[start:end])
+        if not m.group().isspace()
+    ]
+
+
+# Punctuation a moved passage does not start with: that of the sentence
+# before it.
+LEADING_PUNCTUATION = frozenset(".,;:!?")
+
+
+def _core(
+    la: str,
+    lb: str,
+    a1: int,
+    a2: int,
+    b1: int,
+    b2: int,
+    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
+) -> tuple[int, int, int, int] | None:
+    """Parts a1:a2 of line la and b1:b2 of line lb cut down to what they
+    have in common: from the first run of at least ps.edge_run tokens both
+    share, in order, to the last, widened over the shorter runs just outside
+    it (at most ps.max_gap tokens away on both sides: a word edited next to
+    the edge of the passage, not a word in common by chance). None when they
+    share none."""
+    ta, tb = _tokens(la, a1, a2), _tokens(lb, b1, b2)
+    matcher = difflib.SequenceMatcher(
+        None, [t for *_, t in ta], [t for *_, t in tb], autojunk=False
+    )
+    blocks = [m for m in matcher.get_matching_blocks() if m.size]
+    runs = [k for k, m in enumerate(blocks) if m.size >= ps.edge_run]
+    if not runs:
+        return None
+    first, last = runs[0], runs[-1]
+    while first > 0 and (
+        blocks[first].a - (blocks[first - 1].a + blocks[first - 1].size) <= ps.max_gap
+        and blocks[first].b - (blocks[first - 1].b + blocks[first - 1].size) <= ps.max_gap
+    ):
+        first -= 1
+    while last < len(blocks) - 1 and (
+        blocks[last + 1].a - (blocks[last].a + blocks[last].size) <= ps.max_gap
+        and blocks[last + 1].b - (blocks[last].b + blocks[last].size) <= ps.max_gap
+    ):
+        last += 1
+    i1, j1 = blocks[first].a, blocks[first].b
+    i2, j2 = blocks[last].a + blocks[last].size, blocks[last].b + blocks[last].size
+    while i1 < i2 and j1 < j2 and ta[i1][2] in LEADING_PUNCTUATION and ta[i1][2] == tb[j1][2]:
+        i1, j1 = i1 + 1, j1 + 1
+    if i1 >= i2 or j1 >= j2:
+        return None
+    return ta[i1][0], ta[i2 - 1][1], tb[j1][0], tb[j2 - 1][1]
+
+
+def candidate_pairs(
+    outs: list[Passage],
+    ins: list[Passage],
+    words_of: Callable[[Passage], Counter],
+    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
+) -> list[tuple[Passage, Passage]]:
+    """The pairs of a removed and an added passage worth matching: every one,
+    or past ps.max_pairs of them those sharing rare words (words_of: a
+    passage's content words), the most rare words shared first."""
+    if len(outs) * len(ins) <= ps.max_pairs:
+        return [(a, b) for a in outs for b in ins]
+    words = {id(p): set(words_of(p)) for p in [*outs, *ins]}
+    df = Counter(w for ws in words.values() for w in ws)
+    limit = max(ps.rare_min, ps.rare_share * len(words))
+    index: dict[str, list[Passage]] = defaultdict(list)
+    for b in ins:
+        for w in words[id(b)]:
+            if df[w] <= limit:
+                index[w].append(b)
+    shared: Counter = Counter()
+    by_id = {id(p): p for p in [*outs, *ins]}
+    for a in outs:
+        for w in words[id(a)]:
+            if df[w] <= limit:
+                for b in index[w]:
+                    shared[id(a), id(b)] += 1
+    return [(by_id[a], by_id[b]) for (a, b), _ in shared.most_common(ps.max_pairs)]
+
+
+def mark_passage_moves(
+    rows: list[Row],
+    old: list[str],
+    new: list[str],
+    style: Styler | None = None,
+    similarity: float = MOVE_SIMILARITY,
+    algorithm: str = MOVE_ALGORITHM,
+    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
+) -> None:
+    """Find the passages removed in one place and added in another, within
+    a line or between two, that are one passage moved: at least similarity
+    alike by algorithm (as whole lines are, mark_moves), the most similar
+    first, as ps sets them apart from chance likeness. Each end stays in its
+    row, the passage shown as moved there, and its words are no longer
+    counted as removed or added (but for those edited on the way). A row
+    with moved passages keeps, in without_passages, how it looked before."""
+    style = style or Styler(False)
+    changed = [r for r in rows if r.kind in ("delete", "insert", "replace")]
+    free: list[Passage] = []
+    for r in changed:
+        o = old[r.left_no - 1] if r.left_no is not None else ""
+        n = new[r.right_no - 1] if r.right_no is not None else ""
+        free += passages_of(r, o, n, ps)
+    prepare, score = MOVE_ALGORITHMS[algorithm]
+    cutoff = max(0.0, similarity - MOVE_MARGIN)
+
+    def line_of(p: Passage) -> str:
+        return old[p.row.left_no - 1] if p.old else new[p.row.right_no - 1]
+
+    # each passage's words and punctuation, and how many of each
+    tokens: dict[int, list[tuple[int, int, str]]] = {}
+    counts: dict[int, Counter] = {}
+
+    def index(passages: list[Passage]) -> None:
+        for p in passages:
+            tokens[id(p)] = _tokens(line_of(p), p.start, p.end)
+            counts[id(p)] = Counter(t for *_, t in tokens[id(p)])
+
+    index(free)
+
+    def text(p: Passage) -> str:
+        return line_of(p)[p.start : p.end]
+
+    def alike(a: str, b: str) -> float:
+        # the same words, spacing aside (not move_key: None for any two
+        # passages under MIN_MOVE_CHARS, which would make them all alike)
+        if _spaced(a) == _spaced(b):
+            return 1.0
+        if similarity >= 1:
+            return 0.0
+        s = score(prepare(a), prepare(b), cutoff)
+        return s if s and s >= similarity - MOVE_TOLERANCE else 0.0
+
+    def scored(a: Passage, b: Passage, region: tuple[int, int, int, int]):
+        """How alike the parts a1:a2 of a and b1:b2 of b are, cut down to
+        what they have in common: (score, a1, a2, b1, b2), or None."""
+        la, lb = line_of(a), line_of(b)
+        core = _core(la, lb, *region, ps)
+        if core is None:
+            return None
+        a1, a2, b1, b2 = core
+        if not (long_enough(la[a1:a2], ps) and long_enough(lb[b1:b2], ps)):
+            return None
+        if not shares_content(la[a1:a2], lb[b1:b2], ps):
+            return None
+        s = alike(la[a1:a2], lb[b1:b2])
+        return (s, a1, a2, b1, b2) if s else None
+
+    def match(a: Passage, b: Passage) -> tuple[float, int, int, int, int] | None:
+        """How alike removed passage a and added passage b are, and the part
+        of each that matches: of the whole of both, or of the longer one a
+        window as long as the other."""
+        ta, tb = tokens[id(a)], tokens[id(b)]
+        common = sum((counts[id(a)] & counts[id(b)]).values())
+        if common < max(ps.min_words, similarity * min(len(ta), len(tb)) / 2):
+            return None
+        regions = [(a.start, a.end, b.start, b.end)]
+        if min(len(ta), len(tb)) < ps.partial_share * max(len(ta), len(tb)):
+            short, long = (ta, tb) if len(ta) < len(tb) else (tb, ta)
+            window = fuzz.partial_ratio_alignment([t for *_, t in short], [t for *_, t in long])
+            if window and window.dest_end > window.dest_start:
+                # a little wider, for _core to find where the match ends
+                margin = len(short) // 2
+                w1 = long[max(0, window.dest_start - margin)][0]
+                w2 = long[min(len(long), window.dest_end + margin) - 1][1]
+                regions.append((w1, w2, b.start, b.end) if long is ta else (a.start, a.end, w1, w2))
+        found = [m for region in regions if (m := scored(a, b, region))]
+        return max(found) if found else None
+
+    pair = max((r.move_pair for r in rows), default=0)
+    # the pairs of passages already scored, by id(): every passage is kept
+    # alive, so that no id is reused
+    tried: set[tuple[int, int]] = set()
+    alive = list(free)
+    for _ in range(ps.rounds):
+        outs = [p for p in free if p.old]
+        ins = [p for p in free if not p.old]
+        if not outs or not ins:
+            break
+        candidates = []
+        for a, b in candidate_pairs(outs, ins, lambda p: content_words(text(p), ps), ps):
+            if (id(a), id(b)) in tried:
+                continue
+            tried.add((id(a), id(b)))
+            if a.row is b.row and a.first_op <= b.last_op and b.first_op <= a.last_op:
+                continue  # the same change: an edit in place, not a move
+            if m := match(a, b):
+                candidates.append((m, a, b))
+        used: set[int] = set()
+        leftovers: list[Passage] = []
+        for (_, a1, a2, b1, b2), a, b in sorted(
+            candidates, key=lambda c: (-c[0][0], c[1].start, c[2].start)
+        ):
+            if id(a) in used or id(b) in used:
+                continue
+            used |= {id(a), id(b)}
+            pair += 1
+            _make_passage_move(a.row, a1, a2, b.row, b1, b2, old, new, style, pair)
+            # what is left of the longer one, around the window
+            for p, s, e in ((a, a1, a2), (b, b1, b2)):
+                for lo, hi in ((p.start, s), (e, p.end)):
+                    ops_spanned = (p.first_op, p.last_op)
+                    if rest := _passage(p.row, p.old, line_of(p), lo, hi, ops_spanned, ps):
+                        leftovers.append(rest)
+        if not used:
+            break
+        free = [p for p in free if id(p) not in used] + leftovers
+        alive += leftovers
+        index(leftovers)
+    for r in changed:
+        if r.old_moves or r.new_moves:
+            r.without_passages = RowView(
+                r.left, r.right, list(r.changes), r.words_added, r.words_removed
+            )
+            _redraw(r, old, new, style)
+
+
+# A moved passage, and where it went or came from written after it, shown on
+# paper only (as for a moved line).
+MOVED_SPAN = Markup(
+    '<span class="moved" data-pair="{0}" data-move="{1}"{2}>{3}</span>'
+    '<span class="print-note passage" aria-hidden="true"> ({1})</span>'
+)
+
+
+def _make_passage_move(
+    out: Row,
+    a1: int,
+    a2: int,
+    into: Row,
+    b1: int,
+    b2: int,
+    old: list[str],
+    new: list[str],
+    style: Styler,
+    pair: int,
+) -> None:
+    """Record passage a1:a2 of row out's old line as moved to passage b1:b2
+    of row into's new line: each end's HTML, the passage compared with the
+    other, and where it went or came from."""
+    o, n = old[out.left_no - 1], new[into.right_no - 1]
+    a, b = o[a1:a2], n[b1:b2]
+    to_line = into.right_label or f"{into.right_no:,}"
+    from_line = out.left_label or f"{out.left_no:,}"
+    a_styles, b_styles = _slice(style(o), a1, a2), _slice(style(n), b1, b2)
+    edited = _spaced(a) != _spaced(b)
+    if edited:
+        w = word_diff(a, b, a_styles, b_styles)
+        left, right = w.left, w.right
+        # the words edited on the way count, as in a moved line
+        out.passage_words_removed += w.words_removed
+        into.passage_words_added += w.words_added
+    else:
+        left, right = styled(a, a_styles), styled(b, b_styles)
+    flag = Markup(" data-move-edited") if edited else Markup("")
+    out.old_moves.append(
+        MovedSpan(a1, a2, pair, MOVED_SPAN.format(pair, f"Moved to line {to_line}", flag, left))
+    )
+    into.new_moves.append(
+        MovedSpan(
+            b1, b2, pair, MOVED_SPAN.format(pair, f"Moved from line {from_line}", flag, right)
+        )
+    )
+    out.move_changes.append(f"moved {quote(a)} to line {to_line}" + (", edited" if edited else ""))
+    into.move_changes.append(
+        f"moved {quote(b)} from line {from_line}" + (", edited" if edited else "")
+    )
+
+
+def _redraw(row: Row, old: list[str], new: list[str], style: Styler) -> None:
+    """A row's HTML, changes and word counts again, its moved passages set
+    apart."""
+    o = old[row.left_no - 1] if row.left_no is not None else ""
+    n = new[row.right_no - 1] if row.right_no is not None else ""
+    if row.kind == "replace":
+        w = word_diff(o, n, style(o), style(n), row.old_moves, row.new_moves)
+        row.left, row.right = w.left, w.right
+        row.changes = w.changes + row.move_changes
+        row.words_removed = w.words_removed + row.passage_words_removed
+        row.words_added = w.words_added + row.passage_words_added
+        return
+    line, moves = (o, row.old_moves) if row.kind == "delete" else (n, row.new_moves)
+    rest = outside(0, len(line), moves)
+    pieces = [(m.start, m.html) for m in moves] + [
+        (a, styled(line[a:b], _slice(style(line), a, b))) for a, b in rest
+    ]
+    html = Markup("").join(h for _, h in sorted(pieces, key=lambda p: p[0]))
+    words = sum(len(WORD.findall(line[a:b])) for a, b in rest)
+    row.changes = [*row.changes[:1], *row.move_changes] if words else row.move_changes
+    if row.kind == "delete":
+        row.left = html
+        row.words_removed = words + row.passage_words_removed
+    else:
+        row.right = html
+        row.words_added = words + row.passage_words_added
+
+
 Pairing = list[tuple[str, int | None, int | None]]
 
 
@@ -1272,6 +2073,8 @@ def align(
     old_labels: list[str] | None = None,
     new_labels: list[str] | None = None,
     pairs: Pairing | None = None,
+    move_passages: bool = MOVE_PASSAGES,
+    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
 ) -> tuple[list[Row], int, int]:
     """Side-by-side rows for two versions of a file, with the line counts.
 
@@ -1280,8 +2083,10 @@ def align(
     (None: all). None shows the whole file. opcodes is the line alignment
     (difflib's if not given), pairs the pairing made from it (line_pairs,
     made here if not given). markdown styles the lines for the HTML report's
-    formatted view. The counts are the lines added and removed; moved lines
-    count in neither.
+    formatted view. move_passages also finds the passages moved within a
+    line or between two (mark_passage_moves). The counts are the lines added
+    and removed; moved lines count in neither, nor do lines whose words all
+    moved as passages.
     """
     ops = difflib_opcodes(old, new) if opcodes is None else opcodes
     style = Styler(markdown)
@@ -1352,13 +2157,17 @@ def align(
             if row.right_no is not None:
                 row.right_label = new_labels[row.right_no - 1] if new_labels else str(row.right_no)
     mark_moves(rows, style, move_similarity, move_algorithm)
+    if move_passages:
+        mark_passage_moves(
+            rows, old, new, style, move_similarity, move_algorithm, moved_passage_settings
+        )
     # The stops of the HTML report's next/previous navigation: a run of changed
     # lines of code, but each changed paragraph of prose (its blank lines
     # are left out, so changed paragraphs are neighbours).
     for prev, r in zip([None, *rows], rows, strict=False):
         r.first_of_change = r.changed and (markdown or not (prev and prev.changed))
-    deletions = sum(r.kind in ("delete", "replace") for r in rows)
-    additions = sum(r.kind in ("insert", "replace") for r in rows)
+    deletions = sum(r.kind in ("delete", "replace") and not r.only_moved for r in rows)
+    additions = sum(r.kind in ("insert", "replace") and not r.only_moved for r in rows)
     return rows, additions, deletions
 
 
@@ -1473,6 +2282,8 @@ def build_files(
     by_sentence: bool = False,
     sentence_move_similarity: float | None = None,
     sentence_move_algorithm: str | None = None,
+    move_passages: bool = MOVE_PASSAGES,
+    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
 ) -> list[CommentEntry]:
@@ -1641,6 +2452,8 @@ def build_files(
             old_labels=labels[id(fd)][0],
             new_labels=labels[id(fd)][1],
             pairs=pairs,
+            move_passages=move_passages,
+            moved_passage_settings=moved_passage_settings,
         )
         footnotes.reset_tooltips(token)
         fd.mixed_languages = set_row_languages(fd.rows, old, new, fd.language)
@@ -1787,6 +2600,8 @@ def compare(
     by_sentence: bool = False,
     sentence_move_similarity: float | None = None,
     sentence_move_algorithm: str | None = None,
+    move_passages: bool = MOVE_PASSAGES,
+    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
 ) -> Comparison:
@@ -1817,6 +2632,11 @@ def compare(
     (paragraphs, in prose); sentence_move_similarity and
     sentence_move_algorithm where prose is compared sentence by sentence.
     None (each) is prosediff's default for that way (move_defaults).
+    move_passages (on by default) also follows the passages of text moved
+    within a line or between two, by the same measure: a run of words
+    removed in one place and added in another, as it was or lightly edited,
+    is shown as moved (mark_passage_moves). moved_passage_settings tunes how
+    those passages are told from chance likeness (MovedPassageSettings).
     by_sentence compares the prose of Markdown files (and Word documents)
     sentence by sentence instead of line by line; each sentence is labelled
     with its line and its place in it ("12.3"). language is that of their
@@ -1834,6 +2654,7 @@ def compare(
     for name in (move_algorithm, sentence_move_algorithm):
         if name is not None:
             check_move_algorithm(name)
+    moved_passage_settings.check()
     language = normalize_language(language)
     encoding = check_encoding(encoding)
     if cached and target is not None:
@@ -1884,6 +2705,8 @@ def compare(
         move_algorithm=move_algorithm,
         sentence_move_similarity=sentence_move_similarity,
         sentence_move_algorithm=sentence_move_algorithm,
+        move_passages=move_passages,
+        moved_passage_settings=moved_passage_settings,
         by_sentence=by_sentence,
         language=language,
         encoding=encoding,
@@ -1943,6 +2766,8 @@ def compare_paths(
     by_sentence: bool = False,
     sentence_move_similarity: float | None = None,
     sentence_move_algorithm: str | None = None,
+    move_passages: bool = MOVE_PASSAGES,
+    moved_passage_settings: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
     language: str = DEFAULT,
     encoding: str = AUTO_ENCODING,
     include: str | None = FOLDER_FILES,
@@ -1963,6 +2788,7 @@ def compare_paths(
     for name in (move_algorithm, sentence_move_algorithm):
         if name is not None:
             check_move_algorithm(name)
+    moved_passage_settings.check()
     language = normalize_language(language)
     encoding = check_encoding(encoding)
     old, new = Path(old), Path(new)
@@ -2011,6 +2837,8 @@ def compare_paths(
         move_algorithm=move_algorithm,
         sentence_move_similarity=sentence_move_similarity,
         sentence_move_algorithm=sentence_move_algorithm,
+        move_passages=move_passages,
+        moved_passage_settings=moved_passage_settings,
         by_sentence=by_sentence,
         language=language,
         encoding=encoding,

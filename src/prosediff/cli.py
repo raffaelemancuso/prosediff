@@ -5,6 +5,7 @@ git's own commands."""
 import argparse
 import sys
 import webbrowser
+from dataclasses import fields
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from prosediff.diff import (
     SENTENCE_MOVE_ALGORITHM,
     SENTENCE_MOVE_SIMILARITY,
     FilterError,
+    MovedPassageSettings,
     check_encoding,
     compare,
     compare_paths,
@@ -41,6 +43,11 @@ PROG = "prosediff"
 SPLITS = ("paragraph", "sentence", "both")
 # What --comments does with the comments: set apart, compared as text, or none.
 COMMENT_MODES = ("markers", "text", "none")
+
+
+def passage_option(name: str) -> str:
+    """The command-line option of a field of MovedPassageSettings."""
+    return "--passage-" + name.replace("_", "-")
 
 
 def package_version() -> str:
@@ -245,6 +252,32 @@ def main(argv: list[str] | None = None) -> int:
         f"(default: {SENTENCE_MOVE_ALGORITHM})",
     )
     ap.add_argument(
+        "--move-passages",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="also follow the passages moved within a paragraph (a line) or between two: "
+        "a run of words removed in one place and added in another, holes of a word or "
+        "two allowed, as alike as the --move-similarity (--sentence-move-similarity) "
+        "of the lines says, is shown as moved rather than as a deletion and an unrelated "
+        "insertion (default: on; --no-move-passages turns it off)",
+    )
+    # How moved passages are told from chance likeness: one option for each
+    # field of MovedPassageSettings, the same the GUI's advanced settings show.
+    passage_group = ap.add_argument_group(
+        "moved passages (advanced)",
+        "how --move-passages tells a moved passage from chance likeness; the defaults "
+        "were chosen on simulated revisions of books (docs/passage_benchmark.py)",
+    )
+    for f in fields(MovedPassageSettings):
+        passage_group.add_argument(
+            passage_option(f.name),
+            dest=f"passage_{f.name}",
+            type=float if f.metadata["share"] else int,
+            default=None,
+            metavar="X" if f.metadata["share"] else "N",
+            help=f"{f.metadata['help']} (default: {f.default:,})",
+        )
+    ap.add_argument(
         "--split",
         choices=SPLITS,
         default=None,
@@ -358,6 +391,17 @@ def main(argv: list[str] | None = None) -> int:
         value = getattr(args, name)
         if value is not None and not 0 < value <= 1:
             ap.error(f"--{name.replace('_', '-')} must be above 0 and at most 1")
+    chosen = {
+        f.name: getattr(args, f"passage_{f.name}")
+        for f in fields(MovedPassageSettings)
+        if getattr(args, f"passage_{f.name}") is not None
+    }
+    passage_settings = MovedPassageSettings(**chosen)
+    try:
+        passage_settings.check()
+    except ValueError as e:
+        name = str(e).split()[2]
+        ap.error(f"{passage_option(name)}: {e}")
     comments = args.comments or "markers"
     options = dict(
         paths=args.paths,
@@ -373,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
         move_algorithm=args.move_algorithm,
         sentence_move_similarity=args.sentence_move_similarity,
         sentence_move_algorithm=args.sentence_move_algorithm,
+        move_passages=args.move_passages,
+        moved_passage_settings=passage_settings,
         language=args.language,
         encoding=args.encoding,
     )

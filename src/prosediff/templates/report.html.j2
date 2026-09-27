@@ -150,8 +150,27 @@ ins.partial mark { background: var(--ins-word); color: inherit; }
 tr.moved-out td.left, tr.moved-in td.right,
 tr.moved-out td.no.l, tr.moved-in td.no.r { --tint: var(--move-line); }
 tr.moved-out td.no.l, tr.moved-in td.no.r { color: var(--move); font-weight: 600; }
+/* A passage moved within a line or between two is drawn as a moved line is:
+   tinted in the colour of moves (its words edited on the way marked inside
+   it), where it went or came from on hover and on paper, a line between its
+   two ends. A line removed or added whose words all moved is a moved line
+   in all but name: tinted, its number in the colour of moves, → or ←. */
+.moved { background: var(--move-line); cursor: help; }
+.moved.pair-hot { outline: 1px solid var(--move); outline-offset: -1px; }
+body.passages tr.only-moved.delete td.left, body.passages tr.only-moved.delete td.no.l,
+body.passages tr.only-moved.insert td.right, body.passages tr.only-moved.insert td.no.r {
+  --tint: var(--move-line); }
+body.passages tr.only-moved.delete td.no.l, body.passages tr.only-moved.insert td.no.r {
+  color: var(--move); font-weight: 600; }
+body.passages tr.only-moved .sign { color: var(--move); }
+/* The "Moved passages" switch: off, a row shows its plain word diff, each
+   passage removed and added in place, and the counts follow. */
+body:not(.passages) .pv-on, body.passages .pv-off { display: none; }
 .summary .units { margin: 0 0 4px; }
-.toolbar .split-switch { font-weight: 600; white-space: nowrap; }
+/* The split switch shows the split shown: a block of lines (paragraphs),
+   or a line ending in a full stop (sentences). */
+.toolbar .split-switch .sentences, .toolbar .split-switch[aria-pressed="true"] .paragraphs { display: none; }
+.toolbar .split-switch[aria-pressed="true"] .sentences { display: inline; }
 /* A line from each moved line to where it went, over the file's table;
    hovering either end highlights both rows and their line. Hidden in one
    column, where both ends stand in one column, and on paper. */
@@ -313,6 +332,8 @@ thead.print, .print-note { display: none; }
     border-radius: 3px; padding: 0 3px; }
   .print-note { display: block; font-family: -apple-system, "Segoe UI", sans-serif;
     font-size: 0.85em; color: var(--move); }
+  /* where a moved passage went, right after it */
+  .print-note.passage { display: inline; }
   details.file > summary { position: static; }
   /* Nothing clipped: a clipping box makes the browser cut through the line
      at the foot of a page. */
@@ -378,13 +399,27 @@ thead.print, .print-note { display: none; }
 </details>
 {% endif %}
 
+{# What a row shows with moved passages (on) and without (off, None when
+   the row has none): both, the "Moved passages" switch showing one. #}
+{% macro pv(on, off) -%}
+{% if off is none %}{{ on }}{% else %}<span class="pv-on">{{ on }}</span><span class="pv-off">{{ off }}</span>{% endif %}
+{%- endmacro %}
+
+{# A count as the report shows it with moved passages (on) and without
+   (off): one number when both are the same, else both, the "Moved passages"
+   switch showing one. #}
+{% macro both(on, off) -%}
+{% if on == off %}{{ "{:,}".format(on) }}{% else %}<span class="pv-on">{{ "{:,}".format(on) }}</span><span class="pv-off">{{ "{:,}".format(off) }}</span>{% endif %}
+{%- endmacro %}
+
 {% macro counts(x) -%}
-<span class="add" title="lines added">+{{ "{:,}".format(x.additions) }}</span>
-<span class="rem" title="lines removed">−{{ "{:,}".format(x.deletions) }}</span>
+{% set y = x.without_passages %}
+<span class="add" title="lines added">+{{ both(x.additions, y.additions) }}</span>
+<span class="rem" title="lines removed">−{{ both(x.deletions, y.deletions) }}</span>
 <span class="role">lines,</span>
-<span class="add" title="words added">+{{ "{:,}".format(x.words_added) }}</span>
-<span class="rem" title="words removed">−{{ "{:,}".format(x.words_removed) }}</span>
-<span class="role">words{% if x.moved %}, {{ "{:,}".format(x.moved) }} moved line{{ "" if x.moved == 1 else "s" }}{% endif %}</span>
+<span class="add" title="words added">+{{ both(x.words_added, y.words_added) }}</span>
+<span class="rem" title="words removed">−{{ both(x.words_removed, y.words_removed) }}</span>
+<span class="role">words{% if x.moved %}, {{ "{:,}".format(x.moved) }} moved line{{ "" if x.moved == 1 else "s" }}{% endif %}{% if x.moved_passages %}<span class="pv-on">, {{ "{:,}".format(x.moved_passages) }} moved passage{{ "" if x.moved_passages == 1 else "s" }}</span>{% endif %}</span>
 {%- endmacro %}
 
 {# What a line is in a comparison: a paragraph or a sentence of prose, or a
@@ -410,12 +445,14 @@ thead.print, .print-note { display: none; }
 <p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
 {% else %}
 <div class="summary">
-  {% if c.changed_lines or c.inserted_lines or c.deleted_lines or c.moved %}
+  {% if c.changed_lines or c.inserted_lines or c.deleted_lines or c.moved or c.moved_passages %}
+  {% set y = c.without_passages %}
   <p class="units"><b>{{ unit_name(c, split) | capitalize }}:</b>
     {{ "{:,}".format(c.changed_lines) }} changed,
-    {{ "{:,}".format(c.inserted_lines) }} inserted,
-    {{ "{:,}".format(c.deleted_lines) }} deleted,
-    {{ "{:,}".format(c.moved) }} moved</p>
+    {{ both(c.inserted_lines, y.inserted_lines) }} inserted,
+    {{ both(c.deleted_lines, y.deleted_lines) }} deleted,
+    {{ "{:,}".format(c.moved) }} moved{% if c.moved_passages %}<span class="pv-on">;
+    {{ "{:,}".format(c.moved_passages) }} passage{{ "" if c.moved_passages == 1 else "s" }} moved within or between them</span>{% endif %}</p>
   {% endif %}
   <span>{{ "{:,}".format(c.files | length) }} file{{ "" if c.files | length == 1 else "s" }} changed:
   {{ counts(c) }}{% if paths %}, in {{ paths | join(", ") }}{% endif %}</span>
@@ -476,12 +513,14 @@ thead.print, .print-note { display: none; }
     <tbody>
     {% else %}
     {% set sign = signs.get(r.kind, ("", "")) %}
-    <tr class="{{ r.kind }}{% if r.first_of_change %} first-change{% endif %}{% if r.format_changes %} fmt-row{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}{% if r.move_pair %} data-pair="{{ r.move_pair }}"{% endif %}>
+    {% if r.only_moved %}{% set sign = (pv("→", sign[0]), "") if r.kind == "delete" else ("", pv("←", sign[1])) %}{% endif %}
+    {% set plain = r.without_passages %}
+    <tr class="{{ r.kind }}{% if r.only_moved %} only-moved{% endif %}{% if r.first_of_change %} first-change{% endif %}{% if r.format_changes %} fmt-row{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}{% if r.move_pair %} data-pair="{{ r.move_pair }}"{% endif %}>
       {% set move = r.changes[0] if r.kind in ("moved-out", "moved-in") and r.changes else "" %}
       <td class="no l"{% if r.kind == "moved-out" and move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, r.left_no, r.left_lang) }}{{ (r.left_label or r.left_no) if r.left_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[0] }}</span></td>
-      <td class="code left"{% if r.left_lang and r.left_lang != f.language %} lang="{{ r.left_lang }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ r.left | hyphenate(r.left_lang or f.language) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
+      <td class="code left"{% if r.left_lang and r.left_lang != f.language %} lang="{{ r.left_lang }}"{% endif %}>{% if r.kind in spoken and r.left_no is not none %}<span class="sr">{{ spoken[r.kind] }}, old: </span>{% endif %}{{ pv(r.left | hyphenate(r.left_lang or f.language), plain.left | hyphenate(r.left_lang or f.language) if plain else none) }}{% if r.kind == "moved-out" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
       <td class="no r"{% if r.kind == "moved-in" and move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, r.right_no, r.right_lang) }}{{ (r.right_label or r.right_no) if r.right_no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign[1] }}</span></td>
-      <td class="code right"{% if r.right_lang and r.right_lang != f.language %} lang="{{ r.right_lang }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ r.right | hyphenate(r.right_lang or f.language) }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
+      <td class="code right"{% if r.right_lang and r.right_lang != f.language %} lang="{{ r.right_lang }}"{% endif %}>{% if r.kind in spoken and r.right_no is not none %}<span class="sr">{{ spoken[r.kind] }}, new: </span>{% endif %}{{ pv(r.right | hyphenate(r.right_lang or f.language), plain.right | hyphenate(r.right_lang or f.language) if plain else none) }}{% if r.kind == "moved-in" and r.changes %}<span class="print-note" aria-hidden="true">{{ r.changes[0] | replace(", edited:", "") }}</span>{% endif %}</td>
     </tr>
     {% endif %}
     {% endfor %}
@@ -512,8 +551,9 @@ thead.print, .print-note { display: none; }
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
   <span class="counter" aria-live="polite" title="{{ "{:,}".format(c.change_count) }} change{{ "" if c.change_count == 1 else "s" }}">{{ "{:,}".format(c.change_count) }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
-  {% if alt %}<button type="button" class="split-switch" data-split-switch aria-pressed="false" title="Sentences: the comparison sentence by sentence instead of paragraph by paragraph (s)">¶ Paragraphs</button>{% endif %}
+  {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved line to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
+  {% if c.moved_passages or (alt and alt.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="true" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
   <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg></button>
@@ -553,10 +593,11 @@ thead.print, .print-note { display: none; }
       d.hidden = (d.dataset.split === "sentence") !== sentences;
     });
     splitSwitch.setAttribute("aria-pressed", sentences ? "true" : "false");
-    splitSwitch.textContent = sentences ? "\u00b6 Sentences" : "\u00b6 Paragraphs";
+    splitSwitch.setAttribute("aria-label", sentences
+      ? "Compared sentence by sentence" : "Compared paragraph by paragraph");
     splitSwitch.dataset.help = sentences
-      ? "Paragraphs: the comparison paragraph by paragraph instead of sentence by sentence (s)"
-      : "Sentences: the comparison sentence by sentence instead of paragraph by paragraph (s)";
+      ? "Sentences: shown compared sentence by sentence; switch to paragraph by paragraph (s)"
+      : "Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)";
     if (remember) {
       try { localStorage.setItem("prosediff-split", sentences ? "sentence" : "paragraph"); } catch (e) {}
     }
@@ -599,7 +640,7 @@ thead.print, .print-note { display: none; }
   // views off; a choice the
   // browser remembers wins.
   var VIEW_DEFAULT = { unified: false, formatted: true, tint: false, inline: false, formats: true,
-                       movelinks: true };
+                       movelinks: true, passages: true };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
     try {
@@ -691,6 +732,7 @@ thead.print, .print-note { display: none; }
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
                  t: function () { toggle("tint"); }, i: function () { toggle("inline"); },
                  m: function () { toggle("formats"); }, l: function () { toggle("movelinks"); },
+                 v: function () { toggle("passages"); },
                  s: function () { if (splitSwitch) setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true); },
                  "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
@@ -718,7 +760,8 @@ thead.print, .print-note { display: none; }
 
   // The tooltips: a comment's author, text and date on hovering its
   // marker, who made a tracked change and when (formatted view), where a
-  // moved line went or came from (on its number), and the toolbar's help. One element shows them, placed by the
+  // moved line went or came from (on its number) and a moved passage (on
+  // it), and the toolbar's help. One element shows them, placed by the
   // script so no file box clips it, one at a time. A comment also lives in
   // its marker's aria-label, for screen readers.
   var tip = document.getElementById("tip");
@@ -800,7 +843,8 @@ thead.print, .print-note { display: none; }
     return el.closest(".toolbar [data-help]") || el.closest("td[data-move]") ||
       (commentTips && el.closest(".comment")) ||
       (document.body.classList.contains("formats") && el.closest(".fmt")) ||
-      (document.body.classList.contains("formatted") && el.closest(".s-tc-ins, .s-tc-del"));
+      (document.body.classList.contains("formatted") && el.closest(".s-tc-ins, .s-tc-del")) ||
+      el.closest(".moved[data-move]");
   }
   document.addEventListener("mouseover", function (e) {
     var el = tipTarget(e.target);
@@ -825,7 +869,11 @@ thead.print, .print-note { display: none; }
     var old = file.querySelector(":scope > svg.move-links");
     if (old) old.remove();
     var outs = file.querySelectorAll("tr.moved-out[data-pair]");
-    if (!outs.length || !file.open || !document.body.classList.contains("movelinks") ||
+    // moved passages only while they are shown (the "Moved passages" switch)
+    var passages = document.body.classList.contains("passages")
+      ? file.querySelectorAll("td.code.left .pv-on .moved[data-pair]") : [];
+    if (!(outs.length || passages.length) || !file.open ||
+        !document.body.classList.contains("movelinks") ||
         document.body.classList.contains("unified") || file.closest(".split[hidden]")) return;
     var box = file.getBoundingClientRect();
     var svg = document.createElementNS(SVG, "svg");
@@ -839,26 +887,38 @@ thead.print, .print-note { display: none; }
       if (!from || !to) return;
       var a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
       if (!a.height || !b.height) return;
-      var x1 = a.right - box.left - 3, y1 = a.top + a.height / 2 - box.top;
-      var x2 = b.left - box.left + 3, y2 = b.top + b.height / 2 - box.top;
-      // each pair bends a little further, so lines running side by side part
-      var bend = Math.max(24, (x2 - x1) / 2) + (Number(out.dataset.pair) % 6) * 9;
-      var g = document.createElementNS(SVG, "g");
-      g.dataset.pair = out.dataset.pair;
-      var path = document.createElementNS(SVG, "path");
-      path.setAttribute("d", "M" + x1 + " " + y1 + " C" + (x1 + bend) + " " + y1 + " " +
-        (x2 - bend) + " " + y2 + " " + x2 + " " + y2);
-      g.appendChild(path);
-      [[x1, y1], [x2, y2]].forEach(function (p) {
-        var c = document.createElementNS(SVG, "circle");
-        c.setAttribute("cx", p[0]);
-        c.setAttribute("cy", p[1]);
-        c.setAttribute("r", 2.5);
-        g.appendChild(c);
-      });
-      svg.appendChild(g);
+      link(svg, out.dataset.pair, a.right - box.left - 3, a.top + a.height / 2 - box.top,
+        b.left - box.left + 3, b.top + b.height / 2 - box.top);
+    });
+    // a moved passage: from the end of its old text to the start of its new
+    passages.forEach(function (out) {
+      var into = file.querySelector('td.code.right .pv-on .moved[data-pair="' + out.dataset.pair + '"]');
+      var from = out.getClientRects(), to = into ? into.getClientRects() : [];
+      if (!from.length || !to.length) return;
+      var a = from[from.length - 1], b = to[0];
+      link(svg, out.dataset.pair, a.right - box.left, a.top + a.height / 2 - box.top,
+        b.left - box.left, b.top + b.height / 2 - box.top);
     });
     file.appendChild(svg);
+  }
+  // One line, from x1 y1 to x2 y2, a dot at either end.
+  function link(svg, pair, x1, y1, x2, y2) {
+    // each pair bends a little further, so lines running side by side part
+    var bend = Math.max(24, (x2 - x1) / 2) + (Number(pair) % 6) * 9;
+    var g = document.createElementNS(SVG, "g");
+    g.dataset.pair = pair;
+    var path = document.createElementNS(SVG, "path");
+    path.setAttribute("d", "M" + x1 + " " + y1 + " C" + (x1 + bend) + " " + y1 + " " +
+      (x2 - bend) + " " + y2 + " " + x2 + " " + y2);
+    g.appendChild(path);
+    [[x1, y1], [x2, y2]].forEach(function (p) {
+      var c = document.createElementNS(SVG, "circle");
+      c.setAttribute("cx", p[0]);
+      c.setAttribute("cy", p[1]);
+      c.setAttribute("r", 2.5);
+      g.appendChild(c);
+    });
+    svg.appendChild(g);
   }
   var linksPending = false;
   function drawAllLinks() {
@@ -880,14 +940,16 @@ thead.print, .print-note { display: none; }
     var watcher = new ResizeObserver(drawAllLinks);
     document.querySelectorAll("details.file table").forEach(function (tb) { watcher.observe(tb); });
   }
-  // Hovering a moved line lights up the other end and the line between.
+  // Hovering a moved line or passage lights up the other end and the line
+  // between.
   document.addEventListener("mouseover", function (e) {
-    var row = e.target.closest("tr[data-pair]");
+    var row = e.target.closest(".moved[data-pair], tr[data-pair]");
     var hot = document.querySelectorAll(".pair-hot, svg.move-links .hot");
     hot.forEach(function (el) { el.classList.remove("pair-hot", "hot"); });
     if (!row) return;
     var file = row.closest("details.file");
-    file.querySelectorAll('tr[data-pair="' + row.dataset.pair + '"]').forEach(function (r) {
+    var ends = 'tr[data-pair="' + row.dataset.pair + '"], .moved[data-pair="' + row.dataset.pair + '"]';
+    file.querySelectorAll(ends).forEach(function (r) {
       r.classList.add("pair-hot");
     });
     var g = file.querySelector('svg.move-links g[data-pair="' + row.dataset.pair + '"]');

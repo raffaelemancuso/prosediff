@@ -842,6 +842,43 @@ wheels = [
 ]
 
 [[package]]
+name = "patiencediff"
+version = "0.2.19"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/5c/effa27de2f2251a02051f5546ee9f9ceae7c2d15dadaadae5dbe6ee890e1/patiencediff-0.2.19.tar.gz", hash = "sha256:a060953edd05521e6368245d6c70402308a7aea4f66a706b2d832721d1375679", size = 24536, upload-time = "2026-06-15T11:10:57.051Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/59/e835cc0a2dd0f656983472537bf59b93d1572ccd3492df8c022d5818bcd0/patiencediff-0.2.19-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:d76f5ad43624a3d4eb7036ad5e3b35189e082f756c314debccd1bcc9dd457215", size = 265593, upload-time = "2026-06-15T11:10:07.15Z" },
+    { url = "https://files.pythonhosted.org/packages/12/ce/e5006038c70afe3827d55a8bbb43754c49b404116e5a915cf51e137d84fb/patiencediff-0.2.19-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:09605c3ae5037dbf820c77d97d0e6b0ce7b5ea5619fa4d746215da4e80d6250b", size = 294775, upload-time = "2026-06-15T11:10:08.799Z" },
+    { url = "https://files.pythonhosted.org/packages/61/86/935f9513e0bdfbe5f8c643f8d85d5c4aa5e1fc6030704f14f147075572b4/patiencediff-0.2.19-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:4dd38c8d3bb215cac781fcaf6a30be2d6bafb9fb3641d24269b9e8697a3f2ec5", size = 300587, upload-time = "2026-06-15T11:10:10.331Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/36/be678054891b12ba0933ba72e1c47a467284605e2b2c042d449ad1330fd5/patiencediff-0.2.19-cp311-cp311-win32.whl", hash = "sha256:aec228148e8be76245b93f68a35244ff5fb6ad4fc77c7b199f953a12e191af92", size = 152862, upload-time = "2026-06-15T11:10:11.638Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/ff/773b9332908f7ac5e4d9db0038124d7b05fb6379474f51e8b72f209ce3c1/patiencediff-0.2.19-cp311-cp311-win_amd64.whl", hash = "sha256:8f4639d6cdfb2a14505a606a9f8d3dfce426c118db2acae500d2eb2b08720a3e", size = 159929, upload-time = "2026-06-15T11:10:12.911Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/59/bdc3d93315226288dcb89ab24860583670920c2dacc73c7764656f779a1a/patiencediff-0.2.19-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:7a283ef510e11176199b7d0c84d969fb8c38759e1385a7971b686194fd5a96e9", size = 259280, upload-time = "2026-06-15T11:10:14.324Z" },
+    { url = "https://files.pythonhosted.org/packages/69/50/480914bdc61220ff3e49a3207f85b7c72379903f947ecc9711a2e6e950d6/patiencediff-0.2.19-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:79b8f8539df4223b31853fccb4ecaf4c31eece74d36f898cb56f45f314f69d22", size = 291153, upload-time = "2026-06-15T11:10:15.869Z" },
+    { url = "https://files.pythonhosted.org/packages/75/60/e5ba37d20d996897c17217899d3f174887b598f0450fdbdc5485c4dd0ae9/patiencediff-0.2.19-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:eacba31f0de56b0ca9ac446d38ac978c047d50f813353651f217d5a63a49e0f4", size = 297004, upload-time = "2026-06-15T11:10:17.399Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/d1/fd48e7010285adcdd263131b40fb10e5f59aeb21a81c8f48de186afe8bc9/patiencediff-0.2.19-cp312-cp312-win32.whl", hash = "sha256:498fdaa4b9437c32a65703cc37b7e37a11f1daabebc4df5e9790d6cd157de123", size = 150649, upload-time = "2026-06-15T11:10:18.996Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/cc/3af78e3794f9c63e9a40d3f2d7e9de02956f694d8274ad675055848353aa/patiencediff-0.2.19-cp312-cp312-win_amd64.whl", hash = "sha256:8b18e126e9f266320d4dcaeed36940228cc7127517944347de4b12295ec04d34", size = 157834, upload-time = "2026-06-15T11:10:20.4Z" },
+    { url = "https://files.pythonhosted.org/packages/57/fc/43916ad0a34cb0594e05d961c58011087e6d0c2962aa0024a6fdf3442e81/patiencediff-0.2.19-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:9cf5f0623b101cdd2d3d5841906c1d516b27d41b353fbb22e381e4bda7fb7d44", size = 259071, upload-time = "2026-06-15T11:10:21.791Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/51/aea5068aba605e627d57d27ecafb1e72c35494b272282dee6fa642515407/patiencediff-0.2.19-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:5d86000a99e04d9ffb1237682dfca6a0b8e05384960a32dc608f645ad52ba5c1", size = 291217, upload-time = "2026-06-15T11:10:23.231Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/0f/01b72db7109e6e149491e718d90431cffe17492a2ae19b9e856fc4267e78/patiencediff-0.2.19-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:5cb78182bc48532ccca96980985112f43794cfb9d057dc1dcc1eb687ca1eff8f", size = 296665, upload-time = "2026-06-15T11:10:24.68Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/64/18da6b7070fe329638c56de4a0a3a0c4df5ec2021e2d92d26052231bf946/patiencediff-0.2.19-cp313-cp313-win32.whl", hash = "sha256:4fc490ecbcaa9e5d83efec92d0f411485f58be2070910f695ccc46e48c5c6b53", size = 150704, upload-time = "2026-06-15T11:10:25.987Z" },
+    { url = "https://files.pythonhosted.org/packages/4c/34/2607bc31420e3274f6be7dc7e1cde3444d24ef7df39a77e9f3b1685dc1cd/patiencediff-0.2.19-cp313-cp313-win_amd64.whl", hash = "sha256:87aeaa2e277cea07c41dd53c9c2fce1de4ff3ad9759281f8eb99ff639a9ba9ff", size = 157534, upload-time = "2026-06-15T11:10:27.465Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/3d/e8a10f0c2d1bdc89bb68d116877f2a7e9ad3c0da012e7dfe89cdc9051562/patiencediff-0.2.19-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:52813bcaa80f69dab68faa959f4abd3539cac091c3614a5113ca78f691c8eaac", size = 504657, upload-time = "2026-06-15T11:10:28.852Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/73/300b4411f0e6785cef66407d13f996ee76a8f6bb4eea5e75c13bf322aabf/patiencediff-0.2.19-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:7bca729281ed1ed00edbda9a0f1c9c299186da515b7c9801ab5260a035342540", size = 266180, upload-time = "2026-06-15T11:10:30.202Z" },
+    { url = "https://files.pythonhosted.org/packages/43/e9/b74e18f51a2f1ad9d107088f735e07a0f2e89d945e95dc33cdc5b3a86e56/patiencediff-0.2.19-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:bf1f1c5a5c499242b8aa639780aada0719cf7c8c4f2e12b484f5b7133210b960", size = 261199, upload-time = "2026-06-15T11:10:31.756Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/fe/e6e05f9bdd981f181a0d62a8e1bcaec8b89c66869140174379879c8c782b/patiencediff-0.2.19-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:3bde0c9c93a1775c989086ce5ecf78555f1ba3d86863219a3fbf24601c4f722d", size = 291737, upload-time = "2026-06-15T11:10:33.24Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/4d/17dc686314a8cffb34b26cd92b6a24b413a42ccc4a8fac08721c1b49658f/patiencediff-0.2.19-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:2bd8ff4ddf5d4748bf24d9a7ad269695a48b618a4742c6bf0596cbe5d704991c", size = 297324, upload-time = "2026-06-15T11:10:34.833Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/9b/e39d54503bb2eb9b71788f40ba8a5eeb91e41041395403985eb7833b23b5/patiencediff-0.2.19-cp314-cp314-win32.whl", hash = "sha256:9cec9b04c5a47d56beb499442967576396723c0a2acc9cf3dbb818e5fcbd574b", size = 153781, upload-time = "2026-06-15T11:10:36.146Z" },
+    { url = "https://files.pythonhosted.org/packages/37/4e/133b2dcd88ac44668633ff92b0aa8585fef831ac2bd4b9b155750fd0545f/patiencediff-0.2.19-cp314-cp314-win_amd64.whl", hash = "sha256:00dedb389671328c39acb5d072c887ba43f82a56bf4856aec24214975fe69508", size = 161714, upload-time = "2026-06-15T11:10:37.348Z" },
+    { url = "https://files.pythonhosted.org/packages/05/98/578b1af0c560bbf32e263c32f59ce64c79fedfc4e84aa79132e9bfbfb8f5/patiencediff-0.2.19-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:26ae22aae46f37ee8eeb3ed4a20f83afd4b21b50f42df6894679f085250fbda5", size = 503403, upload-time = "2026-06-15T11:10:39.211Z" },
+    { url = "https://files.pythonhosted.org/packages/19/bc/cad849678e788ee2559c5042f98527b5f7d8ec7f1bedf237c86d26254215/patiencediff-0.2.19-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:d7e7b7263221d645e34a0e1cc928fa2b32faae8543832b7a494f2e64f1f646c9", size = 265722, upload-time = "2026-06-15T11:10:40.692Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/50/91fb7cf1516b4fff13adb84ee340c8ca8b5273bceadf1f63aed25b846e6a/patiencediff-0.2.19-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:a226342c4b616bf96165d20499ad7feb51476cc38f7fb4b2ddc644fe3a9393a3", size = 260398, upload-time = "2026-06-15T11:10:43.123Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/42/d7951fb1501ac7d80742aa73a054ea5718d0b95c48343c6a38a0a987f868/patiencediff-0.2.19-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:2a807326bbfaddd61cd12d51eaea328ce64cda8e6d4db9e05293e43194b04d7f", size = 290639, upload-time = "2026-06-15T11:10:44.667Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/8b/d905bdfff9ace2d02b94b0f852485fee34850980647dcdcc0d5e2983127c/patiencediff-0.2.19-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:69572791106c5301b872ec2efb4318dda44c44471ccc2f8a0e5930e7af3edfc9", size = 296486, upload-time = "2026-06-15T11:10:46.123Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/1d/2f54ac7989e92d5b195ca9ce00a347c8670a1ac84078ee73430ad8a0f27b/patiencediff-0.2.19-cp314-cp314t-win32.whl", hash = "sha256:45240e4da6c6ba389b07ba98e6c09d3c5853bb3512430230bc762a56c4071578", size = 152906, upload-time = "2026-06-15T11:10:47.505Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/20/aedfef67353737cc59dd9853f0b0d31688c311efd3bee6564e279c4f5a6d/patiencediff-0.2.19-cp314-cp314t-win_amd64.whl", hash = "sha256:2b84d2727f1193dc704d64ebadc2833ccdb448a1e448c7fe41bcf61504c0b745", size = 160455, upload-time = "2026-06-15T11:10:48.84Z" },
+]
+
+[[package]]
 name = "pillow"
 version = "12.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -969,6 +1006,7 @@ dependencies = [
     { name = "lxml" },
     { name = "markupsafe" },
     { name = "odfdo" },
+    { name = "patiencediff" },
     { name = "psutil" },
     { name = "py3langid" },
     { name = "pyphen" },
@@ -997,6 +1035,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.1.3" },
     { name = "markupsafe", specifier = ">=3.0" },
     { name = "odfdo", specifier = ">=3.26.2" },
+    { name = "patiencediff", specifier = ">=0.2.19" },
     { name = "psutil", specifier = ">=7.2.2" },
     { name = "py3langid", specifier = ">=0.4.0" },
     { name = "pyphen", specifier = ">=0.18.1" },
@@ -1005,7 +1044,6 @@ requires-dist = [
     { name = "ttkbootstrap", specifier = ">=2.2.3" },
     { name = "yasbd-lib", specifier = ">=1.0.0,<2" },
 ]
-provides-extras = ["odt"]
 
 [package.metadata.requires-dev]
 dev = [

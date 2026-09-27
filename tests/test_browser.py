@@ -351,7 +351,10 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     page.keyboard.press("s")
     assert sentences.is_visible() and not paragraphs.is_visible()
     assert "1 moved" in sentences.locator(".units").inner_text()
-    assert "Sentences" in page.locator("[data-split-switch]").inner_text()
+    switch = page.locator("[data-split-switch]")
+    assert switch.get_attribute("aria-label") == "Compared sentence by sentence"
+    assert switch.locator("svg.sentences").is_visible()
+    assert not switch.locator("svg.paragraphs").is_visible()
     # drawn on the next frame: the assertions wait for it
     sync_api.expect(sentences.locator("svg.move-links path")).to_have_count(1)
     page.keyboard.press("l")
@@ -359,3 +362,65 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     page.locator("[data-split-switch]").click()
     assert paragraphs.is_visible()
     context.close()
+
+
+def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
+    """A sentence moved from one paragraph into another, compared paragraph
+    by paragraph: hovering either end tells where it went or came from and
+    lights up both; a line joins them."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    moved = "This sentence moves to the end of the text."
+    old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
+    new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
+    out = tmp_path / "page.html"
+    out.write_text(render(compare_paths(old, new, context=None)), encoding="utf-8")
+    context = browser.new_context()
+    page = context.new_page()
+    page.goto(out.as_uri())
+    assert "1 moved passage" in page.locator("details.file summary").inner_text()
+    tip = page.locator("#tip")
+    page.locator("td.left .moved").hover()
+    assert tip.locator("b").inner_text() == "Moved to line 3"
+    sync_api.expect(page.locator(".moved.pair-hot")).to_have_count(2)
+    page.locator("td.right .moved").hover()
+    assert tip.locator("b").inner_text() == "Moved from line 1"
+    sync_api.expect(page.locator("svg.move-links path")).to_have_count(1)
+    context.close()
+
+
+def test_moved_passages_switch(browser, tmp_path):
+    """The "Moved passages" switch: off, a moved passage is removed in one
+    place and added in the other, the counts follow and its line goes; the
+    key v turns it back on, and the choice is remembered."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    moved = "This sentence moves to the end of the text."
+    old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
+    new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
+    out = tmp_path / "page.html"
+    out.write_text(render(compare_paths(old, new, context=None)), encoding="utf-8")
+    context = browser.new_context()
+    page = context.new_page()
+    page.goto(out.as_uri())
+    switch = page.locator('[data-toggle="passages"]')
+    summary = page.locator("details.file summary")
+    assert switch.get_attribute("aria-pressed") == "true"
+    assert "1 moved passage" in summary.inner_text()
+    sync_api.expect(page.locator("svg.move-links path")).to_have_count(1)
+    switch.click()
+    assert switch.get_attribute("aria-pressed") == "false"
+    assert not page.locator("td.left .moved").is_visible()
+    assert page.locator("td.left del").filter(has_text="This sentence moves").is_visible()
+    assert page.locator("td.right ins").filter(has_text="This sentence moves").is_visible()
+    assert "moved passage" not in summary.inner_text()
+    sync_api.expect(page.locator("svg.move-links path")).to_have_count(0)
+    page.reload()
+    assert switch.get_attribute("aria-pressed") == "false"
+    page.keyboard.press("v")
+    assert page.locator("td.left .moved").is_visible()
+    assert "1 moved passage" in summary.inner_text()
+    context.close()
+
+
+def test_no_moved_passages_switch_without_passages(page):
+    """A report with no moved passage has no switch for them."""
+    assert page.locator('[data-toggle="passages"]').count() == 0

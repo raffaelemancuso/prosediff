@@ -1,0 +1,286 @@
+Word matchers for diff.word_ops: speed, pieces, and moved passages
+2026-09-27 12:56:57
+
+2,776 changed lines of the trials of docs/passage_benchmark.py.
+
+difflib
+  word pairing time   :     30.97 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         0
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.14 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.44 s
+
+cydifflib
+  word pairing time   :      2.80 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         0
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.05 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.38 s
+
+cdifflib
+  word pairing time   :     16.90 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         0
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      0.99 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.39 s
+
+patiencediff
+  word pairing time   :      2.21 s
+  changes per line    :      1.57
+  lone words anchored :        35
+  lines unlike difflib:         4
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.05 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.37 s
+
+rapidfuzz
+  word pairing time   :      0.66 s
+  changes per line    :      2.32
+  lone words anchored :        35
+  lines unlike difflib:       487
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      0.80 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.36 s
+
+Levenshtein
+  word pairing time   :      1.10 s
+  changes per line    :      1.76
+  lone words anchored :        33
+  lines unlike difflib:       277
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      0.45 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.30 s
+
+histodiff histogram
+  word pairing time   :      1.08 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         5
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.06 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.42 s
+
+histodiff patience
+  word pairing time   :      2.24 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         5
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.11 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.24 s
+
+histodiff myers
+  word pairing time   :      2.51 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         5
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.15 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.37 s
+
+similar-rs myers
+  word pairing time   :      1.71 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         3
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.10 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.37 s
+
+similar-rs patience
+  word pairing time   :      2.00 s
+  changes per line    :      1.57
+  lone words anchored :        35
+  lines unlike difflib:         4
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.07 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.37 s
+
+similar-rs histogram
+  word pairing time   :      2.04 s
+  changes per line    :      1.57
+  lone words anchored :        34
+  lines unlike difflib:         3
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.02 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.34 s
+
+myers
+  word pairing time   :     26.62 s
+  changes per line    :      1.60
+  lone words anchored :       110
+  lines unlike difflib:        84
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.24 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.53 s
+
+pymyers
+  word pairing time   :     13.31 s
+  changes per line    :      1.60
+  lone words anchored :       110
+  lines unlike difflib:        84
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.17 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.40 s
+
+patience-diff-algo
+  failed: IndexError: list index out of range
+
+lcs2
+  failed: no result within 600 s
+
+fastdiff
+  word pairing time   :      5.84 s
+  changes per line    :      1.63
+  lone words anchored :       328
+  lines unlike difflib:        78
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :   94.9%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      2.45 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.37 s
+
+edit-distance
+  failed: no result within 600 s
+
+myers-diff
+  word pairing time   :      2.53 s
+  changes per line    :      1.57
+  lone words anchored :        35
+  lines unlike difflib:         4
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.00 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.46 s
+
+dissimilar
+  word pairing time   :      2.59 s
+  changes per line    :      1.57
+  lone words anchored :        32
+  lines unlike difflib:         4
+  Lines are paragraphs (similarity 0.7, token-sort)
+  precision       :  100.0%
+  recall          :  100.0%
+  boundary (IoU)  :   98.9%
+  passages cost   :      1.12 s
+  Lines are sentences (similarity 0.55, token-sort)
+  precision       :  100.0%
+  recall          :   98.7%
+  boundary (IoU)  :   97.5%
+  passages cost   :      0.38 s
+

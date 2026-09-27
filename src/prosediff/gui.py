@@ -25,7 +25,7 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -38,6 +38,7 @@ from prosediff.diff import (
     Comparison,
     Context,
     FilterError,
+    MovedPassageSettings,
     check_encoding,
     compare,
     compare_paths,
@@ -126,6 +127,12 @@ class Settings:
     move_algorithm: str | None = None
     sentence_move_similarity: float | None = None
     sentence_move_algorithm: str | None = None
+    # passages moved within a line or between two, followed too
+    move_passages: bool = True
+    # how moved passages are told from chance likeness (the advanced settings):
+    # field of MovedPassageSettings -> value, only for those changed from
+    # prosediff's default, which the others follow whatever it becomes
+    moved_passages: dict[str, float] = field(default_factory=dict)
     # how prose is compared: one of SPLITS
     split: str = "paragraph"
     # a language code; "document": marked in Word and OpenDocument files;
@@ -258,7 +265,25 @@ def load_settings(path: Path | None = None) -> Settings:
         s.split = "paragraph"
     if s.comments not in COMMENT_MODES:
         s.comments = "markers"
+    known_passage = {f.name for f in fields(MovedPassageSettings)}
+    if not isinstance(s.moved_passages, dict):
+        s.moved_passages = {}
+    s.moved_passages = {
+        k: v
+        for k, v in s.moved_passages.items()
+        if k in known_passage and isinstance(v, int | float) and not isinstance(v, bool)
+    }
     return s
+
+
+def moved_passage_settings_of(s: Settings) -> MovedPassageSettings:
+    """The moved-passage settings chosen (the advanced settings), prosediff's
+    defaults for the others; ValueError, naming it, for a value out of range."""
+    kinds = {f.name: float if f.metadata["share"] else int for f in fields(MovedPassageSettings)}
+    chosen = {k: kinds[k](v) for k, v in s.moved_passages.items() if k in kinds}
+    settings = MovedPassageSettings(**chosen)
+    settings.check()
+    return settings
 
 
 def save_settings(s: Settings, path: Path | None = None) -> bool:
@@ -300,6 +325,8 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         sentence_move_algorithm=(
             s.sentence_move_algorithm if s.sentence_move_algorithm in MOVE_ALGORITHMS else None
         ),
+        move_passages=s.move_passages,
+        moved_passage_settings=moved_passage_settings_of(s),
         language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
@@ -576,6 +603,16 @@ class App:
             self.ignore_ws,
             "Lines that differ only in spacing are the same, as git diff -w.",
         )
+        self.move_passages = tk.BooleanVar(value=self.s.move_passages)
+        switch_row(
+            compared,
+            7,
+            "Moved passages",
+            self.move_passages,
+            "Also follow the passages moved within a paragraph or between two: words removed "
+            "in one place and added in another, as alike as the moved paragraphs (sentences) "
+            "must be, are shown as moved, not as a deletion and an unrelated insertion.",
+        )
 
         self.comments = tk.StringVar(
             value=self.s.comments if self.s.comments in COMMENT_MODES else "markers"
@@ -622,6 +659,59 @@ class App:
             ),
             "How long lines that wrap are aligned in the HTML report.",
         )
+
+        # Advanced settings, hidden until asked for: how moved passages are
+        # told from chance likeness, one field for each of MovedPassageSettings
+        self.advanced_button = ttk.Button(
+            page,
+            text="▸ Advanced settings",
+            command=self.toggle_advanced,
+            bootstyle="link",
+            padding=(0, 4),
+        )
+        self.advanced_button.pack(anchor="w", pady=(8, 0))
+        hint(self.advanced_button, "Show or hide the settings few need to change.")
+        self.advanced = ttk.Labelframe(
+            page, text="Moved passages: telling them from chance likeness", padding=(10, 8)
+        )
+        self.advanced.columnconfigure((1, 3), weight=1)
+        self.passage_vars: dict[str, tk.StringVar] = {}
+        for k, f in enumerate(fields(MovedPassageSettings)):
+            value = self.s.moved_passages.get(f.name, f.default)
+            var = tk.StringVar(value=f"{value:g}" if f.metadata["share"] else f"{int(value):,}")
+            self.passage_vars[f.name] = var
+            spin = (
+                ttk.Spinbox(
+                    self.advanced, from_=0.01, to=1, increment=0.05, textvariable=var, width=10
+                )
+                if f.metadata["share"]
+                else ttk.Spinbox(
+                    self.advanced,
+                    from_=f.metadata["low"],
+                    to=10**7,
+                    increment=1,
+                    textvariable=var,
+                    width=10,
+                )
+            )
+            row, col = k // 2, (k % 2) * 2
+            label = ttk.Label(self.advanced, text=f.metadata["label"])
+            label.grid(row=row, column=col, sticky="w", padx=(0 if col == 0 else 18, 6), pady=3)
+            spin.grid(row=row, column=col + 1, sticky="w", pady=3)
+            what = f.metadata["help"]
+            tip = f"{what[0].upper()}{what[1:]}. Default: {f.default:,}."
+            hint(label, tip)
+            hint(spin, tip)
+        passage_defaults = ttk.Button(
+            self.advanced,
+            text="Defaults",
+            command=self.reset_passage_settings,
+            bootstyle="secondary-outline",
+        )
+        passage_defaults.grid(
+            row=(len(self.passage_vars) + 1) // 2, column=3, sticky="e", pady=(6, 0)
+        )
+        hint(passage_defaults, "Put these settings back to prosediff's defaults.")
 
         # Output
         out = ttk.Labelframe(page, text="Output", padding=(10, 8))
@@ -874,6 +964,8 @@ class App:
             move_algorithm=moves[False][1],
             sentence_move_similarity=moves[True][0],
             sentence_move_algorithm=moves[True][1],
+            move_passages=self.move_passages.get(),
+            moved_passages=self.passage_choices(),
             split=self.split.get(),
             language=language,
             encoding=encoding,
@@ -881,6 +973,35 @@ class App:
             output_format=self.output_format.get(),
             open_page=self.open_page.get(),
         )
+
+    def toggle_advanced(self) -> None:
+        """Show the advanced settings below their button, or hide them."""
+        # laid out or not, whether the window is shown yet or not
+        if self.advanced.winfo_manager():
+            self.advanced.pack_forget()
+            self.advanced_button.configure(text="▸ Advanced settings")
+        else:
+            self.advanced.pack(fill="x", pady=(4, 0), after=self.advanced_button)
+            self.advanced_button.configure(text="▾ Advanced settings")
+
+    def passage_choices(self) -> dict[str, float]:
+        """The moved-passage settings shown that differ from prosediff's
+        defaults; a box that holds no number keeps the default."""
+        chosen: dict[str, float] = {}
+        for f in fields(MovedPassageSettings):
+            kind = float if f.metadata["share"] else int
+            try:
+                value = kind(float(self.passage_vars[f.name].get().replace(",", "")))
+            except ValueError:
+                continue
+            if value != f.default:
+                chosen[f.name] = value
+        return chosen
+
+    def reset_passage_settings(self) -> None:
+        for f in fields(MovedPassageSettings):
+            default = f"{f.default:g}" if f.metadata["share"] else f"{f.default:,}"
+            self.passage_vars[f.name].set(default)
 
     def save_options(self) -> None:
         """Remember the choices shown, for the next time the window opens:
@@ -916,6 +1037,8 @@ class App:
             (self.open_page, d.open_page),
         ):
             var.set(value)
+        self.move_passages.set(d.move_passages)
+        self.reset_passage_settings()
         self.rename_output()
         self.update_untracked()
         self.update_empty_comments()
@@ -939,6 +1062,7 @@ class App:
                 git.BadName,
                 git.GitCommandError,
                 FilterError,
+                MovedPassageSettings,
                 SourceError,
                 ValueError,
                 OSError,

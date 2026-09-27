@@ -5,3 +5,6 @@
 *.gif binary
 *.odt binary
 *.zip binary
+*.gz binary
+# books as Project Gutenberg serves them (CRLF): never normalized
+docs/benchmark_data/gutenberg/*.txt -text

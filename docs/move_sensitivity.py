@@ -78,7 +78,10 @@ from prosediff.diff import (
 from prosediff.sentences import split_sentences
 
 DOCS = Path(__file__).parent
-CACHE = DOCS / "__pycache__" / "gutenberg"
+# The benchmarks' data, kept in the repository: the books, saved as served,
+# and the trials docs/passage_benchmark.py makes from them.
+DATA = DOCS / "benchmark_data"
+CACHE = DATA / "gutenberg"
 # (id, language, what it is), each fetched once into CACHE.
 BOOKS = [
     (1342, "en", "Austen, Pride and Prejudice (en, novel)"),

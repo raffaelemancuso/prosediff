@@ -32,6 +32,7 @@ dependencies = [
     "lxml>=6.1.3",
     "markupsafe>=3.0",
     "odfdo>=3.26.2",
+    "patiencediff>=0.2.19",
     "psutil>=7.2.2",
     "py3langid>=0.4.0",
     "pyphen>=0.18.1",
@@ -51,11 +52,6 @@ prosediff = "prosediff.cli:main"
 # A window, without a console on Windows.
 [project.gui-scripts]
 prosediff-gui = "prosediff.gui:main"
-
-[project.optional-dependencies]
-# odfdo was once this optional extra; it is a dependency now, and the extra
-# stays, empty, so that installing "prosediff[odt]" still works.
-odt = []
 
 [dependency-groups]
 dev = [
