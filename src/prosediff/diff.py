@@ -31,7 +31,7 @@ from charset_normalizer import from_bytes
 from markupsafe import Markup
 from patiencediff import PatienceSequenceMatcher
 from rapidfuzz import fuzz
-from rapidfuzz.distance import Indel, Levenshtein
+from rapidfuzz.distance import Indel
 
 from prosediff import document, footnotes
 from prosediff.comments import (  # noqa: F401  (re-exported)
@@ -1342,27 +1342,19 @@ def _sorted_tokens(line: str) -> list[str]:
     return sorted(similarity_tokens(line))
 
 
-def _indel(a, b, cutoff: float) -> float:
-    return Indel.normalized_similarity(a, b, score_cutoff=cutoff)
-
-
 # How alike two lines are for the moved-line matching, 0 to 1, each measure
 # as (what a line becomes before it is compared, the score of two of them,
-# 0 below the cutoff). All of rapidfuzz, in C.
+# 0 below the cutoff). Both of rapidfuzz, in C, and both follow a line whose
+# sentences were reordered; the order-bound measures (in common in order, of
+# words or characters; Levenshtein) did worse on docs/move_sensitivity.py's
+# revisions, and were dropped.
 MOVE_ALGORITHMS = {
-    # words and punctuation in common, in order: 2 x longest common
-    # subsequence / total length
-    "tokens": (similarity_tokens, _indel),
-    # characters in common, in order (spacing aside)
-    "chars": (_spaced, _indel),
-    # words and punctuation: 1 - edits (insertions, deletions, substitutions)
-    # / length of the longer line
-    "levenshtein": (
-        similarity_tokens,
-        lambda a, b, cutoff: Levenshtein.normalized_similarity(a, b, score_cutoff=cutoff),
+    # words and punctuation in common, whatever their order: 2 x longest
+    # common subsequence of the sorted tokens / total length
+    "token-sort": (
+        _sorted_tokens,
+        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
     ),
-    # words and punctuation in common, whatever their order
-    "token-sort": (_sorted_tokens, _indel),
     # the words both lines share against the rest of each, whatever their
     # order (a line inside a longer one scores high)
     "token-set": (

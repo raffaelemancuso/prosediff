@@ -211,21 +211,19 @@ def test_first_of_change_marks_each_run():
 
 
 def test_move_algorithms():
-    """A paragraph moved with its sentences reordered is a move by default
-    (token-sort), not by the order-bound tokens; an unknown algorithm is
-    refused."""
+    """A paragraph moved with its sentences reordered is a move, by either
+    algorithm; an unknown algorithm is refused."""
     import pytest
 
-    from prosediff.diff import check_move_algorithm
+    from prosediff.diff import MOVE_ALGORITHMS, check_move_algorithm
 
     sentences = ["Alpha opens here.", "Bravo comes next.", "Charlie is third.", "Delta ends it."]
     moved, reordered = " ".join(sentences), " ".join(reversed(sentences))
     old = [moved, "keep this line as it is", "another line kept"]
     new = ["keep this line as it is", "another line kept", reordered]
-    kinds = [r.kind for r in align(old, new, context=None)[0]]
-    assert "moved-in" in kinds
-    kinds = [r.kind for r in align(old, new, context=None, move_algorithm="tokens")[0]]
-    assert "moved-in" not in kinds
+    for algorithm in MOVE_ALGORITHMS:
+        kinds = [r.kind for r in align(old, new, context=None, move_algorithm=algorithm)[0]]
+        assert "moved-in" in kinds
     with pytest.raises(ValueError, match="move algorithm"):
         check_move_algorithm("soundex")
 
@@ -237,7 +235,7 @@ def test_move_threshold_is_inclusive():
 
     a = " ".join(f"w{k}" for k in range(25))
     b = " ".join([*(f"w{k}" for k in range(20)), *(f"x{k}" for k in range(5))])
-    prepare, score = MOVE_ALGORITHMS["levenshtein"]
+    prepare, score = MOVE_ALGORITHMS["token-sort"]
     assert score(prepare(a), prepare(b), 0) == 0.8
     old, new = (
         [a, "kept line number one", "kept line number two"],
@@ -247,5 +245,5 @@ def test_move_threshold_is_inclusive():
             b,
         ],
     )
-    rows = align(old, new, context=None, move_similarity=0.8, move_algorithm="levenshtein")[0]
+    rows = align(old, new, context=None, move_similarity=0.8, move_algorithm="token-sort")[0]
     assert "moved-in" in [r.kind for r in rows]

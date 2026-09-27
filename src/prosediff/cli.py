@@ -233,11 +233,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--move-algorithm",
         choices=tuple(MOVE_ALGORITHMS),
         default=None,
-        help="how --move-similarity measures two lines: tokens, the share of their words "
-        "and punctuation in common, in order; chars, of their characters; levenshtein, "
-        "1 - the words inserted, deleted or replaced / the longer line's; token-sort, "
-        "words in common whatever their order; token-set, the words both share against "
-        f"the rest of each (default: {MOVE_ALGORITHM})",
+        help="how --move-similarity measures two lines: token-sort, the share of their "
+        "words and punctuation in common whatever their order; token-set, the words both "
+        f"share against the rest of each (default: {MOVE_ALGORITHM})",
     )
     ap.add_argument(
         "--sentence-move-similarity",

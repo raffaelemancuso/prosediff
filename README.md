@@ -148,7 +148,7 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--sentence-move-similarity X`, `--sentence-move-algorithm NAME` | the same for sentences, when prose is compared sentence by sentence (default 0.55, `token-sort`). In the GUI, "Moved paragraphs" and "Moved sentences", each a threshold and an algorithm |
 | `--move-passages`, `--no-move-passages` | also follow the passages moved within a paragraph (a line) or between two (default: on): a run of words removed in one place and added in another, gaps of up to two unchanged words allowed, at least four words (and 15 non-space characters) long, as alike as `--move-similarity` (or `--sentence-move-similarity`) and its algorithm say, is shown as moved rather than as a deletion and an unrelated insertion; a passage is also looked for inside a longer one (a sentence moved out of a paragraph deleted or rewritten). In the GUI, "Moved passages" |
 | `--passage-min-words N`, `--passage-min-chars N`, `--passage-max-gap N`, `--passage-shared-words N`, `--passage-content-letters N`, `--passage-edge-run N`, `--passage-partial-share X`, `--passage-rounds N`, `--passage-max-pairs N`, `--passage-rare-share X`, `--passage-rare-min N` | how moved passages are told from chance likeness (advanced; `prosediff --help` says what each does, and its default): the shortest passage (4 words, 15 characters), the unchanged words allowed inside one (2), the words of meaning two passages must share (2, of 4 letters or more), the words in common that can start or end one (2), when a passage is looked for inside a longer one (0.8), the rounds of matching (4), and past how many pairs only those sharing a rare word are tried (250,000; rare: in 1% of the passages, or 20). In the GUI, the fields of "Advanced settings" |
-| `--move-algorithm NAME`    | how that likeness is measured: `token-sort` (default), the words and punctuation two lines have in common whatever their order; `tokens`, in order; `chars`, their characters in common, in order; `levenshtein`, 1 − the words inserted, deleted or replaced over the longer line's; `token-set`, the words both share against the rest of each. See [Moved lines](#moved-lines-algorithm-and-threshold). In the GUI, the list next to "Moved-line similarity" |
+| `--move-algorithm NAME`    | how that likeness is measured: `token-sort` (default), the words and punctuation two lines have in common whatever their order; `token-set`, the words both share against the rest of each. See [Moved lines](#moved-lines-algorithm-and-threshold). In the GUI, the list next to "Moved-line similarity" |
 | `--open`                   | open the HTML report in the browser once it is written |
 | `--setup-git`              | set git up to show Word and OpenDocument files as text and to open prosediff HTML reports from `git difftool` (see below), for the repository REPO (default: the current folder) |
 | `--global`                 | with `--setup-git`, for every repository of the user instead |
@@ -421,14 +421,15 @@ report is rendered with Jinja2.
 ### Moved lines: algorithm and threshold
 
 Which removed and added lines count as one line moved depends on how their
-likeness is measured and on the threshold it must reach. Five measures are
-offered, all computed by rapidfuzz on the words and punctuation of the two
-lines (spacing aside): `tokens` (in common, in order: twice their longest
-common subsequence over their total length), `chars` (the same on
-characters), `levenshtein` (1 − words inserted, deleted or replaced over the
-longer line's), `token-sort` (in common whatever their order: `tokens` on
-the words sorted) and `token-set` (rapidfuzz's `token_set_ratio`: the words
-both share against the rest of each).
+likeness is measured and on the threshold it must reach. Two measures are
+offered, both computed by rapidfuzz on the words and punctuation of the two
+lines (spacing aside): `token-sort` (in common whatever their order: twice
+the longest common subsequence of the sorted words over their total length)
+and `token-set` (rapidfuzz's `token_set_ratio`: the words both share against
+the rest of each). Three order-bound measures were compared too and
+dropped: `tokens` (the words in common, in order), `chars` (the same on
+characters) and `levenshtein` (1 − words inserted, deleted or replaced over
+the longer line's).
 
 They were compared on simulated revisions of five public-domain books from
 Project Gutenberg (Austen, Darwin, Mill, Manzoni, Goethe: English, Italian
@@ -450,9 +451,9 @@ removed × 500 added lines). The best threshold of each measure:
 |--------------|----------------------:|------:|-------:|---------------------:|------:|-------:|
 | `token-sort` |                  0.70 | 98.6% | 0.95 s |                 0.55 | 99.2% | 0.32 s |
 | `token-set`  |                  0.80 | 98.8% | 8.88 s |                 0.70 | 99.3% | 1.91 s |
-| `chars`      |                  0.50 | 96.3% | 1.22 s |                 0.50 | 97.4% | 0.25 s |
-| `tokens`     |                  0.40 | 95.6% | 0.97 s |                 0.40 | 98.0% | 0.34 s |
-| `levenshtein`|                  0.30 | 90.1% | 0.83 s |                 0.30 | 92.0% | 0.30 s |
+| `chars` (dropped) |             0.50 | 96.3% | 1.22 s |                 0.50 | 97.4% | 0.25 s |
+| `tokens` (dropped) |            0.40 | 95.6% | 0.97 s |                 0.40 | 98.0% | 0.34 s |
+| `levenshtein` (dropped) |       0.30 | 90.1% | 0.83 s |                 0.30 | 92.0% | 0.30 s |
 
 `token-sort` and `token-set` are the only ones that follow a line whose
 sentences or clauses were reordered, and they keep false moves rare where
@@ -472,7 +473,8 @@ and 31% of the reordered ones, against 97.5% and 99.8% now (with
 words changed, 1.9% of its moves then wrong), raise it to be stricter.
 The full tables, by threshold and kind of edit, are in
 [docs/move_sensitivity.txt](docs/move_sensitivity.txt); `uv run python
-docs/move_sensitivity.py` remakes them.
+docs/move_sensitivity.py` remakes them for the two measures offered, and
+`--check` measures only the defaults, as a check after a change of the code.
 
 **Word and OpenDocument files are read directly, not converted to
 Markdown.** A Word document is read with python-docx, which opens the

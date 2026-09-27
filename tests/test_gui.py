@@ -407,9 +407,9 @@ def test_move_defaults_follow_prosediff(root, tmp_path):
     s = app.collect()
     assert (s.move_similarity, s.move_algorithm) == (None, None)
     app.move_similarity.set(0.55)
-    app.move_algorithm.set("chars")
+    app.move_algorithm.set("token-set")
     s = app.collect()
-    assert (s.move_similarity, s.move_algorithm) == (0.55, "chars")
+    assert (s.move_similarity, s.move_algorithm) == (0.55, "token-set")
 
 
 def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
@@ -424,7 +424,7 @@ def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
     new.write_bytes(b"Two.\n")
     app = App(root, Settings(mode="files", old=str(old), new=str(new), open_page=False))
     app.comments.set("none")
-    app.move_algorithm.set("chars")
+    app.move_algorithm.set("token-set")
     app.output_format.set("wdiff")
     app.run()
     for _ in range(300):  # the comparison runs in a thread: at most 30 s
@@ -436,7 +436,7 @@ def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
     assert not f.exists()
     app.save_options()
     saved = load_settings(f)
-    assert (saved.comments, saved.move_algorithm) == ("none", "chars")
+    assert (saved.comments, saved.move_algorithm) == ("none", "token-set")
     assert b"\r" not in f.read_bytes()
     app.reset_options()
     s = app.collect()

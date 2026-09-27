@@ -42,23 +42,36 @@ of the moves to find that are found, F1 their harmonic mean, on the moves a
 reader would still call moves (RECOGNISABLE); recall is also given by kind
 of edit.
 
-Each algorithm is also timed as diff.mark_moves runs it, on its largest
-job: BENCH x BENCH removed and added paragraphs (diff.MOVE_MAX_CELLS pairs),
-half of the added ones edited versions of removed ones; the best of REPEATS
-runs, timed alone, once the trials (scored in parallel, in WORKERS
-processes) are done. The suggested default is the fastest of the algorithms whose best F1
-is within F1_TIE points of the best. The report is written next to this
-script, as move_sensitivity.txt, with a part for each kind of line.
+Each algorithm is also timed as diff.mark_moves runs it: BENCH_OUT
+removed x BENCH_IN added lines, half of the added ones edited versions of
+removed ones, timed alone once the trials (scored in parallel, in WORKERS
+processes) are done. The cost of a pair does not depend on how many there
+are, so the time of the largest job, diff.MOVE_MAX_CELLS pairs, is that
+per pair times as many. The suggested default is the fastest of the
+algorithms whose best F1 is within F1_TIE points of the best. The report is
+written next to this script, as move_sensitivity.txt, with a part for each
+kind of line.
+
+    uv run python docs/move_sensitivity.py            # the full report
+    uv run python docs/move_sensitivity.py --check    # after a change
+
+--check measures prosediff as it is, to tell whether a change of the code
+moved its results: each kind of line at its default algorithm and threshold
+only (diff.move_defaults), every trial checked against diff.align, no
+timing; it prints precision, recall and F1 and writes no report. The trials
+are the same at every run, so any difference is the change's.
 """
 
 import os
 import random
 import re
+import sys
 import time
 import urllib.request
 from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 from prosediff.diff import (
@@ -70,6 +83,7 @@ from prosediff.diff import (
     align,
     difflib_opcodes,
     line_pairs,
+    move_defaults,
     move_key,
     similarity_tokens,
     token_similarity,
@@ -109,12 +123,14 @@ RECOGNISABLE = {
     "reordered",
     "reordered + 10%",
 }
-THRESHOLDS = [round(0.3 + 0.05 * k, 2) for k in range(14)]  # 0.30 ... 0.95
+# the best thresholds found lie between 0.55 and 0.80: 0.40 and 0.90 show
+# the curve falling off on both sides
+THRESHOLDS = [round(0.4 + 0.05 * k, 2) for k in range(11)]  # 0.40 ... 0.90
 LOOKALIKE_SAMPLE = 300
-BENCH = int(MOVE_MAX_CELLS**0.5)  # 500 x 500 pairs
-REPEATS = 3
+BENCH_OUT, BENCH_IN = 250, 200  # 50,000 pairs timed
 F1_TIE = 0.005  # best F1s this close are a tie, broken by speed
 CHECKED_TRIALS = 20  # trials whose replayed matching is checked against diff.align
+CHECKED_THRESHOLDS = (0.5, 0.8)  # at these thresholds
 WORKERS = os.cpu_count() or 1
 SCORE_TIMEOUT = 1800  # seconds, for all the trials of one kind of line
 FETCH_TIMEOUT = 60  # seconds, per book
@@ -177,7 +193,13 @@ def jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b) if a | b else 0.0
 
 
-def trial(book: list[str], vocabulary: list[str], rng: random.Random, unit: str):
+def trial(
+    book: list[str],
+    vocabulary: list[str],
+    word_sets: list[set[str]],
+    rng: random.Random,
+    unit: str,
+):
     """Two versions of a stretch of the book; for each new line, the old line
     it comes from (0-based, None for an inserted one); the kind of edit of
     each old line (moved ones as edited, the others "words 0%")."""
@@ -207,9 +229,9 @@ def trial(book: list[str], vocabulary: list[str], rng: random.Random, unit: str)
         if n % 2:
             # hard: the deleted paragraph's closest look-alike (Jaccard of
             # word sets, neutral among the algorithms compared)
-            words = set(WORD.findall(old[k].lower()))
+            words = word_sets[start + k]
             pool = [far() for _ in range(LOOKALIKE_SAMPLE)]
-            pick = max(pool, key=lambda j: jaccard(words, set(WORD.findall(book[j].lower()))))
+            pick = max(pool, key=lambda j: jaccard(words, word_sets[j]))
         else:
             pick = far()
         new.insert(rng.randrange(0, len(new) + 1), (book[pick], None))
@@ -249,7 +271,9 @@ def replay(pairs, old, new, threshold, score, prepared_old, prepared_new) -> set
             moved_new.add(j)
     outs = [i for i in removed if i not in moved_old]
     ins = [j for j in added if j not in moved_new]
-    if threshold >= 1 or not outs or not ins or len(outs) * len(ins) > MOVE_MAX_CELLS:
+    # (a trial is far below the pairs past which only those sharing rare
+    # words are tried)
+    if threshold >= 1 or not outs or not ins:
         return found
     cutoff = max(0.0, threshold - MOVE_MARGIN)
     candidates = [
@@ -273,44 +297,47 @@ def moves_of(rows) -> set[tuple[int, int]]:
 def bench_lines(
     books: list[list[str]], vocabularies: list[list[str]], rng: random.Random, unit: str
 ):
-    """BENCH removed lines, and BENCH added ones: half of them edited
+    """BENCH_OUT removed lines, and BENCH_IN added ones: half of them edited
     versions of removed ones, half others."""
     pool = [(b, p) for b, book in enumerate(books) for p in book if move_key(p)]
-    picked = rng.sample(pool, 2 * BENCH)
-    removed = [p for _, p in picked[:BENCH]]
-    added = [
-        edited(p, rng.choice(EDITS), vocabularies[b], rng, unit) for b, p in picked[: BENCH // 2]
-    ] + [p for _, p in picked[BENCH : BENCH + BENCH - BENCH // 2]]
+    picked = rng.sample(pool, BENCH_OUT + BENCH_IN)
+    removed = [p for _, p in picked[:BENCH_OUT]]
+    half = BENCH_IN // 2
+    added = [edited(p, rng.choice(EDITS), vocabularies[b], rng, unit) for b, p in picked[:half]] + [
+        p for _, p in picked[BENCH_OUT : BENCH_OUT + BENCH_IN - half]
+    ]
     rng.shuffle(added)
     return removed, added
 
 
 def seconds(algorithm: str, removed: list[str], added: list[str], threshold: float) -> float:
-    """How long diff.mark_moves' fuzzy stage takes to score every pair, best
-    of REPEATS runs."""
+    """How long diff.mark_moves takes to score every pair of lines, per pair."""
     prepare, score = MOVE_ALGORITHMS[algorithm]
     cutoff = max(0.0, threshold - MOVE_MARGIN)
-    best = float("inf")
-    for _ in range(REPEATS):
-        t = time.perf_counter()
-        out_items = [prepare(x) for x in removed]
-        in_items = [prepare(x) for x in added]
-        for ta in out_items:
-            for tb in in_items:
-                score(ta, tb, cutoff)
-        best = min(best, time.perf_counter() - t)
-    return best
+    t = time.perf_counter()
+    out_items = [prepare(x) for x in removed]
+    in_items = [prepare(x) for x in added]
+    for ta in out_items:
+        for tb in in_items:
+            score(ta, tb, cutoff)
+    return (time.perf_counter() - t) / (len(removed) * len(added))
 
 
 def column(values: list[str], width: int) -> str:
     return "".join(f"{v:>{width}}" for v in values)
 
 
-def score_trials(share: list[tuple[int, tuple]]) -> tuple[Counter, Counter, Counter, int]:
-    """Score a share of the trials, (number, trial): the right moves found,
-    by algorithm, threshold and kind of edit; the wrong ones, by algorithm
-    and threshold; the moves to find, by kind; and how many runs were
-    checked against diff.align (those of the first CHECKED_TRIALS)."""
+def score_trials(
+    share: list[tuple[int, tuple]],
+    algorithms: list[str],
+    thresholds: list[float],
+    check_all: bool = False,
+) -> tuple[Counter, Counter, Counter, int]:
+    """Score a share of the trials, (number, trial), at each algorithm and
+    threshold: the right moves found, by algorithm, threshold and kind of
+    edit; the wrong ones, by algorithm and threshold; the moves to find, by
+    kind; and how many runs were checked against diff.align (those of the
+    first CHECKED_TRIALS at CHECKED_THRESHOLDS, or every one)."""
     right: Counter = Counter()  # (algorithm, threshold, kind)
     wrong: Counter = Counter()  # (algorithm, threshold)
     to_find: Counter = Counter()  # kind
@@ -335,10 +362,11 @@ def score_trials(share: list[tuple[int, tuple]]) -> tuple[Counter, Counter, Coun
                 paired_j = any(b == j for _, b in facing)
                 if not paired_i and not paired_j:
                     to_find[kinds[i]] += 1
-        for algorithm, (prepare, score) in MOVE_ALGORITHMS.items():
+        for algorithm in algorithms:
+            prepare, score = MOVE_ALGORITHMS[algorithm]
             prepared_old = {i: prepare(x) for i, x in enumerate(old)}
             prepared_new = {j: prepare(x) for j, x in enumerate(new)}
-            for threshold in THRESHOLDS:
+            for threshold in thresholds:
                 found = replay(
                     unpair_moved(base, old, new, threshold, algorithm),
                     old,
@@ -348,7 +376,7 @@ def score_trials(share: list[tuple[int, tuple]]) -> tuple[Counter, Counter, Coun
                     prepared_old,
                     prepared_new,
                 )
-                if n < CHECKED_TRIALS and threshold in (0.5, 0.8):
+                if check_all or (n < CHECKED_TRIALS and threshold in CHECKED_THRESHOLDS):
                     rows_t, _, _ = align(
                         old,
                         new,
@@ -374,9 +402,10 @@ def lines_of(number: int, language: str, unit: str) -> list[str]:
     return book if unit == "paragraph" else split_sentences(book, language)[0]
 
 
-def analyse(unit: str) -> tuple[list[str], tuple]:
+def analyse(unit: str, check: bool = False) -> tuple[list[str], tuple | None]:
     """The part of the report on one kind of line, and its suggested default
-    (algorithm, threshold, precision, recall, F1, wrong moves)."""
+    (algorithm, threshold, precision, recall, F1, wrong moves); with check,
+    the results at prosediff's default only, and no suggestion."""
     rng = random.Random(SEED)
     trials, corpus, books, vocabularies = [], [], [], []
     for number, language, title in BOOKS:
@@ -385,17 +414,25 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
         corpus.append((title, len(book)))
         books.append(book)
         vocabularies.append(vocabulary)
-        trials += [trial(book, vocabulary, rng, unit) for _ in range(TRIALS_PER_BOOK)]
+        # each line's words, for the look-alikes: made once, not per trial
+        word_sets = [set(WORD.findall(p.lower())) for p in book]
+        trials += [trial(book, vocabulary, word_sets, rng, unit) for _ in range(TRIALS_PER_BOOK)]
 
     # the trials are scored in parallel, WORKERS processes each taking a
     # share (the alignment is pure Python: threads would wait on the GIL)
     shares = [list(enumerate(trials))[k::WORKERS] for k in range(WORKERS)]
+    if check:
+        threshold, algorithm = move_defaults(unit == "sentence")
+        algorithms, thresholds = [algorithm], [threshold]
+    else:
+        algorithms, thresholds = list(MOVE_ALGORITHMS), THRESHOLDS
+    work = partial(score_trials, algorithms=algorithms, thresholds=thresholds, check_all=check)
     right: Counter = Counter()  # (algorithm, threshold, kind)
     wrong: Counter = Counter()  # (algorithm, threshold)
     to_find: Counter = Counter()  # kind
     checked = 0
     with ProcessPoolExecutor(max_workers=WORKERS) as pool:
-        for r, w, f, c in pool.map(score_trials, shares, timeout=SCORE_TIMEOUT):
+        for r, w, f, c in pool.map(work, shares, timeout=SCORE_TIMEOUT):
             right += r
             wrong += w
             to_find += f
@@ -403,8 +440,8 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
 
     n_find = sum(to_find[k] for k in RECOGNISABLE)
     results = []
-    for algorithm in MOVE_ALGORITHMS:
-        for t in THRESHOLDS:
+    for algorithm in algorithms:
+        for t in thresholds:
             good = sum(right[(algorithm, t, k)] for k in EDITS)
             good_recognisable = sum(right[(algorithm, t, k)] for k in RECOGNISABLE)
             found = good + wrong[(algorithm, t)]
@@ -412,16 +449,30 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
             recall = good_recognisable / n_find
             f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
             results.append((algorithm, t, precision, recall, f1, wrong[(algorithm, t)]))
+    if check:
+        (a, t, p, r, f, n_wrong), n_all = results[0], sum(to_find.values())
+        by_kind = ", ".join(
+            f"{k} {right[(a, t, k)] / to_find[k] * 100:.1f}%" for k in EDITS if to_find[k]
+        )
+        return [
+            f"{unit.capitalize()}s, {a} at {t:.2f}: {len(trials):,} trials, "
+            f"{n_all:,} moves to find, every trial checked against diff.align ({checked:,})",
+            f"  precision {p * 100:.1f}%, recall {r * 100:.1f}%, F1 {f * 100:.1f}%, "
+            f"wrong {n_wrong:,}",
+            f"  recall by kind of edit: {by_kind}",
+        ], None
     best = {
         a: max((r for r in results if r[0] == a), key=lambda r: (r[4], r[1]))
         for a in MOVE_ALGORITHMS
     }
     top = max(r[4] for r in best.values())
     removed, added = bench_lines(books, vocabularies, rng, unit)
+    # seconds per pair: at the algorithm's best threshold, and at 0.80
     timing = {
         a: (seconds(a, removed, added, best[a][1]), seconds(a, removed, added, 0.8))
         for a in MOVE_ALGORITHMS
     }
+    cells = MOVE_MAX_CELLS
     tied = [a for a in MOVE_ALGORITHMS if best[a][4] >= top - F1_TIE]
     winner = best[min(tied, key=lambda a: timing[a][0])]
 
@@ -478,12 +529,13 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
                 11,
             )
         )
-    cells = BENCH * BENCH
     lines += [
         "",
-        f"Time to score {cells:,} pairs (diff.MOVE_MAX_CELLS, the most diff.mark_moves",
-        f"scores; {BENCH:,} removed x {BENCH:,} added {unit}s), best of {REPEATS:,} runs:",
-        "  " + f"{'algorithm':<12}" + column(["at best", "per pair", "at 0.80", "per pair"], 11),
+        f"Time to score a pair, timed on {BENCH_OUT:,} removed x {BENCH_IN:,} added {unit}s,",
+        f"and for {cells:,} pairs (diff.MOVE_MAX_CELLS, the most diff.mark_moves scores):",
+        "  "
+        + f"{'algorithm':<12}"
+        + column(["at best", f"{cells:,}", "at 0.80", f"{cells:,}"], 11),
     ]
     for a in MOVE_ALGORITHMS:
         t_best, t_80 = timing[a]
@@ -491,10 +543,10 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
             f"  {a:<12}"
             + column(
                 [
-                    f"{t_best:.2f} s",
-                    f"{t_best / cells * 1e6:.1f} us",
-                    f"{t_80:.2f} s",
-                    f"{t_80 / cells * 1e6:.1f} us",
+                    f"{t_best * 1e6:.1f} us",
+                    f"{t_best * cells:.2f} s",
+                    f"{t_80 * 1e6:.1f} us",
+                    f"{t_80 * cells:.2f} s",
                 ],
                 11,
             )
@@ -503,7 +555,7 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
         "",
         f"Within {F1_TIE * 100:.1f} points of the best F1: {', '.join(tied)}.",
         f"Suggested default: {winner[0]} at {winner[1]:.2f} (F1 {winner[4] * 100:.1f}%, "
-        f"{timing[winner[0]][0]:.2f} s for {cells:,} pairs), the fastest of those.",
+        f"{timing[winner[0]][0] * cells:.2f} s for {cells:,} pairs), the fastest of those.",
     ]
     short = {
         k: k.replace("words ", "w").replace("reordered", "reord").replace(" + ", "+") for k in EDITS
@@ -535,6 +587,11 @@ def analyse(unit: str) -> tuple[list[str], tuple]:
 
 def main() -> None:
     t0 = time.monotonic()
+    if "--check" in sys.argv[1:]:
+        for unit in UNITS:
+            print("\n".join(analyse(unit, check=True)[0]))
+        print(f"Run time: {time.monotonic() - t0:,.0f} s.")
+        return
     lines = [
         "prosediff: sensitivity of the moved-line matching to algorithm and threshold",
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
