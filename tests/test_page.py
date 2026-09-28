@@ -82,6 +82,17 @@ def test_render_compared_paths(page, tmp_path):
         assert f'<span class="full-path">{p.resolve()}</span>' in html
 
 
+def test_view_label_only_for_prose(page, tmp_path):
+    """A report of prose says it compared paragraph by paragraph; one of
+    other files, compared line by line, says nothing of views."""
+    assert 'class="view-label"' not in page[4]
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("One.\n")
+    new.write_text("Two.\n")
+    html = render(compare_paths(old, new))
+    assert "<b>Paragraph view</b>: the prose compared paragraph by paragraph</p>" in html
+
+
 def test_render_thousand_separators(page):
     assert "+1,500" in page[4]
 

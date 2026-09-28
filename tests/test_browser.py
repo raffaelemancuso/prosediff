@@ -322,6 +322,22 @@ def test_comment_whose_words_are_gone_flashes_its_marker_only(browser, tmp_path)
     assert page.locator("td.code.flash").count() == 0
 
 
+def test_comment_marker_click_flashes_its_words(browser, tmp_path):
+    """Clicking a comment's marker in the text, or Enter on it, flashes the
+    words it is anchored to, as its link in the panel does."""
+    page = anchored_report(browser, tmp_path)
+    marker = page.locator('td.code .comment[data-text="Here."]').first
+    marker.click()
+    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
+    assert highlighted(page).replace("­", "") == "two three"
+    assert page.locator(".comment.flash").count() == 1
+    page.wait_for_function('!CSS.highlights.has("comment-flash")', timeout=5_000)
+    page.locator('td.code .comment[data-text="Across."]').first.focus()
+    page.keyboard.press("Enter")
+    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
+    assert highlighted(page).replace("­", "").startswith("four.|Five six")
+
+
 def test_comment_flash_with_reduced_motion(browser, tmp_path):
     """A system asking for reduced motion still sees the words flash: once,
     steadily, not animated away."""
@@ -499,6 +515,13 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     sync_api.expect(sentences.locator("svg.move-links")).to_have_count(0)
     page.locator("[data-split-switch]").click()
     assert paragraphs.is_visible()
+    # each view says which it is, as does the toolbar, and switches to the other
+    assert paragraphs.locator(".view-label b").inner_text() == "Paragraph view"
+    assert switch.locator(".split-name").inner_text() == "Paragraphs"
+    paragraphs.locator("[data-split-to]").click()
+    assert sentences.is_visible() and not paragraphs.is_visible()
+    assert sentences.locator(".view-label b").inner_text() == "Sentence view"
+    assert switch.locator(".split-name").inner_text() == "Sentences"
     page.context.close()
 
 

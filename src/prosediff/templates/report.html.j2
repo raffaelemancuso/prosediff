@@ -73,6 +73,7 @@ h2 { font-size: 15px; margin: 0 0 6px; }
    stop. */
 ::highlight(comment-flash) { background-color: var(--flash); }
 td.code.flash { background-color: var(--flash) !important; }
+td.code .comment { cursor: pointer; }
 .comment.flash { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
 .comments-switch .dir { margin-left: 2px; }
 .comments-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
@@ -193,6 +194,15 @@ body:not(.passages) .pv-on, body.passages .pv-off { display: none; }
    or a line ending in a full stop (sentences). */
 .toolbar .split-switch .sentences, .toolbar .split-switch[aria-pressed="true"] .paragraphs { display: none; }
 .toolbar .split-switch[aria-pressed="true"] .sentences { display: inline; }
+.toolbar .split-switch { gap: 4px; padding: 4px 6px; }
+.toolbar .split-switch .split-name { font-size: 12px; }
+/* Which view is shown, above it. */
+.view-label { display: inline-block; margin: 0 0 12px; padding: 3px 10px;
+  border: 1px solid var(--link); border-radius: 6px; background: var(--skip); }
+.view-label button { font: inherit; color: var(--link); background: none; border: 0;
+  padding: 0 0 0 8px; cursor: pointer; }
+.view-label button:hover { text-decoration: underline; }
+@media print { .view-label button { display: none; } }
 /* A line from each moved line to where it went, over the file's table;
    hovering either end highlights both rows and their line. Hidden in one
    column, where both ends stand in one column, and on paper. */
@@ -585,14 +595,22 @@ thead.print, .print-note { display: none; }
 
 {% endmacro %}
 
+{# Which view this is: prose compared paragraph by paragraph or sentence
+   by sentence, and, when the report holds both, a button to the other. #}
+{% macro view_label(split, other=none) -%}
+<p class="view-label"><b>{{ split | capitalize }} view</b>: the prose compared {{ split }} by {{ split }}{% if other %} <button type="button" data-split-to="{{ other }}">show the {{ other }} view</button>{% endif %}</p>
+{%- endmacro %}
 {% if alt %}
 <div class="split" data-split="paragraph" aria-label="Compared paragraph by paragraph">
+{{ view_label("paragraph", "sentence") }}
 {{ report_body(c, "paragraph") }}
 </div>
 <div class="split" data-split="sentence" aria-label="Compared sentence by sentence" hidden>
+{{ view_label("sentence", "paragraph") }}
 {{ report_body(alt, "sentence", "s-") }}
 </div>
 {% else %}
+{% if c.files and unit_of(c.files, split) != "line" %}{{ view_label(split) }}{% endif %}
 {{ report_body(c, split) }}
 {% endif %}
 
@@ -603,7 +621,7 @@ thead.print, .print-note { display: none; }
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
   <span class="counter" aria-live="polite" title="{{ c.change_count | counted("change") }}">{{ c.change_count | comma }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
-  {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg></button>{% endif %}
+  {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
   <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
   {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="true" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
@@ -645,6 +663,7 @@ thead.print, .print-note { display: none; }
       d.hidden = (d.dataset.split === "sentence") !== sentences;
     });
     splitSwitch.setAttribute("aria-pressed", sentences ? "true" : "false");
+    splitSwitch.querySelector(".split-name").textContent = sentences ? "Sentences" : "Paragraphs";
     splitSwitch.setAttribute("aria-label", sentences
       ? "Compared sentence by sentence" : "Compared paragraph by paragraph");
     splitSwitch.dataset.help = sentences
@@ -788,6 +807,8 @@ thead.print, .print-note { display: none; }
       document.querySelectorAll("details.file").forEach(function (d) { d.open = open; });
       return;
     }
+    var splitTo = e.target.closest("[data-split-to]");
+    if (splitTo) { setSplit(splitTo.dataset.splitTo === "sentence", true); return; }
     if (e.target.closest("[data-split-switch]")) {
       setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true);
       return;
@@ -938,6 +959,27 @@ thead.print, .print-note { display: none; }
     var marker = Array.prototype.find.call(cell.querySelectorAll(".comment"), function (m) {
       return m.dataset.text === link.dataset.comment && shows(m, cell);
     });
+    flashAnchor(row, side, cell, marker);
+  }
+  // A comment's marker, clicked in the text (or Enter or Space on it),
+  // flashes its words the same way.
+  function flashMarker(marker) {
+    var cell = marker.closest("td.code");
+    if (!cell) return;
+    flashAnchor(cell.closest("tr"), cell.classList.contains("left") ? "left" : "right", cell, marker);
+  }
+  document.addEventListener("click", function (e) {
+    var marker = e.target.closest("td.code .comment");
+    if (marker) flashMarker(marker);
+  });
+  document.addEventListener("keydown", function (e) {
+    var marker = (e.key === "Enter" || e.key === " ") && e.target.closest &&
+      e.target.closest("td.code .comment");
+    if (!marker) return;
+    e.preventDefault();
+    flashMarker(marker);
+  });
+  function flashAnchor(row, side, cell, marker) {
     var ranges = marker && window.CSS && CSS.highlights && typeof Highlight === "function"
       ? anchorRanges(row, side, marker) : null;
     var highlight = ranges && ranges.length ? new Highlight() : null;
