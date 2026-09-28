@@ -6,7 +6,8 @@ The page is photographed by Playwright's Chromium (uv run playwright
 install chromium, once); the window by Pillow, which needs a desktop: the window
 shows on screen for a moment. The demo text and its authors are made up.
 With --assess (e.g. claude), the AI named really assesses the demo's changes,
-and the report's AI assessment is photographed too (screenshot_assessment.png);
+and the report's AI assessment is photographed too (screenshot_assessment.png),
+with the problems it marked in the text (screenshot_marks.png);
 without it, that screenshot is left as it is.
 """
 
@@ -117,8 +118,10 @@ def shoot_page(repo: Path, out: Path) -> None:
         browser.close()
 
 
-def shoot_assessment(repo: Path, out: Path, ai: str) -> None:
-    """The report's AI assessment, made now by the AI named."""
+def shoot_assessment(repo: Path, out: Path, marks: Path, ai: str) -> bool:
+    """The report's AI assessment, made now by the AI named; then, when it
+    marked problems in the text, the AI marks panel and the first problem
+    pinned in the text, its tooltip open (marks). Whether marks was made."""
     c = compare(repo, "HEAD~1", "HEAD")
     c.location = SHOWN_PATH
     assessment = assess_comparison(c, AssessRequest(ai))
@@ -135,7 +138,23 @@ def shoot_assessment(repo: Path, out: Path, ai: str) -> None:
             path=str(out),
             clip={"x": 0, "y": 0, "width": 1280, "height": box["y"] + box["height"] + 16},
         )
+        if not page.locator(".ai-mark").count():
+            print("the AI marked no problem in the text: no screenshot of the marks")
+            browser.close()
+            return False
+        # the page taller than its contents, so what is shot stays in view
+        page.set_viewport_size({"width": 1280, "height": 2400})
+        page.locator("details.assessment").evaluate("d => d.open = false")
+        page.locator(".ai-mark").first.click()
+        panel = page.locator("details.ai-notes").bounding_box()
+        tip = page.locator("#tip").bounding_box()
+        bottom = max(tip["y"] + tip["height"], page.locator(".ai-mark").first.bounding_box()["y"])
+        page.screenshot(
+            path=str(marks),
+            clip={"x": 0, "y": panel["y"] - 8, "width": 1280, "height": bottom - panel["y"] + 40},
+        )
         browser.close()
+    return True
 
 
 def shoot_window(repo: Path, out: Path) -> None:
@@ -176,6 +195,9 @@ if __name__ == "__main__":
         shoot_page(repo, written[0])
         shoot_window(repo, written[1])
         if args.assess:
-            written.append(DOCS / "screenshot_assessment.png")
-            shoot_assessment(repo, written[2], args.assess)
+            shots = DOCS / "screenshot_assessment.png", DOCS / "screenshot_marks.png"
+            if shoot_assessment(repo, *shots, args.assess):
+                written += shots
+            else:
+                written.append(shots[0])
     print("written:", *written)

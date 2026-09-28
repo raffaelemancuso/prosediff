@@ -185,12 +185,21 @@ def write_output(
     if assessment is not None:
         with open(assessment_path(path), "w", encoding="utf-8", newline="\n") as f:
             f.write(assessment.as_markdown(comparison.repo_name))
+        if assessment.save_prompt and assessment.prompt:
+            with open(prompt_path(path), "w", encoding="utf-8", newline="\n") as f:
+                f.write(assessment.prompt_text())
 
 
 def assessment_path(output: Path) -> Path:
     """Where the assessment of an output goes: report_assessment.md beside
     report.html."""
     return output.with_name(f"{output.stem}_assessment.md")
+
+
+def prompt_path(output: Path) -> Path:
+    """Where the text sent to the model goes, when asked:
+    report_assessment_prompt.txt beside report.html."""
+    return output.with_name(f"{output.stem}_assessment_prompt.txt")
 
 
 def assess_comparison(comparison: Comparison, request: AssessRequest) -> Assessment:

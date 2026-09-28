@@ -22,11 +22,12 @@ models get no tools and no files: only the text.
 """
 
 import asyncio
+import json
 import re
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import cache
 from pathlib import Path
 
@@ -88,6 +89,73 @@ Write "None found." if there are none.
 Be specific and brief. Write in the language the document is written in, \
 unless the instructions of the person asking say otherwise."""
 
+# Added to SYSTEM when the problems are to be marked in the text (annotate).
+ANNOTATE = """
+
+Then, after the sections, mark in the text each passage the changes made \
+or touched that has a problem, in one fenced code block of language json \
+holding a list; each item an object with these keys:
+- "side": "new" for a passage of the new version, "old" for text only the \
+old version has (a removal);
+- "start": the first 3 to 8 words of the passage, copied exactly from that \
+version, punctuation included;
+- "end": its last 3 to 8 words, copied exactly (the same as "start" for a \
+short passage);
+- "problem": what is wrong with it, in a sentence;
+- "solution": the change you propose, in a sentence or as the text to put.
+Copy the words from the text itself, never with the diff's markers ([- -], \
+{+ +}, {>> <<}). Write [] when nothing is to be marked."""
+
+
+@dataclass(frozen=True)
+class Annotation:
+    """A problem the model marked in the text: on which side, from which
+    words to which, what is wrong and what to do."""
+
+    side: str  # "new" or "old"
+    start: str
+    end: str
+    problem: str
+    solution: str = ""
+
+
+# The fenced JSON block at the end of an answer, with the marked passages.
+JSON_BLOCK = re.compile(r"```(?:json)?\s*(\[.*?\])\s*```", re.S | re.I)
+
+
+def split_annotations(answer: str) -> tuple[str, list[Annotation]]:
+    """An answer's Markdown without its fenced JSON list of marked passages,
+    and those passages; the answer as it is, and none, when it has no list
+    that reads as one (an item without its words or problem is left out)."""
+    found = list(JSON_BLOCK.finditer(answer))
+    if not found:
+        return answer, []
+    block = found[-1]
+    try:
+        items = json.loads(block[1])
+    except ValueError:
+        return answer, []
+    notes = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        get = {k: str(item.get(k) or "").strip() for k in ("side", "start", "end", "problem")}
+        if not get["start"] or not get["problem"]:
+            continue
+        notes.append(
+            Annotation(
+                "old" if get["side"].lower() == "old" else "new",
+                get["start"],
+                get["end"] or get["start"],
+                get["problem"],
+                str(item.get("solution") or "").strip(),
+            )
+        )
+    text = answer[: block.start()] + answer[block.end() :]
+    # a heading left with nothing under it, for the list alone
+    text = re.sub(r"\n#+[^\n]*\s*$", "", text.rstrip())
+    return text.strip(), notes
+
 
 class AssessError(RuntimeError):
     """The assessment could not be made: a backend missing, a login, a
@@ -99,14 +167,18 @@ class AssessRequest:
     """What to ask an AI: which (spec: "claude", "claude/opus",
     "ollama/qwen3"), how hard to think (effort: one the model supports, ""
     for its default), what it reads (context: one of CONTEXTS), the
-    instructions of the person asking (added to the prompt), and how long
-    it may take."""
+    instructions of the person asking (added to the prompt), how long it
+    may take, whether the text sent is saved beside the output
+    (save_prompt: Assessment.prompt_text), and whether the model marks the
+    problems in the text (annotate: Assessment.annotations)."""
 
     spec: str
     effort: str = ""
     context: str = "document"
     instructions: str = ""
     timeout: float = ASSESS_TIMEOUT
+    save_prompt: bool = False
+    annotate: bool = True
 
 
 @dataclass
@@ -120,6 +192,18 @@ class Assessment:
     error: str = ""  # why there is none
     effort: str = ""
     context: str = ""
+    # the text sent to the model, as sent: its system prompt and its message
+    # ("" when it was never sent), and whether it is saved beside the output
+    system: str = ""
+    prompt: str = ""
+    save_prompt: bool = False
+    # the problems the model marked in the text, when asked (annotate)
+    annotations: list[Annotation] = field(default_factory=list)
+
+    @property
+    def notes_json(self) -> list[dict]:
+        """The marked problems, for the report's script to find in the text."""
+        return [asdict(a) for a in self.annotations]
 
     @property
     def verdict(self) -> str:
@@ -164,7 +248,26 @@ class Assessment:
         if self.seconds:
             head += f", in {self.seconds:,.0f} s"
         body = f"Failed: {self.error}" if self.error else self.markdown.strip()
+        if self.annotations:
+            marked = []
+            for n, a in enumerate(self.annotations, 1):
+                where = "the new version" if a.side == "new" else "the old version"
+                quote = f'"{a.start}"' if a.end == a.start else f'"{a.start}" … "{a.end}"'
+                item = f"{n}. {quote} ({where}): {a.problem}"
+                marked.append(f"{item}\n   Proposed: {a.solution}" if a.solution else item)
+            body += "\n\n## Marked in the text\n\n" + "\n".join(marked)
         return f"{head}.\n\n{body}\n"
+
+    def prompt_text(self) -> str:
+        """The text sent to the model, exactly: which AI and how it was asked,
+        then its system prompt and its message, each between two marker
+        lines."""
+        asked = ", ".join(filter(None, (self.backend, self.how)))
+        return (
+            f"The text prosediff sent to the model ({asked}).\n\n"
+            f"===== system prompt =====\n{self.system}\n===== end of system prompt =====\n\n"
+            f"===== message =====\n{self.prompt}\n===== end of message =====\n"
+        )
 
 
 @dataclass(frozen=True)
@@ -390,18 +493,24 @@ def assess(
     context = request.context if request.context in CONTEXTS else "document"
     if context == "changes":
         document = ""
-    made = Assessment(request.spec, effort=request.effort, context=context)
+    made = Assessment(
+        request.spec, effort=request.effort, context=context, save_prompt=request.save_prompt
+    )
     try:
         backend, model = parse_backend(request.spec)
         if not diff.strip():
             raise AssessError("there are no changes to assess")
         prompt = prompt_for(diff, subject, document, instructions_from(request.instructions))
-        text, answered = runner(backend, SYSTEM, prompt, model, request.effort, request.timeout)
+        system = SYSTEM + ANNOTATE if request.annotate else SYSTEM
+        made.system, made.prompt = system, prompt  # kept even if the model then fails
+        text, answered = runner(backend, system, prompt, model, request.effort, request.timeout)
         if not text.strip():
             raise AssessError("the model gave no answer")
     except (AssessError, OSError) as e:
         made.error, made.seconds = str(e), time.monotonic() - started
         return made
+    if request.annotate:
+        text, made.annotations = split_annotations(text)
     made.markdown, made.model = text.strip(), answered
     made.seconds = time.monotonic() - started
     return made

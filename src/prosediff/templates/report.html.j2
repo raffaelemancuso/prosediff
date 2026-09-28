@@ -73,15 +73,14 @@ h2 { font-size: 15px; margin: 0 0 6px; }
 .comments-panel .status-unchanged { color: var(--muted); }
 .comments-panel a { color: inherit; text-decoration: none; }
 .comments-panel a:hover { text-decoration: underline; }
-/* Following a comment's link flashes the text the comment is anchored to
-   (a highlight of the script's ranges), or its paragraph when where that
-   text ends is not known, and rings its marker. The script switches them on
-   and off: no animation, which a system asking for reduced motion would
-   stop. */
-::highlight(comment-flash) { background-color: var(--flash); }
-td.code.flash { background-color: var(--flash) !important; }
-td.code .comment { cursor: pointer; }
-.comment.flash { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
+/* A mark clicked (a comment's marker, a problem's badge, or either's entry
+   in its list) pinned: its text highlighted (a highlight of the script's
+   ranges), or its paragraph when where that text ends is not known, and
+   the mark ringed, until clicked again. */
+::highlight(pin) { background-color: var(--flash); }
+td.code.pinned { background-color: var(--flash) !important; }
+.comment.pinned, .ai-mark.pinned { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
+td.code .comment, td.code .ai-mark { cursor: pointer; }
 .comments-switch .dir { margin-left: 2px; }
 /* The panel folds from its header, as the files and the AI assessment do;
    its buttons there do not fold it. */
@@ -122,6 +121,28 @@ td.code .comment { cursor: pointer; }
 .assess-body li { margin: 2px 0; }
 .assess-body code { font-size: 0.9em; background: var(--panel); padding: 0 3px; border-radius: 3px; }
 .assess-note { font-size: 12px; margin: 10px 0 2px; }
+/* The problems the AI marked: listed in its box, each a button to the
+   passage; in the text, a numbered
+   badge, which tells the problem and the solution on hover. */
+.ai-pointer { margin: 10px 0 2px; }
+.ai-notes ol { list-style: none; margin: 4px 0 8px; padding: 0; }
+.ai-notes li { display: grid; grid-template-columns: 3.2em 1fr; gap: 8px; padding: 4px 0; }
+.ai-notes li + li { border-top: 1px dashed var(--border); }
+.ai-notes .ai-num { color: var(--current); font-weight: 600; }
+.ai-notes .ai-show { font-style: italic; text-align: left; padding-left: 0; }
+.ai-notes li.missing .ai-show { color: var(--muted); cursor: default; }
+.ai-solution b { font-weight: 600; }
+/* The "AI marks expanded" view: each problem written out after its badge,
+   every passage highlighted. */
+.ai-inline { display: none; }
+body.aiexpand .ai-inline { display: inline; margin-right: 4px; padding: 0 4px;
+  font: italic 0.85em/1.4 -apple-system, "Segoe UI", sans-serif; color: var(--fg);
+  background: var(--fmt-bg); border: 1px solid var(--current); border-radius: 3px; }
+::highlight(ai-all) { background-color: var(--flash); }
+.ai-mark { display: inline-block; font: 600 11px/1.4 -apple-system, "Segoe UI", sans-serif;
+  color: var(--bg); background: var(--current); border-radius: 8px; padding: 0 5px;
+  margin-right: 3px; cursor: help; vertical-align: 1px; }
+@media print { .ai-notes .ai-show { color: inherit; } }
 .assess-error { color: var(--rem); margin: 6px 0 2px; }
 .summary { color: var(--muted); margin-bottom: 12px; }
 .summary p { margin: 0 0 4px; display: flex; flex-wrap: wrap; align-items: baseline;
@@ -223,6 +244,13 @@ body.passages tr.only-moved.insert td.right, body.passages tr.only-moved.insert 
 body.passages tr.only-moved.delete td.no.l, body.passages tr.only-moved.insert td.no.r {
   color: var(--move); font-weight: 600; }
 body.passages tr.only-moved .sign { color: var(--move); }
+/* The "Change highlights" view off: no background on the text, neither on
+   changed words and letters, nor on lines removed, added or moved, nor on
+   moved passages; the gutters keep their tint and signs, which say where
+   the changes are. */
+body:not(.highlights) td.code { --tint: transparent !important; }
+body:not(.highlights) :is(del, ins, del.partial, ins.partial, del.partial mark,
+  ins.partial mark, .moved) { background: none; }
 /* The "Moved passages" switch: off, a row shows its plain word diff, each
    passage removed and added in place, and the counts follow. */
 body:not(.passages) .pv-on, body.passages .pv-off { display: none; }
@@ -253,8 +281,12 @@ tr.pair-hot td { outline: 1px solid var(--move); outline-offset: -1px; }
 td[data-move] { cursor: help; }
 .comment { font-size: 0.85em; background: var(--panel); border-radius: 3px;
   padding: 0 2px; }
-/* A new or removed comment's icon says it all: no box around it. */
+/* A new or removed comment's icon says it all: no box around it. A new
+   one is the balloon after a green +, in the text and in the panel. */
 .comment.new, .comment.removed { background: none; padding: 0; }
+.comment.new::before, .comment-icon.new::before { content: "+"; color: var(--add);
+  font: 700 1.1em/1 -apple-system, "Segoe UI", sans-serif; margin-right: 1px;
+  vertical-align: 0.1em; }
 /* The one tooltip of the HTML report, for comments (the author in bold, the
    comment below, its date in grey) and the toolbar's help. The script
    places it next to what is hovered or focused, so no file box clips it. */
@@ -348,6 +380,11 @@ footer a { color: inherit; }
   border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
   font-variant-numeric: tabular-nums; }
+/* The AI marks' own ◀ ⚠ ▶, apart from the changes'. */
+.toolbar .ai-nav { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px;
+  border-left: 1px solid var(--border); }
+.toolbar .ai-counter { color: var(--current); font-weight: 600; min-width: 4em;
+  text-align: center; font-variant-numeric: tabular-nums; }
 .toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 /* The spacing stepper: − and + either side of the value, in one bordered
    row, drawn in the link colour like the icons. */
@@ -362,13 +399,16 @@ footer a { color: inherit; }
 .stepper .gap-value { min-width: 2.6em; text-align: center; padding: 3px 4px;
   font-size: 12px; font-variant-numeric: tabular-nums;
   border-inline: 1px solid var(--border); }
-/* Comments inline: each written out after its marker, its author and text,
-   as on paper. */
-body.inline .comment::after { content: " " attr(data-author) ": " attr(data-text);
+/* The "Comments expanded" view: each comment written out after its
+   marker, its author and text, as on paper, and the words it is anchored
+   to highlighted (a highlight of the script's). */
+body.cexpand .comment::after { content: " " attr(data-author) ": " attr(data-text);
   font-family: -apple-system, "Segoe UI", sans-serif; font-style: italic;
   color: var(--muted); }
-body.inline .comment, body.inline .comment.new, body.inline .comment.removed { background: var(--panel);
-  border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
+body.cexpand .comment, body.cexpand .comment.new, body.cexpand .comment.removed {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 3px;
+  padding: 0 3px; }
+::highlight(comments-all) { background-color: var(--flash); }
 /* No help cursor where the tooltip is switched off. */
 body.no-comments-tips .comment { cursor: auto; }
 /* Single column: each row shows the old line above the new one; unchanged
@@ -455,7 +495,7 @@ thead.print, .print-note { display: none; }
 {% macro comment_list(items) %}
   <ul>
   {% for e in items %}
-    <li data-place="{{ loop.index }}" data-date="{{ e.date }}" data-status="{{ e.status }}"><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}" data-comment="{{ e.text }}" data-side="{{ "left" if e.status == "removed" else "right" }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
+    <li data-place="{{ loop.index }}" data-date="{{ e.date }}" data-status="{{ e.status }}"><span class="status-{{ e.status }}"><span class="comment-icon {{ e.status }}" aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}" data-comment="{{ e.text }}" data-side="{{ "left" if e.status == "removed" else "right" }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
   {% endfor %}
   </ul>
 {% endmacro %}
@@ -587,6 +627,23 @@ thead.print, .print-note { display: none; }
   {{ comment_list(c.comments_in_reading_order(("new", "removed"))) }}
 </details>
 {% endif %}
+{% if assessment and assessment.annotations and not assessment.error %}
+<details class="comments-panel ai-notes" open>
+  <summary class="comments-head">
+    <h2>AI marks: {{ assessment.annotations | length | counted("problem") }}</h2>
+    <span class="role">each ⚠ in the text; click one, here or there, to pin it</span>
+  </summary>
+  <ol>
+  {% for a in assessment.annotations %}
+    <li data-note="{{ loop.index0 }}"><span class="ai-num" aria-hidden="true">⚠ {{ loop.index }}</span>
+      <span><button type="button" class="btn ai-show" data-note="{{ loop.index0 }}" title="Show it in the text">“{{ a.start }}”{% if a.end != a.start %} … “{{ a.end }}”{% endif %}</button>
+      <span class="role">({{ "new version" if a.side == "new" else "old version" }})</span>
+      <span class="role ai-missing" hidden>not found in the text</span><br>
+      <span class="ai-problem">{{ a.problem }}</span>{% if a.solution %} <span class="ai-solution"><b>Proposed:</b> {{ a.solution }}</span>{% endif %}</span></li>
+  {% endfor %}
+  </ol>
+</details>
+{% endif %}
 
 
 
@@ -673,6 +730,10 @@ thead.print, .print-note { display: none; }
   <p class="assess-error">The assessment failed: {{ assessment.error }}</p>
   {% else %}
   <div class="assess-body">{{ assessment.html }}</div>
+  {% if assessment.annotations %}
+  <p class="ai-pointer">It marked {{ assessment.annotations | length | counted("problem") }} in the text: under <b>AI marks</b>, below, and ⚠ in the text.</p>
+  <script type="application/json" id="ai-notes-data">{{ assessment.notes_json | tojson }}</script>
+  {% endif %}
   <p class="role assess-note">Written by an AI: check it against the text.</p>
   {% endif %}
 </details>
@@ -696,16 +757,22 @@ thead.print, .print-note { display: none; }
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
   <span class="counter" aria-live="polite" title="{{ c.change_count | counted("change") }}">{{ c.change_count | comma }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
+  {% if assessment and assessment.annotations and not assessment.error %}<span class="ai-nav" role="group" aria-label="AI marks">
+    <button type="button" data-ai-nav="-1" title="Previous AI mark (Shift+A)" aria-label="Previous AI mark">◀</button>
+    <span class="ai-counter" aria-live="polite" title="AI marks: the problems the AI marked in the text">⚠ {{ assessment.annotations | length | comma }}</span>
+    <button type="button" data-ai-nav="1" title="Next AI mark (a)" aria-label="Next AI mark">▶</button></span>{% endif %}
   {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
-  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
-  {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="true" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
+  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="false" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
+  {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="false" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
   <span class="menu">
     <button type="button" class="menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="view-menu">View<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
     <div class="menu-panel" id="view-menu" role="group" aria-label="More views" hidden>
       <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg><span class="label">Formatted</span><kbd aria-hidden="true">f</kbd></button>
+      <button type="button" class="icon" data-toggle="highlights" aria-pressed="true" aria-label="Change highlights" title="Change highlights: the background colour of changed words and lines; off, the text plain, the gutters still marking the changes (h)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="5" width="13" height="6" rx="1" class="fill soft"/><path d="M4 8h8"/></svg><span class="label">Change highlights</span><kbd aria-hidden="true">h</kbd></button>
       <button type="button" class="icon" data-toggle="formats" aria-pressed="false" aria-label="Formatting changes" title="Formatting changes: text of a document made bold, italic, underlined, ..., its words unchanged (m)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h4.2a2.6 2.6 0 0 1 0 5.2H4zM4 7.7h4.8a2.9 2.9 0 0 1 0 5.8H4z"/><path d="M11.5 11.5l1.5 1.5 2.5-3" /></svg><span class="label">Formatting changes</span><kbd aria-hidden="true">m</kbd></button>
-      <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg><span class="label">Comments inline</span><kbd aria-hidden="true">i</kbd></button>
+      <button type="button" class="icon" data-toggle="cexpand" aria-pressed="false" aria-label="Comments expanded" title="Comments expanded: each comment written out after its marker, the words it is anchored to highlighted, all at once (c)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg><span class="label">Comments expanded</span><kbd aria-hidden="true">c</kbd></button>
+      {% if assessment and assessment.annotations and not assessment.error %}<button type="button" class="icon" data-toggle="aiexpand" aria-pressed="false" aria-label="AI marks expanded" title="AI marks expanded: each problem the AI marked written out after its badge, its passage highlighted, all at once (e)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 14.5 13.5h-13z"/><path d="M8 6v3.5M8 11.4v.1"/></svg><span class="label">AI marks expanded</span><kbd aria-hidden="true">e</kbd></button>{% endif %}
       <button type="button" class="icon" role="checkbox" aria-checked="true" data-tips="comments" aria-label="Comment tooltips" title="Comment tooltips: the author, text and date of a comment, on hovering its marker"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4.5 5.5h7M4.5 8.5h5"/></svg><span class="label">Comment tooltips</span></button>
       <span class="spacing item"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span><span class="label">Paragraph spacing</span>
     <span class="stepper">
@@ -776,11 +843,13 @@ thead.print, .print-note { display: none; }
     if (shown === counter) showTip(counter);
   }
 
-  // The views (one column, formatted, comments inline, ...)
+  // The views (one column, formatted, comments expanded, ...)
   // are classes of the body, remembered where the browser allows.
   function setView(name, on) {
     document.body.classList.toggle(name, on);
     if (name === "formats" && on) unfoldFormats();
+    if (name === "aiexpand") expandAiMarks(on);
+    if (name === "cexpand") expandComments(on);
     var b = document.querySelector('[data-toggle="' + name + '"]');
     if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
     try { localStorage.setItem("prosediff-" + name, on ? "1" : "0"); } catch (e) {}
@@ -809,8 +878,8 @@ thead.print, .print-note { display: none; }
   // Formatted text and formatting changes are on by default, the other
   // views off; a choice the
   // browser remembers wins.
-  var VIEW_DEFAULT = { unified: false, formatted: true, inline: false, formats: true,
-                       movelinks: true, passages: true };
+  var VIEW_DEFAULT = { unified: false, formatted: true, cexpand: false, formats: true,
+                       movelinks: false, passages: false, highlights: true, aiexpand: false };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
     try {
@@ -971,9 +1040,10 @@ thead.print, .print-note { display: none; }
     if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
-                 i: function () { toggle("inline"); },
+                 c: function () { toggle("cexpand"); }, e: function () { toggle("aiexpand"); },
                  m: function () { toggle("formats"); }, l: function () { toggle("movelinks"); },
-                 v: function () { toggle("passages"); },
+                 v: function () { toggle("passages"); }, h: function () { toggle("highlights"); },
+                 a: function () { goAiMark(1); }, A: function () { goAiMark(-1); },
                  s: function () { if (splitSwitch) setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true); },
                  "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
@@ -998,25 +1068,13 @@ thead.print, .print-note { display: none; }
     }
     flashing = null;
   }
-  // A comment's link, followed, flashes the text the comment is anchored
-  // to, on the side it is on (the old one for a removed comment), from its
-  // marker to the end of its text (a .comment-end of the same data-c), in
-  // one paragraph or across several; or, when where that text ends is not
-  // known, the whole paragraph; nothing when its words are gone (with a
-  // tracked change). Its marker is ringed. Twice on and off, or
-  // once and longer for a system that asks for reduced motion.
-  var flashing = null, flashRun = 0, flashOff = null;
-  var FLASH_STEPS = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches
-    ? [[0, 1600]] : [[0, 550], [750, 1700]];
-  function pulse(on, off) {
-    if (flashOff) flashOff();  // the flash before, cut short
-    flashOff = off;
-    var run = ++flashRun;
-    FLASH_STEPS.forEach(function (step) {
-      setTimeout(function () { if (run === flashRun) on(); }, step[0]);
-      setTimeout(function () { if (run === flashRun) off(); }, step[1]);
-    });
-  }
+  // A comment's link, followed, pins the text the comment is anchored to
+  // (pinComment), on the side it is on (the old one for a removed comment),
+  // from its marker to the end of its text (a .comment-end of the same
+  // data-c), in one paragraph or across several; or, when where that text
+  // ends is not known, the whole paragraph; nothing when its words are gone
+  // (with a tracked change). flashing: the link followed, for openTarget.
+  var flashing = null;
   // Whether el shows: none of its ancestors in the cell is hidden (the
   // row's other version, with or without moved passages).
   function shows(el, cell) {
@@ -1061,41 +1119,76 @@ thead.print, .print-note { display: none; }
     var marker = Array.prototype.find.call(cell.querySelectorAll(".comment"), function (m) {
       return m.dataset.text === link.dataset.comment && shows(m, cell);
     });
-    flashAnchor(row, side, cell, marker);
+    pinComment(row, side, cell, marker);
   }
   // A comment's marker, clicked in the text (or Enter or Space on it),
-  // flashes its words the same way.
+  // pins it the same way.
   function flashMarker(marker) {
     var cell = marker.closest("td.code");
     if (!cell) return;
-    flashAnchor(cell.closest("tr"), cell.classList.contains("left") ? "left" : "right", cell, marker);
+    pinComment(cell.closest("tr"), cell.classList.contains("left") ? "left" : "right", cell, marker);
   }
+  // A mark clicked (a comment's marker, a problem's badge, or either's
+  // entry in its list) is pinned: its text stays highlighted, its mark
+  // ringed and its tooltip open, until it is clicked again (or Esc);
+  // another clicked takes its place. While one is pinned, hovering
+  // elsewhere leaves its tooltip be.
+  var pinned = null;
+  var canHighlight = window.CSS && CSS.highlights && typeof Highlight === "function";
+  // ranges: the text to highlight; null when it is not known, the cell
+  // (the paragraph) highlighted instead; none: nothing but the mark.
+  function pin(mark, ranges, cell) {
+    var again = pinned && pinned.mark === mark;
+    unpin();
+    if (again) return;
+    if (ranges && ranges.length && canHighlight) {
+      var highlight = new Highlight();
+      ranges.forEach(function (r) { highlight.add(r); });
+      CSS.highlights.set("pin", highlight);
+    } else if (!ranges && cell) {
+      cell.classList.add("pinned");
+    }
+    pinned = { mark: mark, cell: cell };
+    mark.classList.add("pinned");
+    anchorX = 0;
+    showTip(mark);
+  }
+  function unpin() {
+    if (!pinned) return;
+    if (canHighlight) CSS.highlights.delete("pin");
+    if (pinned.cell) pinned.cell.classList.remove("pinned");
+    pinned.mark.classList.remove("pinned");
+    pinned = null;
+    hideTip();
+  }
+  function pinComment(row, side, cell, marker) {
+    if (!marker) return;
+    pin(marker, canHighlight ? anchorRanges(row, side, marker) : null, cell);
+  }
+  // A problem the AI marked: its badge's passage.
+  function pinNote(mark) {
+    var note = aiNotes[Number(mark.dataset.note)];
+    var range = note && note.ranges[note.marks.indexOf(mark)];
+    pin(mark, range ? [range] : [], null);
+  }
+  function pinMark(mark) {
+    if (mark.classList.contains("ai-mark")) pinNote(mark);
+    else flashMarker(mark);
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") unpin();
+  });
   document.addEventListener("click", function (e) {
-    var marker = e.target.closest("td.code .comment");
-    if (marker) flashMarker(marker);
+    var mark = e.target.closest("td.code .comment, td.code .ai-mark");
+    if (mark) pinMark(mark);
   });
   document.addEventListener("keydown", function (e) {
-    var marker = (e.key === "Enter" || e.key === " ") && e.target.closest &&
-      e.target.closest("td.code .comment");
-    if (!marker) return;
+    var mark = (e.key === "Enter" || e.key === " ") && e.target.closest &&
+      e.target.closest("td.code .comment, td.code .ai-mark");
+    if (!mark) return;
     e.preventDefault();
-    flashMarker(marker);
+    pinMark(mark);
   });
-  function flashAnchor(row, side, cell, marker) {
-    var ranges = marker && window.CSS && CSS.highlights && typeof Highlight === "function"
-      ? anchorRanges(row, side, marker) : null;
-    var highlight = ranges && ranges.length ? new Highlight() : null;
-    if (highlight) ranges.forEach(function (r) { highlight.add(r); });
-    pulse(function () {
-      if (highlight) CSS.highlights.set("comment-flash", highlight);
-      else if (!ranges) cell.classList.add("flash");
-      if (marker) marker.classList.add("flash");
-    }, function () {
-      if (window.CSS && CSS.highlights) CSS.highlights.delete("comment-flash");
-      cell.classList.remove("flash");
-      if (marker) marker.classList.remove("flash");
-    });
-  }
   document.addEventListener("click", function (e) {
     var link = e.target.closest(".comments-panel a[data-comment]");
     if (!link) return;
@@ -1105,6 +1198,218 @@ thead.print, .print-note { display: none; }
   });
   window.addEventListener("hashchange", openTarget);
   openTarget();
+
+  // The problems the AI marked (ai-notes-data): each passage looked for in
+  // the text of its side, from its start words to its end words, in each
+  // view; a numbered badge before it, telling the problem and the
+  // solution on hover. The words match whatever the hyphenation, the
+  // spacing, straight or curly quotes, and the comment markers among them.
+  // aiOrder: the notes' indices in reading order; each note's num, its
+  // number in that order
+  var aiNotes = [], aiOrder = [];
+  (function () {
+    var data = document.getElementById("ai-notes-data");
+    if (!data) return;
+    try { aiNotes = JSON.parse(data.textContent); } catch (e) { return; }
+    var QUOTES = { "‘": "'", "’": "'", "“": '"', "”": '"' };
+    var SKIP = ".sr, .print-note, .comment, .comment-end, .pv-off, .sign, .ai-mark";
+    // Text as it is matched, each character with the text node and offset
+    // it comes from (none for a space put between two cells).
+    function Hay() { this.text = ""; this.at = []; }
+    Hay.prototype.put = function (c, where) {
+      if (c.charCodeAt(0) === 173) return;  // a soft hyphen, the hyphenation's
+      c = QUOTES[c] || c;
+      if (/\s/.test(c)) {
+        if (!this.text || this.text[this.text.length - 1] === " ") return;
+        c = " ";
+      }
+      this.text += c;
+      this.at.push(where);
+    };
+    function norm(s) {
+      var h = new Hay();
+      for (var i = 0; i < s.length; i++) h.put(s[i], null);
+      return h.text.trim();
+    }
+    function sideText(root, side) {
+      var hay = new Hay();
+      root.querySelectorAll("td.code." + side).forEach(function (cell) {
+        var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+        for (var node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (node.parentElement.closest(SKIP)) continue;
+          for (var i = 0; i < node.data.length; i++) hay.put(node.data[i], [node, i]);
+        }
+        hay.put(" ", null);
+      });
+      return hay;
+    }
+    // The range from the start words to the end words (within a few pages
+    // of them; else the start words alone), matched as written, else
+    // whatever the case; null when the start words are nowhere.
+    function rangeOf(hay, note) {
+      var start = norm(note.start), end = norm(note.end || note.start);
+      if (!start) return null;
+      var text = hay.text, i = text.indexOf(start);
+      if (i < 0) {
+        hay.lower = hay.lower || text.toLowerCase();
+        text = hay.lower;
+        start = start.toLowerCase();
+        end = end.toLowerCase();
+        i = text.indexOf(start);
+        if (i < 0) return null;
+      }
+      var j = text.indexOf(end, i);
+      if (j < 0 || j - i > 20000) { j = i; end = start; }
+      var a = hay.at[i], b = hay.at[j + end.length - 1];
+      if (!a || !b) return null;
+      var range = document.createRange();
+      range.setStart(a[0], a[1]);
+      range.setEnd(b[0], b[1] + 1);
+      return range;
+    }
+    var roots = document.querySelectorAll(".split");
+    if (!roots.length) roots = [document];
+    // every range first, then the badges, which split the text nodes the
+    // ranges were found in (a range follows; a found position would not)
+    Array.prototype.forEach.call(roots, function (root) {
+      var sides = { new: sideText(root, "right"), old: sideText(root, "left") };
+      aiNotes.forEach(function (note) {
+        var range = rangeOf(sides[note.side === "old" ? "old" : "new"], note);
+        if (range) (note.ranges = note.ranges || []).push(range);
+      });
+    });
+    // Numbered in reading order: by where each passage starts in the text,
+    // row by row, the old side of a row before its new; those found
+    // nowhere last, as the AI listed them. The panel follows.
+    aiOrder = aiNotes.map(function (note, k) { return k; });
+    aiOrder.sort(function (a, b) {
+      var ra = aiNotes[a].ranges, rb = aiNotes[b].ranges;
+      if (!ra || !rb) return (ra ? 0 : 1) - (rb ? 0 : 1) || a - b;
+      return ra[0].compareBoundaryPoints(Range.START_TO_START, rb[0]) || a - b;
+    });
+    aiOrder.forEach(function (k, at) { aiNotes[k].num = at + 1; });
+    document.querySelectorAll(".ai-notes ol").forEach(function (list) {
+      aiOrder.forEach(function (k) {
+        var item = list.querySelector('li[data-note="' + k + '"]');
+        if (!item) return;
+        item.querySelector(".ai-num").textContent = "⚠ " + aiNotes[k].num;
+        list.appendChild(item);
+      });
+    });
+    // the passages are highlighted only when pinned (pinNote): the badges
+    // alone say where they are
+    aiNotes.forEach(function (note, k) {
+      note.marks = (note.ranges || []).map(function (range) {
+        var mark = document.createElement("span");
+        mark.className = "ai-mark";
+        mark.tabIndex = 0;
+        mark.dataset.note = k;
+        mark.setAttribute("role", "note");
+        mark.setAttribute("aria-label", "Problem " + note.num + ": " + note.problem +
+          (note.solution ? " Proposed: " + note.solution : ""));
+        mark.textContent = "⚠ " + note.num;
+        range.insertNode(mark);
+        // what it says, written out after it when the marks are expanded
+        var inline = document.createElement("span");
+        inline.className = "ai-inline";
+        inline.setAttribute("aria-hidden", "true");
+        inline.textContent = note.problem + (note.solution ? " Proposed: " + note.solution : "");
+        mark.after(inline);
+        range.setStartAfter(inline);
+        return mark;
+      });
+      if (!note.marks.length) {
+        document.querySelectorAll('.ai-notes li[data-note="' + k + '"]').forEach(function (item) {
+          item.classList.add("missing");
+          item.querySelector(".ai-missing").hidden = false;
+        });
+      }
+    });
+    expandAiMarks(document.body.classList.contains("aiexpand"));  // as remembered
+  })();
+  // The "AI marks expanded" view (e): every problem written out after its
+  // badge (the class of the body) and every passage highlighted at once;
+  // collapsed, the badges alone, a passage highlighted only when pinned.
+  function expandAiMarks(on) {
+    if (!window.CSS || !CSS.highlights || typeof Highlight !== "function") return;
+    var ranges = [];
+    aiNotes.forEach(function (note) { ranges = ranges.concat(note.ranges || []); });
+    if (on && ranges.length) {
+      var all = new Highlight();
+      ranges.forEach(function (r) { all.add(r); });
+      CSS.highlights.set("ai-all", all);
+    } else {
+      CSS.highlights.delete("ai-all");
+    }
+  }
+  // The "Comments expanded" view (c): every comment written out after its
+  // marker (the class of the body) and the words each is anchored to
+  // highlighted at once, those of the markers shown; collapsed, a comment's
+  // words highlighted only when pinned.
+  function expandComments(on) {
+    if (!canHighlight) return;
+    CSS.highlights.delete("comments-all");
+    if (!on) return;
+    var all = new Highlight();
+    document.querySelectorAll("td.code .comment").forEach(function (marker) {
+      var cell = marker.closest("td.code");
+      if (!shows(marker, cell)) return;
+      var side = cell.classList.contains("left") ? "left" : "right";
+      (anchorRanges(cell.closest("tr"), side, marker) || []).forEach(function (r) { all.add(r); });
+    });
+    if (all.size) CSS.highlights.set("comments-all", all);
+  }
+  expandComments(document.body.classList.contains("cexpand"));  // as remembered
+  // A problem's badge in the view shown; null when its words were not
+  // found there.
+  function shownMark(note) {
+    return note && note.marks ? note.marks.find(function (m) {
+      return !m.closest(".split[hidden]");
+    }) || null : null;
+  }
+  // A badge brought into view, its unchanged lines unfolded if need be.
+  function reveal(mark) {
+    var body = mark.closest("tbody[hidden]");
+    if (body && body.previousElementSibling && body.previousElementSibling.classList.contains("fold")) {
+      unfold(body.previousElementSibling);
+    }
+    var file = mark.closest("details.file");
+    if (file) file.open = true;
+    mark.scrollIntoView({ block: "center" });
+  }
+  // A problem of the list, clicked: its passage in the view shown, brought
+  // into view and pinned, as its badge clicked would be; clicked again,
+  // unpinned.
+  document.addEventListener("click", function (e) {
+    var button = e.target.closest(".ai-show");
+    if (!button) return;
+    var mark = shownMark(aiNotes[Number(button.dataset.note)]);
+    if (!mark) return;
+    if (!(pinned && pinned.mark === mark)) reveal(mark);
+    pinNote(mark);
+  });
+  // The toolbar's AI marks: the next or the previous problem found in the
+  // view shown (a, Shift+A, or its arrows), brought into view and pinned;
+  // its counter says which.
+  var aiCurrent = -1;
+  var aiCounter = document.querySelector(".ai-counter");
+  function goAiMark(step) {
+    var found = aiOrder.filter(function (k) { return shownMark(aiNotes[k]); });
+    if (!found.length) return;
+    var at = found.indexOf(aiCurrent);
+    at = at < 0 ? (step > 0 ? 0 : found.length - 1) : (at + step + found.length) % found.length;
+    aiCurrent = found[at];
+    var mark = shownMark(aiNotes[aiCurrent]);
+    reveal(mark);
+    if (!(pinned && pinned.mark === mark)) pinNote(mark);
+    if (aiCounter) {
+      aiCounter.textContent = "⚠ " + aiNotes[aiCurrent].num + " / " + aiNotes.length;
+    }
+  }
+  document.addEventListener("click", function (e) {
+    var nav = e.target.closest("[data-ai-nav]");
+    if (nav) goAiMark(Number(nav.dataset.aiNav));
+  });
 
   // The tooltips: a comment's author, text and date on hovering its
   // marker, who made a tracked change and when (formatted view), where a
@@ -1131,6 +1436,11 @@ thead.print, .print-note { display: none; }
       add("b", el.dataset.author || "Comment");
       add("line", el.dataset.text);
       if (el.dataset.date) add("when", el.dataset.date);
+    } else if (el.classList.contains("ai-mark")) {
+      var note = aiNotes[Number(el.dataset.note)];
+      add("b", "Problem " + note.num + ", marked by the AI");
+      add("line", note.problem);
+      if (note.solution) add("line", "Proposed: " + note.solution);
     } else if (el.classList.contains("fmt")) {
       add("b", "Formatting changed");
       add("line", el.dataset.fmt);
@@ -1200,9 +1510,10 @@ thead.print, .print-note { display: none; }
       (commentTips && el.closest(".comment")) ||
       (document.body.classList.contains("formats") && el.closest(".fmt")) ||
       (document.body.classList.contains("formatted") && el.closest(".s-tc-ins, .s-tc-del")) ||
-      el.closest(".moved[data-move]");
+      el.closest(".moved[data-move]") || el.closest(".ai-mark");
   }
   document.addEventListener("mouseover", function (e) {
+    if (pinned) return;  // a pinned comment keeps its tooltip
     var el = tipTarget(e.target);
     if (el === shown) return;
     if (!el) { hideTip(); return; }
@@ -1210,10 +1521,11 @@ thead.print, .print-note { display: none; }
     showTip(el);
   });
   document.addEventListener("focusin", function (e) {
+    if (pinned) return;
     var el = tipTarget(e.target);
     if (el) { anchorX = 0; showTip(el); }
   });
-  document.addEventListener("focusout", hideTip);
+  document.addEventListener("focusout", function () { if (!pinned) hideTip(); });
   // Scrolling keeps the tooltip where it belongs.
   window.addEventListener("scroll", function () { anchorX = 0; placeTip(); }, { passive: true });
 

@@ -12,26 +12,14 @@ EDITED = "This long sentence travels to the end of the file, almost as it was."
 MOVED = "This sentence travels to the end of the file."
 
 
-def test_moved_line_is_marked_both_ends():
-    old = [MOVED, "a", "b", "c"]
-    new = ["a", "b", "c", MOVED]
-    rows, add, rem = align(old, new, context=None)
-    kinds = {r.kind for r in rows}
-    assert "moved-out" in kinds and "moved-in" in kinds
-    out = next(r for r in rows if r.kind == "moved-out")
-    into = next(r for r in rows if r.kind == "moved-in")
-    assert out.changes == ["moved to line 4"]
-    assert into.changes == ["moved from line 1"]
-    assert (add, rem) == (0, 0)  # a move is neither
-
-
-def test_move_ignores_spacing():
-    rows, _, _ = align([MOVED, "a"], ["a", "  " + MOVED.replace(" ", "  ")], context=None)
+def test_moved_line_is_marked_both_ends_spacing_aside():
+    rows, add, rem = align([MOVED, "a"], ["a", "  " + MOVED.replace(" ", "  ")], context=None)
     assert [(r.kind, r.changes) for r in rows] == [
         ("moved-out", ["moved to line 2"]),
         ("equal", []),
         ("moved-in", ["moved from line 1"]),
     ]
+    assert (add, rem) == (0, 0)  # a move is neither
 
 
 def test_short_lines_are_not_moves():

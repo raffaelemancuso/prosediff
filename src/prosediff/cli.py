@@ -56,6 +56,7 @@ from prosediff.render import (
     default_split,
     format_of,
     package_version,
+    prompt_path,
     write_output,
 )
 from prosediff.sources import (
@@ -356,6 +357,21 @@ def build_parser() -> argparse.ArgumentParser:
         "Policy; Laura asked to cut the introduction by a fifth'), or a file holding them",
     )
     ai_group.add_argument(
+        "--assess-annotate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="have the AI mark each problem in the text, from its first words to its "
+        "last, with the problem and the change it proposes: a badge before each in "
+        "the HTML report, its passage highlighted when clicked, and listed in an AI "
+        "marks panel (default: on)",
+    )
+    ai_group.add_argument(
+        "--assess-save-prompt",
+        action="store_true",
+        help="also save the exact text sent to the model (its system prompt and its "
+        "message) beside the output, as OUTPUT_assessment_prompt.txt",
+    )
+    ai_group.add_argument(
         "--assess-timeout",
         type=float,
         default=ASSESS_TIMEOUT,
@@ -438,8 +454,8 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"--assess: {e}")
         if args.assess_timeout <= 0:
             ap.error("--assess-timeout must be above 0")
-    elif args.assess_effort or args.assess_instructions:
-        ap.error("--assess-effort and --assess-instructions go with --assess")
+    elif args.assess_effort or args.assess_instructions or args.assess_save_prompt:
+        ap.error("--assess-effort, --assess-instructions and --assess-save-prompt go with --assess")
 
     fmt = args.format or format_of(args.output)
     split = args.split or default_split(fmt)
@@ -516,6 +532,8 @@ def main(argv: list[str] | None = None) -> int:
             context=args.assess_context,
             instructions=args.assess_instructions or "",
             timeout=args.assess_timeout,
+            save_prompt=args.assess_save_prompt,
+            annotate=args.assess_annotate,
         )
         assessment = assess_comparison(comparison, request)
         if assessment.error:
@@ -542,6 +560,8 @@ def main(argv: list[str] | None = None) -> int:
     if assessment is not None:
         verdict = f" ({assessment.verdict})" if assessment.verdict else ""
         print(f"{PROG}: assessment{verdict} -> {assessment_path(output)}")
+        if assessment.save_prompt and assessment.prompt:
+            print(f"{PROG}: the text sent to the model -> {prompt_path(output)}")
     if args.open:
         webbrowser.open(output.resolve().as_uri())
     return 0

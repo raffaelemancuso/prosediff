@@ -223,11 +223,15 @@ class Settings:
     open_page: bool = True
     # the AI that assesses the changes (prosediff.assess): "claude", "codex",
     # "PROVIDER/MODEL"; "": none; how hard it thinks ("": its default), what
-    # it reads (one of CONTEXTS), and the instructions (text, or a file)
+    # it reads (one of CONTEXTS), the instructions (text, or a file), and
+    # whether the text sent to it is saved beside the output
     assess: str = ""
     assess_effort: str = ""
     assess_context: str = "document"
     assess_instructions: str = ""
+    assess_save_prompt: bool = False
+    # whether the AI marks the problems in the text
+    assess_annotate: bool = True
 
 
 READY = "Choose what to compare, then Compare."
@@ -449,6 +453,8 @@ def generate(
             effort=s.assess_effort,
             context=s.assess_context,
             instructions=s.assess_instructions,
+            save_prompt=s.assess_save_prompt,
+            annotate=s.assess_annotate,
         )
         progress(f"Asking {s.assess} to assess the changes…")
         assessment = assess_comparison(comparison, request)
@@ -1065,11 +1071,45 @@ class App:
             lambda: self.pick_into(self.assess_instructions, "Instructions for the AI"),
             "Choose a text file holding the instructions",
         ).grid(row=2, column=2, **PAD)
+        self.assess_annotate = tk.BooleanVar(value=self.s.assess_annotate)
+        self.assess_save_prompt = tk.BooleanVar(value=self.s.assess_save_prompt)
+        switches = ttk.Frame(card)
+        switches.grid(row=3, column=1, columnspan=2, sticky="w", **PAD)
+        # greyed out while no AI is chosen (update_ai_switches)
+        self.ai_switches = []
+        for text, var, tip in (
+            (
+                "Mark problems in the text",
+                self.assess_annotate,
+                "Have the AI mark each problem in the text, from its first words to its "
+                "last, with what is wrong and the change it proposes: a numbered badge "
+                "before each in the HTML report, its passage highlighted when clicked, and "
+                "listed in an AI marks panel.",
+            ),
+            (
+                "Save the text sent to the AI",
+                self.assess_save_prompt,
+                "Also save, beside the output, the exact text the AI was sent (its system "
+                "prompt and its message), as a .txt file: to see what it read.",
+            ),
+        ):
+            switch = toggle(switches, text, var)
+            switch.pack(side="left", padx=(0, 18))
+            hint(switch, tip)
+            self.ai_switches.append(switch)
+        self.assess_ai.trace_add("write", lambda *_: self.update_ai_switches())
+        self.update_ai_switches()
         self.assess_ai.trace_add("write", lambda *_: self.update_models())
         self.assess_model.trace_add("write", lambda *_: self.update_efforts())
         self.update_models(keep=True)  # the model and effort saved stay
         # the providers any-llm reaches, for the AI list
         self.ask("providers", providers)
+
+    def update_ai_switches(self) -> None:
+        """The AI assessment's switches, greyed out while no AI is chosen."""
+        none = self.assess_ai.get().strip() in ("", NO_ASSESSMENT)
+        for switch in self.ai_switches:
+            switch.state(["disabled"] if none else ["!disabled"])
 
     def pick_into(self, var: tk.StringVar, title: str) -> None:
         chosen = filedialog.askopenfilename(
@@ -1416,6 +1456,8 @@ class App:
             ),
             assess_context=self.assess_context.get(),
             assess_instructions=self.assess_instructions.get().strip(),
+            assess_save_prompt=self.assess_save_prompt.get(),
+            assess_annotate=self.assess_annotate.get(),
         )
 
     def toggle_advanced(self) -> None:
@@ -1483,6 +1525,8 @@ class App:
             (self.assess_ai, d.assess or NO_ASSESSMENT),
             (self.assess_context, d.assess_context),
             (self.assess_instructions, d.assess_instructions),
+            (self.assess_save_prompt, d.assess_save_prompt),
+            (self.assess_annotate, d.assess_annotate),
         ):
             var.set(value)
         self.move_passages.set(d.move_passages)

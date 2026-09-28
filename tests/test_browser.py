@@ -154,13 +154,14 @@ def test_view_menu_opens_and_closes(page):
     names = panel.locator(".label").all_inner_texts()
     assert names == [
         "Formatted",
+        "Change highlights",
         "Formatting changes",
-        "Comments inline",
+        "Comments expanded",
         "Comment tooltips",
         "Paragraph spacing",
     ]
-    page.click('[data-toggle="inline"]')
-    assert panel.is_visible() and "inline" in page.evaluate("document.body.className")
+    page.click('[data-toggle="cexpand"]')
+    assert panel.is_visible() and "cexpand" in page.evaluate("document.body.className")
     page.keyboard.press("Escape")
     assert not panel.is_visible() and button.get_attribute("aria-expanded") == "false"
     button.click()
@@ -168,8 +169,43 @@ def test_view_menu_opens_and_closes(page):
     assert not panel.is_visible()
 
 
+def test_change_highlights_switched_off(browser, tmp_path):
+    """Change highlights, on by default, off by its switch in the View menu
+    or by h: no background on changed words, nor on a line removed or
+    added; the gutters keep their tint. Remembered across a reload."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("One word here.\n\nGone line.\n", encoding="utf-8")
+    new.write_text("One other here.\n\nNew line added here.\n", encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
+
+    def background(selector):
+        return page.locator(selector).first.evaluate("e => getComputedStyle(e).backgroundColor")
+
+    def tint(selector):
+        return page.locator(selector).first.evaluate(
+            "e => getComputedStyle(e).getPropertyValue('--tint').trim()"
+        )
+
+    clear = "rgba(0, 0, 0, 0)"
+    assert background("ins") != clear and background("del") != clear
+    assert page.get_attribute('[data-toggle="highlights"]', "aria-pressed") == "true"
+    page.click(".menu-button")
+    page.click('[data-toggle="highlights"]')
+    assert background("ins") == clear and background("del") == clear
+    assert tint("tr.replace td.code.right") == "transparent"
+    for row in ("tr.insert td.code.right", "tr.delete td.code.left"):
+        if page.locator(row).count():
+            assert tint(row) == "transparent"
+    assert tint("tr.replace td.no.r") != "transparent"  # the gutter still marks it
+    page.reload()
+    assert background("ins") == clear
+    page.keyboard.press("h")
+    assert background("ins") != clear
+    page.context.close()
+
+
 def test_views_are_remembered(page):
-    """One column (u), raw Markdown (f) and comments written out (i): each
+    """One column (u), raw Markdown (f) and comments expanded (c): each
     switched on by its key, remembered across a reload, switched off by its
     button. An edited line is never tinted as a whole: only its changed
     words are."""
@@ -189,7 +225,7 @@ def test_views_are_remembered(page):
     assert page.locator(".s-strong").first.evaluate("e => getComputedStyle(e).fontWeight") == "700"
     assert edited_line_colour() == "transparent"
     assert comment() in ("none", "normal")
-    for key in "ufit":  # t, the tint of before, does nothing
+    for key in "ufct":  # t, the tint of before, does nothing
         page.keyboard.press(key)
     # an unchanged row shows its new side only
     left = page.locator("tr.equal td.left").first
@@ -197,7 +233,7 @@ def test_views_are_remembered(page):
     assert page.locator(".s-syn").first.is_visible()
     assert edited_line_colour() == "transparent"
     assert "Anna" in comment() and "Old remark." in comment()
-    for name in ("unified", "inline"):
+    for name in ("unified", "cexpand"):
         assert page.get_attribute(f'[data-toggle="{name}"]', "aria-pressed") == "true"
     page.reload()
     assert "unified" in page.evaluate("document.body.className")
@@ -205,7 +241,7 @@ def test_views_are_remembered(page):
     assert "Anna" in comment()
     page.click('[data-toggle="unified"]')
     page.click(".menu-button")  # the others are in the View menu
-    page.click('[data-toggle="inline"]')
+    page.click('[data-toggle="cexpand"]')
     assert "unified" not in page.evaluate("document.body.className")
     assert comment() in ("none", "normal")
 
@@ -262,13 +298,15 @@ def test_comment_link_goes_to_its_row(page):
     target = page.locator("tr.target")
     assert target.count() == 1
     assert "Line 20" in target.inner_text()
-    # the paragraph the comment is in flashes, and so does its marker
-    page.wait_for_selector("tr.target td.code.right.flash", timeout=5_000)
-    assert page.locator("tr.target td.code.right .comment.flash").count() == 1
-    page.wait_for_selector("td.code.flash", state="detached", timeout=5_000)
-    # following the same link again flashes it again
+    # its paragraph (where its text ends is not known) and marker stay marked
+    page.wait_for_selector("tr.target td.code.right.pinned", timeout=5_000)
+    assert page.locator("tr.target td.code.right .comment.pinned").count() == 1
+    page.wait_for_timeout(2_000)
+    assert page.locator("td.code.pinned").count() == 1
+    # following the same link again unmarks it
     page.locator(".comments-panel a").first.click()
-    page.wait_for_selector("tr.target td.code.right.flash", timeout=5_000)
+    page.wait_for_selector("td.code.pinned", state="detached", timeout=5_000)
+    assert page.locator(".comment.pinned").count() == 0
 
 
 def test_comments_sorted_by_place_or_date(browser, tmp_path):
@@ -324,31 +362,62 @@ def anchored_report(browser, tmp_path, **context_options):
     return page
 
 
-def highlighted(page) -> str:
+def highlighted(page, name: str = "pin") -> str:
     return page.evaluate(
-        """() => { const h = CSS.highlights.get("comment-flash");
-                   return h ? [...h].map(r => r.toString()).join("|") : null; }"""
+        f"""() => {{ const h = CSS.highlights.get("{name}");
+                   return h ? [...h].map(r => r.toString()).join("|") : null; }}"""
     )
 
 
-def test_comment_link_flashes_the_words_it_is_anchored_to(browser, tmp_path):
+def test_comment_link_pins_the_words_it_is_anchored_to(browser, tmp_path):
     """Following a comment's link highlights the words it is anchored to,
-    not its paragraph, across paragraphs too; then the highlight goes."""
+    not its paragraph, across paragraphs too, and keeps its tooltip open,
+    until the link is followed again; another comment takes its place."""
     page = anchored_report(browser, tmp_path)
-    page.locator(".comments-panel a", has_text="Here.").click()
-    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
-    assert highlighted(page).replace("­", "") == "two three"
-    assert page.locator("td.code.flash").count() == 0
-    assert page.locator(".comment.flash").count() == 1
-    page.wait_for_function('!CSS.highlights.has("comment-flash")', timeout=5_000)
+    here = page.locator(".comments-panel a", has_text="Here.")
+    here.click()
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    assert highlighted(page).replace("\u00ad", "") == "two three"
+    assert page.locator("td.code.pinned").count() == 0
+    assert page.locator(".comment.pinned").count() == 1
+    tip = page.locator("#tip")
+    assert tip.is_visible() and "Here." in tip.inner_text()
+    page.wait_for_timeout(2_000)  # it stays
+    page.mouse.move(5, 5)  # and hovering elsewhere leaves it be
+    assert highlighted(page) is not None and tip.is_visible()
     page.locator(".comments-panel a", has_text="Across.").click()
-    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
-    first, second = highlighted(page).replace("­", "").split("|")
+    page.wait_for_function(
+        'CSS.highlights.get("pin") && CSS.highlights.get("pin").size == 2',
+        timeout=5_000,
+    )
+    first, second = highlighted(page).replace("\u00ad", "").split("|")
     assert first == "four." and second.startswith("Five six")
     assert "seven" not in second
+    assert page.locator(".comment.pinned").count() == 1 and "Across." in tip.inner_text()
+    page.locator(".comments-panel a", has_text="Across.").click()
+    page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
+    assert page.locator(".comment.pinned").count() == 0 and not tip.is_visible()
+    # the marker in the text pins as its link does: clicked, Enter, Esc
+    marker = page.locator('td.code .comment[data-text="Here."]').first
+    marker.click()
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    assert highlighted(page).replace("\u00ad", "") == "two three" and tip.is_visible()
+    marker.click()
+    page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
+    page.locator('td.code .comment[data-text="Across."]').first.focus()
+    page.keyboard.press("Enter")
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    page.keyboard.press("Escape")
+    page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
+    # expanded (c): every comment written out, the words of each highlighted
+    page.keyboard.press("c")
+    assert "Here." in marker.evaluate("e => getComputedStyle(e, '::after').content")
+    assert page.evaluate('CSS.highlights.get("comments-all").size') == 3
+    page.keyboard.press("c")
+    assert not page.evaluate('CSS.highlights.has("comments-all")')
 
 
-def test_comment_whose_words_are_gone_flashes_its_marker_only(browser, tmp_path):
+def test_comment_whose_words_are_gone_rings_its_marker_only(browser, tmp_path):
     """A comment whose words went (its text ends where it starts) rings its
     marker and highlights nothing: not its paragraph either."""
     old, new = tmp_path / "a.md", tmp_path / "b.md"
@@ -357,61 +426,95 @@ def test_comment_whose_words_are_gone_flashes_its_marker_only(browser, tmp_path)
     new.write_text(f'One two.{note}[]{{.comment-end id="1"}}\n', encoding="utf-8")
     page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
     page.locator(".comments-panel a").first.click()
-    page.wait_for_selector(".comment.flash", timeout=5_000)
+    page.wait_for_selector(".comment.pinned", timeout=5_000)
     assert highlighted(page) is None
-    assert page.locator("td.code.flash").count() == 0
+    assert page.locator("td.code.pinned").count() == 0
 
 
-def test_comment_marker_click_flashes_its_words(browser, tmp_path):
-    """Clicking a comment's marker in the text, or Enter on it, flashes the
-    words it is anchored to, as its link in the panel does."""
-    page = anchored_report(browser, tmp_path)
-    marker = page.locator('td.code .comment[data-text="Here."]').first
-    marker.click()
-    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
-    assert highlighted(page).replace("­", "") == "two three"
-    assert page.locator(".comment.flash").count() == 1
-    page.wait_for_function('!CSS.highlights.has("comment-flash")', timeout=5_000)
-    page.locator('td.code .comment[data-text="Across."]').first.focus()
-    page.keyboard.press("Enter")
-    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
-    assert highlighted(page).replace("­", "").startswith("four.|Five six")
+def test_problems_marked_by_the_ai(browser, tmp_path):
+    """The problems the AI marked are found in the text of their side,
+    whatever the quotes and the hyphenation: a numbered badge before each,
+    badge telling the problem and the solution; one found nowhere is said
+    so. Each pins as a comment does, from its badge or its entry in the AI
+    marks panel; the toolbar's arrows (a, Shift+A) step through those
+    found, pinning each, the counter saying which."""
+    from prosediff.assess import Annotation, Assessment
 
-
-def test_comment_flash_with_reduced_motion(browser, tmp_path):
-    """A system asking for reduced motion still sees the words flash: once,
-    steadily, not animated away."""
-    page = anchored_report(browser, tmp_path, reduced_motion="reduce")
-    page.locator(".comments-panel a", has_text="Here.").click()
-    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
-    page.wait_for_timeout(1_000)
-    assert highlighted(page).replace("­", "") == "two three"
-    page.wait_for_function('!CSS.highlights.has("comment-flash")', timeout=5_000)
-
-
-def test_comments_panel_folds_from_its_header(browser, tmp_path):
-    """The comments panel folds and opens from its header, as a file does;
-    its Show and Sort buttons there sort and filter without folding it."""
     old, new = tmp_path / "a.md", tmp_path / "b.md"
-    old.write_text("First line.\n", encoding="utf-8")
-    came = '[Came.]{.comment-start id="2" author="A" date="2026-09-25T10:00:00Z"}'
-    new.write_text(f"First line.{came}\n", encoding="utf-8")
-    page = open_report(browser, tmp_path, compare_paths(old, new))
-    panel = page.locator("details.comments-panel")
-    assert panel.evaluate("d => d.open")
-    page.click('[data-sort="date"]')
-    page.click('[data-show="new"]')
-    assert panel.evaluate("d => d.open")
-    page.click(".comments-head h2")
-    assert not panel.evaluate("d => d.open")
-    assert not page.locator(".comments-panel li").first.is_visible()
-    page.click(".comments-head h2")
-    assert panel.evaluate("d => d.open")
+    old.write_text("A sentence kept.\n\nThe old “quoted” claim went away.\n", encoding="utf-8")
+    new.write_text(
+        "A sentence kept, and extended with considerably longer words.\n\n"
+        "A new paragraph, placed here.\n",
+        encoding="utf-8",
+    )
+    a = Assessment("claude", "## Verdict\n**Mixed**.", "m")
+    a.annotations = [
+        Annotation("new", "extended with", "longer words.", "Wordy.", "Cut it."),
+        Annotation("new", "words nowhere", "at all", "Missing.", ""),
+        Annotation("old", 'The old "quoted"', "went away.", "Lost.", "Keep it."),
+    ]
+    c = compare_paths(old, new, Options(context=None))
+    page = open_report(browser, tmp_path, c, assessment=a)
+    marks = page.locator(".ai-mark")
+    # numbered in reading order, the one found nowhere last, the panel too
+    assert marks.all_inner_texts() == ["⚠ 1", "⚠ 2"]
+    numbers = page.locator(".ai-notes li .ai-num").all_inner_texts()
+    assert numbers == ["⚠ 1", "⚠ 2", "⚠ 3"]
+    assert "missing" in (page.locator(".ai-notes li").last.get_attribute("class") or "")
+    # the passages highlighted only when pinned
+    assert page.evaluate("CSS.highlights.size") == 0
+    assert page.locator(".ai-notes li.missing").count() == 1
+    assert page.locator(".ai-notes li.missing .ai-missing").is_visible()
+    tip = page.locator("#tip")
+    # pinned from its badge, until clicked again
+    marks.first.click()
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    assert highlighted(page).replace("\u00ad", "") == "extended with considerably longer words."
+    page.wait_for_timeout(1_000)
+    page.mouse.move(5, 5)
+    assert tip.is_visible() and "Wordy." in tip.inner_text()
+    assert "Proposed: Cut it." in tip.inner_text()
+    marks.first.click()
+    page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
+    assert not tip.is_visible()
+    # and from the panel
+    page.locator(".ai-notes .ai-show").first.click()
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    page.locator(".ai-notes .ai-show").first.click()
+    page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
+    # the toolbar: those found, in turn, the missing one skipped
+    counter = page.locator(".ai-counter")
+    assert counter.inner_text() == "⚠ 3"
+    page.click('[data-ai-nav="1"]')
+    assert counter.inner_text() == "⚠ 1 / 3"
+    page.keyboard.press("a")
+    assert counter.inner_text() == "⚠ 2 / 3" and "Lost." in tip.inner_text()
+    assert highlighted(page).replace("\u00ad", "") == "The old “quoted” claim went away."
+    page.keyboard.press("a")  # round again
+    assert counter.inner_text() == "⚠ 1 / 3"
+    page.keyboard.press("Shift+A")
+    assert counter.inner_text() == "⚠ 2 / 3"
+    page.keyboard.press("Escape")
+    # expanded (e, or its switch in the View menu): every problem written out
+    # after its badge, every passage highlighted; again, collapsed
+    inline = page.locator(".ai-inline")
+    assert not inline.first.is_visible()
+    page.keyboard.press("e")
+    assert inline.all_inner_texts() == ["Wordy. Proposed: Cut it.", "Lost. Proposed: Keep it."]
+    assert page.evaluate('CSS.highlights.get("ai-all").size') == 2
+    page.click(".menu-button")
+    assert page.get_attribute('[data-toggle="aiexpand"]', "aria-pressed") == "true"
+    page.click('[data-toggle="aiexpand"]')
+    assert not inline.first.is_visible()
+    assert not page.evaluate('CSS.highlights.has("ai-all")')
+    page.context.close()
 
 
 def test_comments_filtered_by_status(browser, tmp_path):
     """The comments panel shows all its comments, or only the new or the
-    removed ones, with a dashed line between those shown; remembered."""
+    removed ones, with a dashed line between those shown; remembered. It
+    folds from its header, as a file does, its Show and Sort buttons there
+    leaving it open."""
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     gone = '[Gone.]{.comment-start id="1" author="A" date="2026-09-20T10:00:00Z"}'
     came = '[Came.]{.comment-start id="2" author="A" date="2026-09-25T10:00:00Z"}'
@@ -441,6 +544,14 @@ def test_comments_filtered_by_status(browser, tmp_path):
     assert page.get_attribute('[data-show="removed"]', "aria-pressed") == "true"
     page.click('[data-show="all"]')
     assert shown() == ["Gone.", "Came."]
+    # the panel folds from its header, its buttons there leaving it open
+    panel = page.locator("details.comments-panel")
+    page.click('[data-sort="date"]')
+    assert panel.evaluate("d => d.open")
+    page.click(".comments-head h2")
+    assert not panel.evaluate("d => d.open") and not items.first.is_visible()
+    page.click(".comments-head h2")
+    assert panel.evaluate("d => d.open")
 
 
 def test_comment_tooltip(page):
@@ -543,7 +654,7 @@ def test_moved_line_numbers_tell_where(browser, tmp_path):
 def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     """A report holding both splits shows one at a time, the toolbar (or s)
     switching; each tells its counts; a line joins a moved line's ends, and
-    the toggle (l) hides them."""
+    the toggle (l), off by default, shows them."""
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     old.write_bytes(
         b"The first sentence stays here. This sentence moves to the end of the text.\n\n"
@@ -570,6 +681,8 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     assert switch.get_attribute("aria-label") == "Compared sentence by sentence"
     assert switch.locator("svg.sentences").is_visible()
     assert not switch.locator("svg.paragraphs").is_visible()
+    sync_api.expect(sentences.locator("svg.move-links")).to_have_count(0)
+    page.keyboard.press("l")
     # drawn on the next frame: the assertions wait for it
     sync_api.expect(sentences.locator("svg.move-links path")).to_have_count(1)
     page.keyboard.press("l")
@@ -595,6 +708,8 @@ def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
     old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
     new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
     page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
+    page.keyboard.press("v")  # the moved passages, off by default
+    page.keyboard.press("l")  # and the lines between moves
     assert "1 moved passage" in page.locator("details.file summary").inner_text()
     tip = page.locator("#tip")
     page.locator("td.left .moved").hover()
@@ -607,9 +722,10 @@ def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
 
 
 def test_moved_passages_switch(browser, tmp_path):
-    """The "Moved passages" switch: off, a moved passage is removed in one
-    place and added in the other, the counts follow and its line goes; the
-    key v turns it back on, and the choice is remembered."""
+    """The "Moved passages" switch, off by default: a moved passage removed
+    in one place and added in the other, the counts without it; on, it is
+    shown as moved and counted; the choice remembered, and the key v turns
+    it back off."""
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     moved = "This sentence moves to the end of the text."
     old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
@@ -617,21 +733,20 @@ def test_moved_passages_switch(browser, tmp_path):
     page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
     switch = page.locator('[data-toggle="passages"]')
     summary = page.locator("details.file summary")
-    assert switch.get_attribute("aria-pressed") == "true"
-    assert "1 moved passage" in summary.inner_text()
-    sync_api.expect(page.locator("svg.move-links path")).to_have_count(1)
-    switch.click()
     assert switch.get_attribute("aria-pressed") == "false"
     assert not page.locator("td.left .moved").is_visible()
     assert page.locator("td.left del").filter(has_text="This sentence moves").is_visible()
     assert page.locator("td.right ins").filter(has_text="This sentence moves").is_visible()
     assert "moved passage" not in summary.inner_text()
-    sync_api.expect(page.locator("svg.move-links path")).to_have_count(0)
-    page.reload()
-    assert switch.get_attribute("aria-pressed") == "false"
-    page.keyboard.press("v")
+    switch.click()
+    assert switch.get_attribute("aria-pressed") == "true"
     assert page.locator("td.left .moved").is_visible()
     assert "1 moved passage" in summary.inner_text()
+    page.reload()
+    assert switch.get_attribute("aria-pressed") == "true"
+    page.keyboard.press("v")
+    assert not page.locator("td.left .moved").is_visible()
+    assert "moved passage" not in summary.inner_text()
     page.context.close()
 
 

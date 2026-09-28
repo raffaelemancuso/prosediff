@@ -363,8 +363,12 @@ def test_ai_model_and_effort_as_the_ai_reports(root):
     ais = ["none", "claude", "codex", "ollama", "anthropic", "openai"]
     assert list(app.ai_box["values"]) == ais
     assert app.assess_spec() == "" and app.model_box.instate(["disabled"])
+    # the switches of the assessment, greyed out without an AI; marking on
+    assert all(s.instate(["disabled"]) for s in app.ai_switches)
+    assert app.collect().assess_annotate is True
     app.assess_ai.set("claude")
     settle(root, app, "claude")
+    assert not any(s.instate(["disabled"]) for s in app.ai_switches)
     assert list(app.model_box["values"]) == ["default", "opus", "haiku"]
     assert app.assess_model.get() == "default" and app.assess_spec() == "claude"
     assert list(app.effort_box["values"]) == ["low", "max"] and app.assess_effort.get() == ""
@@ -392,8 +396,11 @@ def test_ai_model_and_effort_as_the_ai_reports(root):
     assert app.assess_spec() == "openai/gpt-5"
     app.assess_context.set("changes")
     app.assess_instructions.set("Be brief.")
+    assert app.collect().assess_save_prompt is False  # off by default
+    app.assess_save_prompt.set(True)
     s = app.collect()
     assert (s.assess_context, s.assess_instructions) == ("changes", "Be brief.")
+    assert s.assess_save_prompt is True
     again = App(
         root,
         Settings(

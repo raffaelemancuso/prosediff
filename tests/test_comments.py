@@ -3,7 +3,7 @@
 from helpers import END, NOTE, two_folders
 
 from prosediff import Options, compare, compare_paths, render
-from prosediff.comments import NEW_COMMENT_MARK, REMOVED_COMMENT_MARK, end_of, number_of
+from prosediff.comments import REMOVED_COMMENT_MARK, end_of, number_of
 from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
 
 MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
@@ -80,7 +80,8 @@ def test_plain_and_show_comments():
     assert f">{COMMENT_MARK}</span>" in html
     # a comment added since the base has its own icon
     new = str(show_comments(folded, comments, frozenset(PLACEHOLDER.findall(folded))))
-    assert 'class="comment new"' in new and f">{NEW_COMMENT_MARK}</span>" in new
+    # the balloon, marked new by its class (a green + in the HTML report)
+    assert 'class="comment new"' in new and f">{COMMENT_MARK}</span>" in new
     assert 'aria-label="new comment by Anna' in new
     # and so has a comment removed since the base
     gone = str(show_comments(folded, comments, removed=frozenset(PLACEHOLDER.findall(folded))))
@@ -202,7 +203,7 @@ def test_comments_panel_statuses_and_links(tmp_path):
     # in the panel
     assert html.count('class="comment new"') == 1
     assert html.count('class="comment removed"') == 1
-    assert by_text["New remark."].icon == NEW_COMMENT_MARK
+    assert by_text["New remark."].icon == COMMENT_MARK
     assert by_text["Old remark."].icon == REMOVED_COMMENT_MARK
     assert not PLACEHOLDER.search(html)  # every comment became a marker
 

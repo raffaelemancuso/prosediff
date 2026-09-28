@@ -28,9 +28,10 @@ END_FIRST = 0x100000
 END_PLACEHOLDER = re.compile(f"[{chr(END_FIRST)}-{chr(END_FIRST + PUA_LAST - PUA_FIRST)}]")
 # Either: what is a comment's, not text.
 ANY_PLACEHOLDER = re.compile(f"{PLACEHOLDER.pattern}|{END_PLACEHOLDER.pattern}")
+# A comment's marker; one only the new side has (added since the base) is
+# the same balloon, which the HTML report marks with a green + (its class
+# "new"): a squared NEW is unreadable at the size of the text.
 COMMENT_MARK = "\N{SPEECH BALLOON}"
-# A comment only the new side has: added since the base.
-NEW_COMMENT_MARK = "\N{SQUARED NEW}"
 # A comment only the old side has: removed since the base.
 REMOVED_COMMENT_MARK = "\N{WASTEBASKET}\N{VARIATION SELECTOR-16}"
 
@@ -72,9 +73,7 @@ class CommentEntry:
 
     @property
     def icon(self) -> str:
-        return {"new": NEW_COMMENT_MARK, "removed": REMOVED_COMMENT_MARK}.get(
-            self.status, COMMENT_MARK
-        )
+        return REMOVED_COMMENT_MARK if self.status == "removed" else COMMENT_MARK
 
 
 class Comments:
@@ -248,7 +247,7 @@ def show_comments(
     def marker(m: re.Match) -> str:
         c = comments.get(m[0])
         status = "new" if m[0] in new else "removed" if m[0] in removed else ""
-        icon = {"new": NEW_COMMENT_MARK, "removed": REMOVED_COMMENT_MARK}.get(status, COMMENT_MARK)
+        icon = REMOVED_COMMENT_MARK if status == "removed" else COMMENT_MARK
         label = f"{status} {c.label}" if status else c.label
         return str(
             MARKER.format(

@@ -45,7 +45,9 @@ def test_sentence_moved_between_edited_paragraphs():
     assert (first.kind, last.kind) == ("replace", "replace")
     assert moved_spans(str(first.left)) == [("1", "Moved to line 3")]
     assert moved_spans(str(last.right)) == [("1", "Moved from line 1")]
-    assert SENTENCE in str(first.left) and SENTENCE in str(last.right)
+    # the moved passage's ends are the sentence's own
+    assert f'data-move="Moved to line 3">{SENTENCE}</span>' in str(first.left)
+    assert f'data-move="Moved from line 1">{SENTENCE}</span>' in str(last.right)
     # a move, not words removed and added
     assert (first.words_removed, last.words_added) == (0, 0)
     assert "<del>" not in str(first.left) and "<ins>" not in str(last.right)
@@ -147,6 +149,14 @@ def test_move_passages_can_be_turned_off(tmp_path):
     html = render(on)
     assert len(moved_spans(html)) == 2
     assert "1 moved passage" in html
+    # the counts without them: the moved sentence's words removed and added
+    plain, words = on.without_passages, len(SENTENCE.split())
+    assert plain.moved_passages == 0
+    assert plain.words_removed == on.counts.words_removed + words
+    assert plain.words_added == on.counts.words_added + words
+    # both counts are in the page, the "Moved passages" switch showing one
+    shown, hidden = f"{on.counts.words_added:,}", f"{plain.words_added:,}"
+    assert f'<span class="pv-on">{shown}</span><span class="pv-off">{hidden}</span>' in html
     off = compare_paths(a, b, Options(move_passages=False))
     assert off.counts.moved_passages == 0
     assert not moved_spans(render(off))
@@ -202,12 +212,6 @@ def test_removal_slides_to_the_line_start_past_an_abbreviation():
     assert changes == [(removed, "insert")]
 
 
-def test_moved_passage_ends_are_whole_sentences():
-    first, _, last = align(OLD, NEW, context=None)[0]
-    assert f'data-move="Moved to line 3">{SENTENCE}</span>' in str(first.left)
-    assert f'data-move="Moved from line 1">{SENTENCE}</span>' in str(last.right)
-
-
 def test_short_different_passages_are_not_the_same():
     """Two passages too short for a line's move key (under MIN_MOVE_CHARS)
     are compared by their words, not taken as identical."""
@@ -233,27 +237,6 @@ def test_rows_keep_how_they_looked_without_passages():
     assert plain is not None and "<del>" in str(plain.left) and "moved" not in str(plain.left)
     assert plain.words_removed == 11 and first.words_removed == 0
     assert last.without_passages.words_added == 11 and last.words_added == 0
-
-
-def test_counts_without_passages(tmp_path):
-    first = "Opening remarks were brief"
-    second = "The second part discusses results"
-    a, b = two_files(
-        tmp_path,
-        f"{first}. {SENTENCE} Then.\n\n{second}. Good.\n",
-        f"{first}. Then.\n\n{second}. {SENTENCE} Good.\n",
-    )
-    c = compare_paths(a, b)
-    plain = c.without_passages
-    words = len(SENTENCE.split())
-    assert (c.counts.moved_passages, plain.moved_passages) == (1, 0)
-    # hidden, the moved sentence's words are removed and added again
-    assert plain.words_removed == c.counts.words_removed + words
-    assert plain.words_added == c.counts.words_added + words
-    html = render(c)
-    # both counts are in the page, the "Moved passages" switch shows one
-    on, off = f"{c.counts.words_added:,}", f"{plain.words_added:,}"
-    assert f'<span class="pv-on">{on}</span><span class="pv-off">{off}</span>' in html
 
 
 def test_many_pairs_are_narrowed_not_given_up():

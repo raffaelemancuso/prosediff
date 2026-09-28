@@ -8,8 +8,10 @@ from helpers import two_files
 from prosediff import assess as assess_module
 from prosediff import compare_paths, render
 from prosediff.assess import (
+    ANNOTATE,
     MAX_DIFF_CHARS,
     SYSTEM,
+    Annotation,
     AssessError,
     Assessment,
     AssessRequest,
@@ -18,9 +20,10 @@ from prosediff.assess import (
     cut,
     instructions_from,
     parse_backend,
+    split_annotations,
 )
 from prosediff.cli import main
-from prosediff.render import assess_comparison, assessment_path, new_version
+from prosediff.render import assess_comparison, assessment_path, new_version, prompt_path
 
 ANSWER = """## Verdict
 **Improves**: the introduction is tighter.
@@ -69,7 +72,9 @@ def test_the_model_is_sent_what_the_request_says(tmp_path):
     request = AssessRequest("claude/opus", effort="high", context="changes", timeout=60)
     a = assess_comparison_with(c, request, runner)
     ((backend, system, prompt, model, effort, timeout),) = runner.asked
-    assert (backend, model, effort, timeout, system) == ("claude", "opus", "high", 60, SYSTEM)
+    # the problems to be marked in the text, by default
+    assert system == SYSTEM + ANNOTATE
+    assert (backend, model, effort, timeout) == ("claude", "opus", "high", 60)
     assert "One {+changed +}line." in prompt and "Kept." not in prompt
     assert "<document>" not in prompt and "<instructions>" not in prompt
     assert (a.backend, a.model, a.error, a.verdict) == ("claude/opus", "fake-1", "", "improves")
@@ -87,6 +92,51 @@ def assess_comparison_with(c, request, runner):
 
     document = new_version(c) if request.context == "document" else ""
     return assess(unified(c, 0, "wdiff"), c.repo_name, request, document, runner)
+
+
+MARKED = """## Verdict
+**Mixed**: tighter, but a sentence is broken.
+
+## Problems to fix
+1. A broken sentence.
+
+```json
+[
+ {"side": "new", "start": "One changed", "end": "line.", "problem": "Vague.",
+  "solution": "Say what changed."},
+ {"side": "old", "start": "One line.", "end": "One line.", "problem": "Lost."},
+ {"side": "new", "start": "", "problem": "No words: left out."},
+ "not an object"
+]
+```
+"""
+
+
+def test_the_problems_marked_in_the_text(tmp_path):
+    """With annotate (the default) the model is asked to mark the problems
+    in the text; its JSON list is taken out of the assessment, each item
+    read, one without its words left out; without annotate, nothing is
+    asked, nor taken out."""
+    text, notes = split_annotations(MARKED)
+    assert text.endswith("1. A broken sentence.") and "```" not in text
+    assert notes == [
+        Annotation("new", "One changed", "line.", "Vague.", "Say what changed."),
+        Annotation("old", "One line.", "One line.", "Lost.", ""),
+    ]
+    assert split_annotations("## Verdict\nNo list.") == ("## Verdict\nNo list.", [])
+    assert split_annotations("```json\n[not json\n```") == ("```json\n[not json\n```", [])
+    old, new = two_files(tmp_path, "One line.\n", "One changed line.\n")
+    c = compare_paths(old, new)
+    a = assess_comparison_with(c, AssessRequest("claude"), fake(MARKED))
+    assert [n.start for n in a.annotations] == ["One changed", "One line."]
+    assert "```" not in a.markdown
+    md = a.as_markdown("b.md")
+    assert '## Marked in the text\n\n1. "One changed" … "line." (the new version): Vague.' in md
+    assert "   Proposed: Say what changed." in md
+    runner = fake(MARKED)
+    plain = assess_comparison_with(c, AssessRequest("claude", annotate=False), runner)
+    assert runner.asked[0][1] == SYSTEM and plain.annotations == []
+    assert "```json" in plain.markdown
 
 
 def test_instructions_given_or_read_from_a_file(tmp_path):
@@ -166,8 +216,9 @@ def test_a_long_text_is_cut_and_the_model_told():
 
 def test_the_report_holds_the_assessment(tmp_path):
     """The assessment heads the HTML report, its Markdown rendered and its
-    HTML escaped, its verdict a badge, how it was asked said; a failed one
-    says why."""
+    HTML escaped, its verdict a badge, how it was asked said; the problems
+    it marked in an AI marks panel, held for the script to find in the text,
+    the toolbar stepping through them; a failed one says why."""
     old, new = two_files(tmp_path, "One line.\n", "One changed line.\n")
     c = compare_paths(old, new)
     a = Assessment("ollama/qwen3", ANSWER + "\n<script>x</script>\n", "qwen3", 42.4)
@@ -177,11 +228,20 @@ def test_the_report_holds_the_assessment(tmp_path):
     assert "by ollama/qwen3 (qwen3), in 42 s" in html
     assert "<h2>Problems to fix</h2>" in html and "<ol>" in html
     assert "<script>x</script>" not in html and "&lt;script&gt;" in html
+    # no marks: no panel, no data, no arrows
+    assert 'id="ai-notes-data"' not in html and "<h2>AI marks:" not in html
+    assert 'data-ai-nav="1"' not in html
     a.effort, a.context = "max", "document"
-    assert (
-        "by ollama/qwen3 (qwen3), effort max, from the changes and the new version, in 42 s"
-        in render(c, assessment=a)
+    a.annotations = split_annotations(MARKED)[1]
+    html = render(c, assessment=a)
+    assert "by ollama/qwen3 (qwen3), effort max, from the changes and the new version, in 42 s" in (
+        html
     )
+    assert "<h2>AI marks: 2 problems</h2>" in html
+    assert "It marked 2 problems in the text" in html
+    assert '<script type="application/json" id="ai-notes-data">' in html
+    assert 'data-ai-nav="1"' in html
+    assert "Say what changed." in html and "(old version)" in html
     failed = render(c, assessment=Assessment("codex", error="no login"))
     assert "The assessment failed: no login" in failed
     assert 'class="assessment"' not in render(c)
@@ -190,15 +250,17 @@ def test_the_report_holds_the_assessment(tmp_path):
 def test_cli_assess_writes_the_report_and_the_markdown(tmp_path, monkeypatch, capsys):
     """--assess puts the assessment in the report and beside it, as
     Markdown, asked as --assess-effort, --assess-context and
-    --assess-instructions say; a failure still writes the report, and says
-    so."""
+    --assess-instructions say; --assess-save-prompt saves the exact text
+    sent, none saved without it; a failure still writes the report, and the
+    text sent, and says so."""
     old, new = two_files(tmp_path, "One line.\n", "One changed line.\n")
     runner = fake(model="claude-opus-5-5")
     monkeypatch.setattr(assess_module, "run_backend", runner)
     out = tmp_path / "r.html"
     args = ["--files", str(old), str(new), "-o", str(out), "--assess", "claude"]
-    assert main([*args, "--assess-effort", "max", "--assess-instructions", "Be brief."]) == 0
-    ((_, _, prompt, _, effort, _),) = runner.asked
+    asked = ["--assess-effort", "max", "--assess-instructions", "Be brief."]
+    assert main([*args, *asked, "--assess-save-prompt"]) == 0
+    ((_, system, prompt, _, effort, _),) = runner.asked
     assert effort == "max" and "<document>" in prompt and "Be brief." in prompt
     assert "verdict-improves" in out.read_text(encoding="utf-8")
     md = assessment_path(out)
@@ -209,17 +271,28 @@ def test_cli_assess_writes_the_report_and_the_markdown(tmp_path, monkeypatch, ca
         "from the changes and the new version, in "
     )
     assert "## Problems to fix" in text
-    assert "assessment (improves) -> " in capsys.readouterr().out
+    saved = prompt_path(out)
+    assert saved == tmp_path / "r_assessment_prompt.txt"
+    assert saved.read_bytes().decode("utf-8") == (
+        "The text prosediff sent to the model (claude, effort max, from the changes "
+        "and the new version).\n\n"
+        f"===== system prompt =====\n{system}\n===== end of system prompt =====\n\n"
+        f"===== message =====\n{prompt}\n===== end of message =====\n"
+    )
+    printed = capsys.readouterr().out
+    assert "assessment (improves) -> " in printed and "the text sent to the model -> " in printed
+    saved.unlink()
     assert main([*args, "--assess-context", "changes"]) == 0
-    assert "<document>" not in runner.asked[1][2]
+    assert "<document>" not in runner.asked[1][2] and not saved.exists()
 
     def failing(*_):
         raise AssessError("no login")
 
     monkeypatch.setattr(assess_module, "run_backend", failing)
-    assert main(["--files", str(old), str(new), "--assess", "codex", "-o", str(out)]) == 0
+    assert main([*args, "--assess-save-prompt"]) == 0
     assert "The assessment failed: no login" in out.read_text(encoding="utf-8")
     assert "the assessment failed: no login" in capsys.readouterr().err
+    assert "===== message =====\nThe whole new version of a.md" in saved.read_text("utf-8")
 
 
 def test_cli_refuses_what_makes_no_sense(tmp_path, capsys):
