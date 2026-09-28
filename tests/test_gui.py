@@ -14,6 +14,7 @@ import tkinter as tk
 from helpers import two_files
 
 from prosediff import gui
+from prosediff.assess import AssessError, ModelInfo
 from prosediff.diff import MOVED_PASSAGE_DEFAULTS, MovedPassageSettings
 from prosediff.gui import (
     INDEX,
@@ -27,6 +28,15 @@ from prosediff.gui import (
     save_settings,
     settings_from_args,
 )
+
+
+def test_no_second_console_when_there_is_one(monkeypatch):
+    """The invisible console is made only for a program with none (pythonw,
+    prosediff-gui.exe): made once at most, and never away from Windows."""
+    gui.invisible_console()
+    assert gui.invisible_console() is False
+    monkeypatch.setattr(gui.sys, "platform", "linux")
+    assert gui.invisible_console() is False
 
 
 def test_every_drop_down_item_has_a_hint():
@@ -151,7 +161,9 @@ def test_generate_git(history, tmp_path):
     b, shas = history
     for target in ("worktree", "index", shas[4]):
         out = tmp_path / f"{target}.html"
-        path, c = generate(Settings(repo=str(b.path), base=shas[0], target=target, output=str(out)))
+        path, c, _ = generate(
+            Settings(repo=str(b.path), base=shas[0], target=target, output=str(out))
+        )
         assert path == out and out.read_bytes().startswith(b"<!DOCTYPE html>")
         short = {"worktree": "working tree", "index": "index"}.get(target, shas[4][:7])
         assert c.target.short == short
@@ -167,14 +179,14 @@ def test_generate_files_and_default_output(tmp_path):
         f"First paragraph here.\n\nSecond paragraph. {moved}\n",
     )
     s = Settings(mode="files", old=str(a), new=str(b))
-    path, c = generate(s)
+    path, c, _ = generate(s)
     assert path.parent.name == "prosediff" and path.suffix == ".html" and len(c.files) == 1
     assert path.is_relative_to(tmp_path)  # the temporary folder is the test's own (conftest)
     assert c.counts.moved == 0
     s.split = "sentence"
     assert generate(s)[1].counts.moved == 1
     s.output_format = "diff"
-    path, _ = generate(s)
+    path, _, _ = generate(s)
     assert path.suffix == ".diff" and path.read_text().startswith("--- a/a.md\n+++ b/b.md\n")
     s.output = str(tmp_path / "a_vs_b.html")  # the format chosen wins over the suffix
     assert generate(s)[0] == tmp_path / "a_vs_b.diff"
@@ -206,13 +218,193 @@ def tk_root():
     r.destroy()
 
 
+REPORTED = {
+    "claude": [
+        ModelInfo("default", "Default (recommended): Opus 5.5", (("low", ""), ("max", ""))),
+        ModelInfo("opus", "Opus 5.5", (("low", ""), ("max", ""))),
+        ModelInfo("haiku", "Haiku 4.5"),
+    ],
+    "codex": [
+        ModelInfo(
+            "gpt-6-astra",
+            "GPT-6-Astra, Codex's default",
+            (("low", "Fast"), ("medium", "Balanced"), ("ultra", "Deepest")),
+            "low",
+        ),
+        ModelInfo("gpt-5.5", "GPT-5.5", (("low", ""), ("medium", "")), "medium"),
+    ],
+    "ollama": [ModelInfo("gemma3:270m"), ModelInfo("qwen3:8b")],
+}
+
+
+def reported(ai):
+    if ai not in REPORTED:
+        raise AssessError(f"{ai}: no API key")
+    return REPORTED[ai]
+
+
 @pytest.fixture
-def root(tk_root):
-    """A window of its own for each test."""
+def root(tk_root, monkeypatch):
+    """A window of its own for each test; what the window looks for in the
+    background (the models an AI reports, any-llm's providers) found at
+    once, without starting Claude Code or Codex or asking Ollama; and no
+    dialog waiting for a click: each records what it would have shown, in
+    the window's shown."""
+    monkeypatch.setattr(gui, "models_of", reported)
+    monkeypatch.setattr(gui, "providers", lambda: ["anthropic", "ollama", "openai"])
+    shown = []
+    for name in ("showerror", "showwarning", "showinfo"):
+        monkeypatch.setattr(gui.messagebox, name, lambda title, text, **kw: shown.append(text))
     w = tk.Toplevel(tk_root)
     w.withdraw()
+    w.shown = shown
     yield w
     w.destroy()
+
+
+def settle(root, app, ai: str | None = None) -> None:
+    """Wait until the window has put what the background found in its
+    lists: the providers, and the models of ai."""
+    for _ in range(100):
+        root.update()
+        if not app.asking and (ai is None or ai in app.ai_models):
+            return
+        root.after(20)
+    raise AssertionError("the lists were never filled")
+
+
+def finish(root, app, seconds: float = 60) -> None:
+    """Wait for the comparison's process to end (it starts a Python of its
+    own: a few seconds)."""
+    for _ in range(int(seconds * 10)):
+        root.update()
+        if app.job is None:
+            return
+        root.after(100)
+    raise AssertionError("the comparison never ended")
+
+
+def test_the_stages_are_told(tmp_path):
+    """generate tells each stage as it starts: both comparisons, then the
+    report."""
+    old, new = two_files(tmp_path, "One.\n", "Two.\n")
+    stages = []
+    generate(Settings(mode="files", old=str(old), new=str(new), open_page=False), stages.append)
+    assert stages == [
+        "Comparing paragraph by paragraph…",
+        "Comparing sentence by sentence…",
+        "Writing the report…",
+    ]
+    stages.clear()
+    s = Settings(mode="files", old=str(old), new=str(new), output_format="wdiff")
+    generate(s, stages.append)
+    assert stages == ["Comparing…", "Writing the diff…"]
+
+
+def test_a_comparison_runs_apart_and_can_be_cancelled(root, tmp_path):
+    """Compare starts the comparison in a process of its own and becomes
+    Cancel, which stops it and all it started, and becomes Compare again;
+    the status line tells the stage."""
+    old, new = two_files(tmp_path, "One.\n", "Two.\n")
+    app = App(root, Settings(mode="files", old=str(old), new=str(new), open_page=False))
+    app.run()
+    assert app.button["text"] == "Cancel" and app.job is not None
+    pid = app.job.pid
+    assert app.status.get() == "Starting…"
+    app.cancel()
+    assert app.button["text"] == "Compare" and app.job is None
+    assert app.status.get() == "Cancelled."
+    assert not gui.psutil.pid_exists(pid) or gui.psutil.Process(pid).status() == "zombie"
+    # and a comparison let run tells its stages, then its result
+    seen = set()
+    app.run()
+    for _ in range(600):
+        root.update()
+        seen.add(app.status.get().split(" 1 s")[0].rstrip("0123456789 s"))
+        if app.job is None:
+            break
+        root.after(100)
+    assert "Writing the report…" in seen or "Comparing sentence by sentence…" in seen
+    assert "changed" in app.status.get()
+
+
+def test_the_model_list_says_loading_until_the_ai_answers(root, monkeypatch):
+    """While the AI reports its models, the model and effort fields say
+    Loading and cannot be used; the model saved comes back once they are
+    known."""
+    import threading
+
+    answer = threading.Event()
+
+    def slow(ai):
+        answer.wait(10)
+        return REPORTED[ai]
+
+    monkeypatch.setattr(gui, "models_of", slow)
+    app = App(root, Settings(mode="files", assess="claude/opus", assess_effort="max"))
+    root.update()
+    assert app.assess_model.get() == "Loading…" and app.model_box.instate(["disabled"])
+    assert app.assess_effort.get() == "Loading…" and app.effort_box.instate(["disabled"])
+    s = app.collect()
+    assert (s.assess, s.assess_effort) == ("claude/opus", "max")  # kept meanwhile
+    answer.set()
+    settle(root, app, "claude")
+    assert (app.assess_model.get(), app.assess_effort.get()) == ("opus", "max")
+    assert not app.model_box.instate(["disabled"])
+
+
+def test_ai_model_and_effort_as_the_ai_reports(root):
+    """The AI assessment: the AI, then its model and effort among those it
+    reports, each AI's own default chosen (Claude's "default", Codex's
+    default model and that model's default effort), making the --assess
+    spec; a saved choice comes back as it was."""
+    app = App(root, Settings(mode="files"))
+    settle(root, app)
+    ais = ["none", "claude", "codex", "ollama", "anthropic", "openai"]
+    assert list(app.ai_box["values"]) == ais
+    assert app.assess_spec() == "" and app.model_box.instate(["disabled"])
+    app.assess_ai.set("claude")
+    settle(root, app, "claude")
+    assert list(app.model_box["values"]) == ["default", "opus", "haiku"]
+    assert app.assess_model.get() == "default" and app.assess_spec() == "claude"
+    assert list(app.effort_box["values"]) == ["low", "max"] and app.assess_effort.get() == ""
+    app.assess_model.set("opus")
+    app.assess_effort.set("max")
+    s = app.collect()
+    assert (s.assess, s.assess_effort) == ("claude/opus", "max")
+    app.assess_model.set("haiku")  # it reports no effort
+    assert list(app.effort_box["values"]) == [] and app.assess_effort.get() == ""
+    app.assess_ai.set("codex")
+    settle(root, app, "codex")
+    assert list(app.model_box["values"]) == ["gpt-6-astra", "gpt-5.5"]
+    assert (app.assess_model.get(), app.assess_effort.get()) == ("gpt-6-astra", "low")
+    assert app.model_hint("gpt-6-astra") == "GPT-6-Astra, Codex's default"
+    assert app.effort_hint("low") == "Fast (the model's default)"
+    app.assess_model.set("gpt-5.5")
+    assert app.assess_effort.get() == "medium"
+    app.assess_ai.set("ollama")
+    settle(root, app, "ollama")
+    assert app.assess_spec() == "ollama/gemma3:270m"
+    app.assess_ai.set("openai")  # its models unknown without a key: typed
+    settle(root, app, "openai")
+    assert "no API key" in app.status.get()
+    app.assess_model.set("gpt-5")
+    assert app.assess_spec() == "openai/gpt-5"
+    app.assess_context.set("changes")
+    app.assess_instructions.set("Be brief.")
+    s = app.collect()
+    assert (s.assess_context, s.assess_instructions) == ("changes", "Be brief.")
+    again = App(
+        root,
+        Settings(
+            mode="files", assess="codex/gpt-5.5", assess_effort="low", assess_context="changes"
+        ),
+    )
+    settle(root, again, "codex")
+    assert (again.assess_ai.get(), again.assess_model.get()) == ("codex", "gpt-5.5")
+    assert (again.assess_effort.get(), again.assess_context.get()) == ("low", "changes")
+    again.reset_options()
+    assert again.assess_spec() == "" and again.collect().assess_context == "document"
 
 
 def test_window_loads_a_repository(root, history):
@@ -447,12 +639,8 @@ def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
     app.move_algorithm.set("token-set")
     app.output_format.set("wdiff")
     app.run()
-    for _ in range(300):  # the comparison runs in a thread: at most 30 s
-        root.update()
-        if not app.button.instate(["disabled"]):
-            break
-        root.after(100)
-    assert not app.button.instate(["disabled"]) and "changed" in app.status.get()
+    finish(root, app)
+    assert app.button["text"] == "Compare" and "changed" in app.status.get()
     assert not f.exists()
     app.save_options()
     saved = load_settings(f)
@@ -465,8 +653,8 @@ def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
 
 
 def test_a_failed_comparison_shows_an_error(root, tmp_path, monkeypatch):
-    """An error in the comparison's thread reaches the window: an error box,
-    and the Compare button usable again, not a window waiting forever."""
+    """An error in the comparison's process reaches the window: an error
+    box, and the Compare button back, not a window waiting forever."""
     shown = []
     monkeypatch.setattr(gui.messagebox, "showerror", lambda title, text: shown.append(text))
     app = App(
@@ -479,12 +667,8 @@ def test_a_failed_comparison_shows_an_error(root, tmp_path, monkeypatch):
         ),
     )
     app.run()
-    for _ in range(300):  # the comparison runs in a thread: at most 30 s
-        root.update()
-        if not app.button.instate(["disabled"]):
-            break
-        root.after(100)
-    assert not app.button.instate(["disabled"])
+    finish(root, app)
+    assert app.button["text"] == "Compare"
     assert app.status.get() == "Not compared."
     assert shown and "no such file or folder" in shown[0]
 
@@ -507,12 +691,12 @@ def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     old.write_bytes(b"One sentence here. Another one there.\n")
     new.write_bytes(b"Another one there. One sentence here.\n")
     s.mode, s.old, s.new, s.output = "files", str(old), str(new), str(tmp_path / "r.html")
-    path, _ = generate(s)
+    path, _, _ = generate(s)
     page = path.read_text(encoding="utf-8")
     assert 'data-split="paragraph"' in page and 'data-split="sentence"' in page
     # a diff holds one split: both compares paragraph by paragraph
     s.output_format, s.output = "diff", str(tmp_path / "r.diff")
-    path, _ = generate(s)
+    path, _, _ = generate(s)
     assert path.suffix == ".diff" and path.read_text(encoding="utf-8")
 
 

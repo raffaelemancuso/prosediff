@@ -90,7 +90,10 @@ def test_view_label_only_for_prose(page, tmp_path):
     old.write_text("One.\n")
     new.write_text("Two.\n")
     html = render(compare_paths(old, new))
-    assert "<b>Paragraph view</b>: the prose compared paragraph by paragraph</p>" in html
+    assert (
+        '<span class="view-label" title="The prose compared paragraph by paragraph">'
+        "<b>Paragraph view</b></span>"
+    ) in html
 
 
 def test_render_thousand_separators(page):

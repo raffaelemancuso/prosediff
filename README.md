@@ -97,6 +97,11 @@ prosediff sits between the two:
   from a window, or from `git difftool`. The git program itself is needed
   either way: it aligns the lines of every comparison (see
   [Usage](#usage)).
+- **It can have an AI judge the revision as a whole** (optional): Claude
+  Code, ChatGPT through Codex, a local Ollama model or any API model reads
+  the changes and says whether the new version is better, what changed,
+  what improved and what to fix, at the top of the report (see [AI
+  assessment](#ai-assessment)).
 - **The result is one self-contained HTML file**: no server, no network, no
   Word needed to read it. It can be attached to an e-mail, so a co-author
   sees what changed since they last read the paper, and printed or saved as
@@ -110,6 +115,8 @@ prosediff --files OLD NEW [options]
 prosediff --folders OLD NEW [options]
 prosediff --setup-git [REPO | --global]
 prosediff --to-markdown FILE
+prosediff --list-models AI
+prosediff --login-codex
 ```
 
 (installed: `uv tool install prosediff`; from a checkout: `uv run prosediff ...`)
@@ -149,6 +156,13 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--move-passages`, `--no-move-passages` | also follow the passages moved within a paragraph (a line) or between two (default: on): a run of words removed in one place and added in another, gaps of up to two unchanged words allowed, at least four words (and 15 non-space characters) long, as alike as `--move-similarity` (or `--sentence-move-similarity`) and its algorithm say, is shown as moved rather than as a deletion and an unrelated insertion; a passage is also looked for inside a longer one (a sentence moved out of a paragraph deleted or rewritten). In the GUI, "Moved passages" |
 | `--passage-min-words N`, `--passage-min-chars N`, `--passage-max-gap N`, `--passage-shared-words N`, `--passage-content-letters N`, `--passage-edge-run N`, `--passage-partial-share X`, `--passage-rounds N`, `--passage-max-pairs N`, `--passage-rare-share X`, `--passage-rare-min N` | how moved passages are told from chance likeness (advanced; `prosediff --help` says what each does, and its default): the shortest passage (4 words, 15 characters), the unchanged words allowed inside one (2), the words of meaning two passages must share (2, of 4 letters or more), the words in common that can start or end one (2), when a passage is looked for inside a longer one (0.8), the rounds of matching (4), and past how many pairs only those sharing a rare word are tried (250,000; rare: in 1% of the passages, or 20). In the GUI, the fields of "Advanced settings" |
 | `--move-algorithm NAME`    | how that likeness is measured: `token-sort` (default), the words and punctuation two lines have in common whatever their order; `token-set`, the words both share against the rest of each. See [Moved lines](#moved-lines-algorithm-and-threshold). In the GUI, the list next to "Moved-line similarity" |
+| `--assess AI`              | have an AI assess the value of the changes as a whole, at the top of the HTML report and in `OUTPUT_assessment.md` beside the output (see [AI assessment](#ai-assessment)): `claude`, `codex`, or `PROVIDER/MODEL` (e.g. `ollama/qwen3`, `openai/gpt-5`); `claude/MODEL` and `codex/MODEL` choose their model among those they report (`--list-models`), else the one the login uses. In the GUI, the "AI assessment" card |
+| `--assess-effort LEVEL`    | how hard the model thinks: one of the levels it reports it supports (`--list-models`; e.g. `low`, `medium`, `high`, `xhigh`, `max`). Default: the model's own |
+| `--assess-context document\|changes` | what the model reads: `document` (default), the changes and the whole new version, to check them against the rest of the document (citations, cross-references, terms); `changes`, the changes only. The old version is never sent apart: its unchanged paragraphs are in the new one, and what changed is in the changes. In the GUI, "Changes + new version" and "Changes only" |
+| `--assess-instructions TEXT` | your own instructions, added to the prompt (e.g. `"the journal is Research Policy; Laura asked to shorten the introduction"`), or a text file holding them |
+| `--assess-timeout SECONDS` | give up on the assessment after this long (default 900); the report is written all the same, saying why there is none |
+| `--list-models AI`         | list the models an AI reports it offers (`claude`, `codex`, `ollama`, or any provider any-llm reaches), its default first, and the efforts each supports |
+| `--login-codex`            | log in to ChatGPT, in the browser, for `--assess codex` (once) |
 | `--open`                   | open the HTML report in the browser once it is written |
 | `--setup-git`              | set git up to show Word and OpenDocument files as text and to open prosediff HTML reports from `git difftool` (see below), for the repository REPO (default: the current folder) |
 | `--global`                 | with `--setup-git`, for every repository of the user instead |
@@ -170,7 +184,74 @@ Examples:
 - `prosediff --files draft_v1.docx draft_v2.docx -o changes.diff`: the same
   comparison as a unified diff, to read in an editor or send as a patch;
 - `prosediff --files draft_v1.docx draft_v2.docx -o changes.wdiff
-  --comments none`: as a word diff, the comments left out.
+  --comments none`: as a word diff, the comments left out;
+- `prosediff --files draft_v1.docx draft_v2_returned.docx --assess claude
+  --open`: the report, headed by Claude Code's assessment of the revision;
+- `prosediff --files draft_v1.docx draft_v2_returned.docx --assess
+  ollama/qwen3`: the same by a local model, nothing leaving the computer.
+
+## AI assessment
+
+`--assess AI` (in the window, "AI assessment") has an AI read the changes
+and judge them as a whole, as a co-author reading the returned draft would:
+
+- **Verdict**: *Improves*, *Mixed* or *Worsens*, and why;
+- **What changed**, grouped by section;
+- **Improvements**;
+- **Problems to fix**, most serious first, each quoting the words concerned:
+  claims no longer supported, results misstated, broken sentences,
+  placeholders, dangling citations, inconsistent terms or spelling, and the
+  reviewers' comments left unanswered.
+
+It heads the HTML report, its verdict a coloured badge, and is written
+beside the output as Markdown (`report_assessment.md` for `report.html`),
+for any format.
+
+![The AI assessment at the top of a prosediff report: a verdict badge, what changed, the improvements and the problems to fix](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_assessment.png)
+
+The AI is one of three kinds, each an optional extra of prosediff, so the
+plain install stays small:
+
+| `--assess`       | What answers | Install | Sign-in |
+|------------------|--------------|---------|---------|
+| `claude`, `claude/MODEL` | Claude Code, through the [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/); MODEL one of those Claude Code reports (`opus`, `sonnet`, a full name such as `claude-opus-5-5`, ...) | `uv tool install "prosediff[claude]"` | your Claude login (the one Claude Code uses); billed to your Claude plan |
+| `codex`, `codex/MODEL`   | ChatGPT, through OpenAI's [Codex SDK](https://pypi.org/project/openai-codex/) (the Codex program comes with it); MODEL one of those Codex reports (`gpt-5.5`, ...) | `uv tool install "prosediff[codex]"` | your ChatGPT login: `prosediff --login-codex` once; billed to your ChatGPT plan |
+| `PROVIDER/MODEL` | any model of the fifty-odd [providers any-llm supports](https://mozilla-ai.github.io/any-llm/providers/): a local model of [Ollama](https://ollama.com/) (`ollama/qwen3`), LM Studio, llama.cpp or vLLM, or an API (`openai/gpt-5`, `anthropic/claude-sonnet-5`, `gemini/...`, `mistral/...`, `deepseek/...`, `groq/...`, `openrouter/...`, Azure, Bedrock, ...) | `uv tool install "prosediff[models]"` | none for a local model; an API's key in its environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, ...) |
+
+Several extras combine: `"prosediff[claude,codex,models]"`. Asked for an AI
+whose extra is not installed, prosediff says which to add.
+
+The models, and the efforts each supports, are always those the AI itself
+reports, never a list kept in prosediff: `prosediff --list-models claude`
+(or `codex`, `ollama`, `openai`, ...) prints them, its default first, the
+model's default effort starred; the window offers the same lists. How the
+assessment is made is chosen with three more settings:
+
+- **Effort** (`--assess-effort`): how hard the model thinks, among the
+  levels it supports; more effort reads more closely, but takes longer and
+  costs more.
+- **What it reads** (`--assess-context`; in the window, **Changes + new
+  version** or **Changes only**): by default the changes and the whole new
+  version, so the model can check them against the rest of the document (a
+  citation left unused, a claim contradicting another section, a placeholder
+  in an untouched paragraph); or the changes only, less to read. The old
+  version is not sent apart, and need not be: its unchanged paragraphs are
+  in the new one, and the changes hold its old wording beside the new.
+- **Your instructions** (`--assess-instructions`): the journal, what a
+  co-author asked for, what to look at, in a sentence or a text file;
+  they are added to the prompt, the assessment's format kept.
+
+What the AI is sent: the word diff of the changed paragraphs, comments
+included, the whole new version (unless `--assess-context changes`), and
+the instructions; no files, and no tools to run. With `claude`, `codex` or an API, that text goes to
+Anthropic's or OpenAI's (or the API's) servers under your account; with
+Ollama it stays on the computer. The HTML report itself still needs no
+network to read. A long revision is cut at about 100,000 tokens, the model
+told; a local model is given a context window to fit the diff. The
+assessment is an AI's reading: check it against the text. Its worth is the model's: a local model needs to be large enough to
+follow the instructions over a long diff (a few billion parameters at
+least), and fast only when it fits the graphics card's memory; a very small
+one (under 1 billion) answers, but does not assess.
 
 ## With git's own commands
 
@@ -263,21 +344,39 @@ saved, so the others follow prosediff's defaults; "Reset to defaults"
 puts every option back.
 
 Under **Output**, the format (HTML report, unified diff or word diff, the
-extension of the file following it) and where to save it (by default,
+extension of the file following it), where to save it (by default,
 comparing two folders, `prosediff.html` in the new one; otherwise a new file
-in the temporary folder). Compare (or Ctrl+Enter) writes it and opens it;
-the comparison runs in the background, a progress bar running meanwhile, a
-notification says when it is done. The window remembers its choices only
+in the temporary folder).
+
+Under **AI assessment** (see [AI assessment](#ai-assessment)), the **AI**
+(none, `claude`, `codex`, `ollama`, or another provider any-llm reaches),
+its **Model** and its **Effort**, each list as the AI reports it and its
+own defaults chosen (any name can be typed); what it **Reads**, the changes
+and the new version or the changes only; and your **Instructions**, typed or
+from a text file. Compare (or Ctrl+Enter) writes it and opens it.
+The comparison runs in a process of its own, the status line saying the
+stage it is at and for how long (comparing paragraph by paragraph, then
+sentence by sentence, asking the AI, writing the report); meanwhile Compare
+becomes **Cancel** (or Esc), which stops it and all it started, the AI
+included. A notification says when it is done. The window remembers its choices only
 when asked: **Save options** writes them (to `%APPDATA%\prosediff\gui.json`)
 for it to open with next time, and **Reset to defaults** puts every option
 back to its default (what is compared and where the output goes stay).
 
 ## The HTML report
 
-- The two sides (hash or file name, subject, author, date) and, for
-  commits, the commits in between (reachable from the target, or from HEAD
-  for the index and the working tree, and not from the base; the 50 newest
-  are listed).
+- A compact header: the title (and the repository's path), then a line
+  for each side (hash or file name, subject, author, date, and the file's
+  or folder's path outside git) and, for commits, the commits in between
+  (reachable from the target, or from HEAD for the index and the working
+  tree, and not from the base; the 50 newest are listed).
+- With `--assess`, the AI's assessment of the changes: its verdict as a
+  badge, what changed, the improvements and the problems to fix (see [AI
+  assessment](#ai-assessment)); it folds away like a file.
+- A summary line: which view it is (paragraph or sentence, with a button to
+  the other when the report holds both) and how many paragraphs (or
+  sentences; lines, for files other than prose) were changed, inserted,
+  deleted and moved.
 - A comments panel: every comment with its author and date, marked new,
   removed or unchanged, each linked to the line it sits in (unchanged
   comments are in a collapsed list). It shows all of them, or only the new
@@ -289,11 +388,10 @@ back to its default (what is compared and where the output goes stay).
   ends). In the text, a comment is a 💬 marker, 🆕 when it was added
   since the base, or 🗑️ when it was removed; hovering or focusing it
   shows the author in bold, the comment below and its date in grey.
-- At the top, how many paragraphs (or sentences; lines, for files other than
-  prose) were changed, inserted, deleted and moved.
-- The changed files with their counts of lines and words added and removed
-  (and moved lines), linked to their tables; buttons expand or collapse
-  every file at once.
+- With more than one file, the changed files with their counts of lines
+  and words added and removed (and moved lines), linked to their tables;
+  buttons expand or collapse every file at once. A single file needs
+  neither: its own header gives its counts.
 - Each file as a collapsible four-column table, its header sticking to the
   top while it scrolls. Long lines wrap instead of scrolling sideways, so
   prose stays readable. Unchanged lines beyond the context are folded into a
@@ -327,22 +425,21 @@ back to its default (what is compared and where the output goes stay).
 - Changed images (PNG, JPEG, GIF, WebP, BMP, up to 5 MB) old and new side by
   side; other binary files are listed but not shown.
 - A toolbar: the number of changes, with `n` and `p` (or its arrows) to jump
-  to the next and previous change; five icon buttons (hovering any toolbar
-  item shows its name, what it does and its key): `u` for one column instead
-  of two (each changed line shows its old version above its new one); `f` for
+  to the next and previous change; the view switch (`s`, with both views);
+  `l` for the lines between moves, `v` for the moved passages and `u` for
+  one column; and a **View** menu for the switches few use, each named with
+  its key (hovering any toolbar item shows its name, what it does and its
+  key). `u` shows one column instead of two (each changed line shows its
+  old version above its new one). In the View menu: `f` for
   the text formatted, on by default, or plain (formatted: Markdown's syntax
   hidden, emphasis, headings, links and citations styled, a document's bold,
   italic, underline and the like shown, prose in a proportional font); `i` for comments inline, each written out after its marker (its
-  author and text), as on paper; `t` to tint the whole
-  of an edited line, as most diff tools do (by default only its changed
-  words are coloured, and its gutter; the tint stops short of the space
-  between paragraphs); `m` for the formatting changes, on by default: text
+  author and text), as on paper; `m` for the formatting changes, on by default: text
   of a Word or OpenDocument file whose words are the same but whose
   formatting changed (made bold or italic, underlined, struck through, made
   superscript, subscript, a link or a heading) is marked in amber, what
   changed shown on hover, the unchanged lines holding such changes
-  unfolded, and each file's header says in how many lines; `v` for the
-  moved passages, on by default (see above); a spacing
+  unfolded, and each file's header says in how many lines; a spacing
   stepper, − and + either side of the value
   (or `[` and `]`, or the arrow keys on the value, an ARIA spinbutton), for
   less or more space between the paragraphs of Markdown and
@@ -559,13 +656,16 @@ docstring lists them); `compare` also takes `paths`, `cached` and
 uv run pytest                            # the tests
 uv run playwright install chromium       # once, for the browser tests
 uv run ruff check && uv run ruff format --check
-uv run --with pillow python docs/make_screenshots.py   # the README screenshots
+uv run --with pillow python docs/make_screenshots.py --assess claude   # the README screenshots
 uv run --with pillow python docs/make_icon.py          # the window icons, from docs/logo.svg
 ```
 
 The tests build throwaway repositories with GitPython and need `git` on
 `PATH`; the browser tests need Playwright's Chromium, and are skipped
-without it. The Word tests write their documents with python-docx, or as raw
+without it. The AI assessment is tested with a stand-in for the models, and
+once with a real local one, the smallest there is (`ollama pull
+gemma3:270m`, 292 MB), skipped when Ollama or that model is missing; no
+test calls Claude, Codex or a paid API. The Word tests write their documents with python-docx, or as raw
 XML for what it cannot write (tracked changes, footnotes, equations), and
 the OpenDocument tests as raw XML. The git tests keep git's global and
 system settings out of the way. `.github/workflows/tests.yml` runs

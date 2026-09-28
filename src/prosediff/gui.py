@@ -16,13 +16,16 @@ system is set (Windows' app mode, macOS's appearance), the title bar too on
 Windows; switches for the yes-or-no options, Bootstrap icons on the buttons.
 """
 
+import contextlib
 import ctypes
 import json
+import multiprocessing
 import os
 import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import webbrowser
 from collections.abc import Callable
@@ -31,8 +34,20 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import git
+import psutil
 import ttkbootstrap as ttk
 
+from prosediff.assess import (
+    CLAUDE_DEFAULT,
+    CONTEXTS,
+    AssessError,
+    Assessment,
+    AssessRequest,
+    ModelInfo,
+    models_of,
+    parse_backend,
+    providers,
+)
 from prosediff.diff import (
     AUTO_ENCODING,
     COMMENT_MODES,
@@ -56,6 +71,7 @@ from prosediff.render import (
     FORMATS,
     SPLITS,
     TEXT_SUFFIXES,
+    assess_comparison,
     check_split,
     counted,
     default_output,
@@ -70,6 +86,21 @@ ENCODINGS = (AUTO_ENCODING, "utf-8", "cp1252", "latin-1", "utf-16", "cp1250", "c
 # The choices, then the common codes; any code can be typed.
 LANGUAGES = (DEFAULT, DOCUMENT, GUESS)
 LANGUAGES += ("en", "it", "de", "fr", "es", "pt", "nl", "pl", "sv", "da", "fi", "cs", "el")
+# The AI assessment: the AI (none, the two subscriptions, Ollama, then the
+# other providers any-llm reaches, found in the background) and its model,
+# chosen among those the AI reports (models_of), its own default first;
+# any can be typed.
+NO_ASSESSMENT = "none"
+# What the model and effort fields say while the AI reports its models.
+LOADING = "Loading…"
+AIS = (NO_ASSESSMENT, "claude", "codex", "ollama")
+AI_HINTS = {
+    NO_ASSESSMENT: "No assessment.",
+    "claude": "Claude Code, on your Claude login (prosediff[claude]).",
+    "codex": "ChatGPT through Codex, on your ChatGPT login (prosediff[codex]); log in "
+    "once with prosediff --login-codex.",
+    "ollama": "A local Ollama model: nothing leaves this computer (prosediff[models]).",
+}
 # What each item of the drop-down lists means (item_hints).
 ENCODING_HINTS = {
     AUTO_ENCODING: "UTF-8, unless a file cannot be read in it; then guessed.",
@@ -190,6 +221,13 @@ class Settings:
     # "html": the HTML report; "diff", "wdiff": a unified or word diff (prosediff.unified)
     output_format: str = "html"
     open_page: bool = True
+    # the AI that assesses the changes (prosediff.assess): "claude", "codex",
+    # "PROVIDER/MODEL"; "": none; how hard it thinks ("": its default), what
+    # it reads (one of CONTEXTS), and the instructions (text, or a file)
+    assess: str = ""
+    assess_effort: str = ""
+    assess_context: str = "document"
+    assess_instructions: str = ""
 
 
 READY = "Choose what to compare, then Compare."
@@ -341,8 +379,13 @@ def context_of(s: Settings) -> Context:
         return "auto"
 
 
-def generate(s: Settings) -> tuple[Path, Comparison]:
-    """Compare as the settings say and write the HTML report; returns its path."""
+def generate(
+    s: Settings, progress: Callable[[str], None] = lambda stage: None
+) -> tuple[Path, Comparison, Assessment | None]:
+    """Compare as the settings say and write the HTML report; returns its
+    path, the comparison and the AI's assessment (None when none was asked:
+    a failed one holds its error, and the report is written all the same).
+    progress is told each stage as it starts ("Comparing…")."""
     paths = s.paths or None
     options = Options(
         context=context_of(s),
@@ -386,11 +429,30 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
             untracked=s.untracked and s.target in ("worktree", ""),
         )
 
-    comparison, sentences = compare_split(run, options, split)
+    def staged(options: Options) -> Comparison:
+        if split != "both":
+            progress("Comparing…")
+        else:
+            unit = "sentence" if options.by_sentence else "paragraph"
+            progress(f"Comparing {unit} by {unit}…")
+        return run(options)
+
+    comparison, sentences = compare_split(staged, options, split)
     out = Path(s.output) if s.output else None
     if out is None and s.mode != "git":
         out = default_page(Path(old), Path(new))
     out = Path(with_format(str(out), fmt)) if out is not None else default_output(fmt)
+    assessment = None
+    if s.assess:
+        request = AssessRequest(
+            s.assess,
+            effort=s.assess_effort,
+            context=s.assess_context,
+            instructions=s.assess_instructions,
+        )
+        progress(f"Asking {s.assess} to assess the changes…")
+        assessment = assess_comparison(comparison, request)
+    progress("Writing the report…" if fmt == "html" else "Writing the diff…")
     write_output(
         comparison,
         out,
@@ -400,8 +462,67 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
         context=context_of(s),
         sentences=sentences,
         split=split,
+        assessment=assessment,
     )
-    return out, comparison
+    return out, comparison, assessment
+
+
+# Why a comparison can fail: the errors the window reports, others being bugs.
+JOB_ERRORS = (
+    git.InvalidGitRepositoryError,
+    git.NoSuchPathError,
+    git.BadName,
+    git.GitCommandError,
+    FilterError,
+    RuntimeError,  # git diff failed or timed out (git_opcodes)
+    SourceError,
+    ValueError,
+    OSError,
+)
+
+
+@dataclass
+class JobResult:
+    """What the window needs of a finished comparison: where it went, what
+    changed, and the assessment."""
+
+    path: Path
+    files: int
+    additions: int
+    deletions: int
+    assessment: Assessment | None = None
+
+
+def run_job(s: Settings, messages) -> None:
+    """generate, in a process of its own that the window can stop: each
+    stage, then the result or the error, sent back on messages, as
+    ("stage", text), ("done", JobResult) or ("error", text)."""
+    invisible_console()  # its console programs open no window either
+    try:
+        path, c, assessment = generate(s, lambda stage: messages.put(("stage", stage)))
+    except JOB_ERRORS as e:
+        messages.put(("error", str(e) or type(e).__name__))
+        return
+    except Exception as e:  # a bug: said rather than left unanswered
+        messages.put(("error", f"{type(e).__name__}: {e}"))
+        return
+    counts = c.counts
+    result = JobResult(path, len(c.files), counts.additions, counts.deletions, assessment)
+    messages.put(("done", result))
+
+
+def stop_process_tree(pid: int) -> None:
+    """Stop a process and every program it started (Claude Code, Codex,
+    git), at once."""
+    try:
+        process = psutil.Process(pid)
+        family = [*process.children(recursive=True), process]
+    except psutil.NoSuchProcess:
+        return
+    for p in family:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            p.kill()
+    psutil.wait_procs(family, timeout=5)
 
 
 def with_format(path: str, fmt: str) -> str:
@@ -434,7 +555,12 @@ class App:
         use_theme(root)
         self.s = settings or load_settings()
         self.choices: dict[str, str] = {}  # label -> ref
-        self.results: queue.Queue = queue.Queue()
+        # the comparison running (a process of its own), what it sends back,
+        # its settings, and the stage it is at
+        self.job: multiprocessing.process.BaseProcess | None = None
+        self.messages = None
+        self.job_settings: Settings | None = None
+        self.stage, self.stage_started = "", 0.0
         root.title("prosediff: compare two versions")
         root.minsize(780, 0)
         page = ttk.Frame(root, padding=(14, 12, 14, 12))
@@ -481,6 +607,7 @@ class App:
         self.build_shown_card(shown)
         self.build_advanced(page)
         self.build_output(page)
+        self.build_assessment(page)
         self.build_bottom(page)
 
         if self.s.repo:
@@ -827,16 +954,263 @@ class App:
         self.open_page = tk.BooleanVar(value=self.s.open_page)
         toggle(out, "Open when done", self.open_page).grid(row=2, column=1, sticky="w", **PAD)
 
+    def build_assessment(self, page: ttk.Frame) -> None:
+        """The AI assessment: the AI, its model and effort, among those it
+        reports; what it reads; the instructions of the person asking."""
+        card = ttk.Labelframe(page, text="AI assessment", padding=(10, 8))
+        card.pack(fill="x", pady=(10, 0))
+        card.columnconfigure(1, weight=1)
+        ai, _, model = (self.s.assess or NO_ASSESSMENT).partition("/")
+        self.assess_ai = tk.StringVar(value=ai)
+        self.assess_model = tk.StringVar(value=model or (CLAUDE_DEFAULT if ai == "claude" else ""))
+        self.assess_effort = tk.StringVar(value=self.s.assess_effort)
+        # the models each AI reports, once asked; the AIs being asked; what
+        # the background found, for tkinter's own thread
+        self.ai_models: dict[str, list[ModelInfo]] = {}
+        self.asking: set[str] = set()
+        self.found: queue.Queue[tuple[str, list, str]] = queue.Queue()
+        # the model and effort chosen before the list shows "Loading…"
+        self.pending: tuple[str, str] = ("", "")
+        ttk.Label(card, text="AI").grid(row=0, column=0, sticky="w", **PAD)
+        ai_row = ttk.Frame(card)
+        ai_row.grid(row=0, column=1, columnspan=2, sticky="w", **PAD)
+        self.ai_box = item_hints(
+            ttk.Combobox(ai_row, textvariable=self.assess_ai, values=AIS, width=12),
+            lambda value: AI_HINTS.get(
+                value,
+                f"{value}: a model of its API, through any-llm, "
+                "its key in the environment (prosediff[models]).",
+            ),
+        )
+        self.ai_box.pack(side="left")
+        ttk.Label(ai_row, text="Model").pack(side="left", padx=(12, 6))
+        self.model_box = item_hints(
+            ttk.Combobox(ai_row, textvariable=self.assess_model, width=22),
+            self.model_hint,
+        )
+        self.model_box.pack(side="left")
+        ttk.Label(ai_row, text="Effort").pack(side="left", padx=(12, 6))
+        self.effort_box = item_hints(
+            ttk.Combobox(ai_row, textvariable=self.assess_effort, width=9),
+            self.effort_hint,
+        )
+        self.effort_box.pack(side="left")
+        for w, tip in (
+            (
+                self.ai_box,
+                "Have an AI assess the value of the changes as a whole: a verdict, what "
+                "changed, what improved and the problems to fix, at the top of the HTML "
+                "report and in a Markdown file beside it. claude: Claude Code; codex: "
+                "ChatGPT through Codex; ollama: a local model; or another provider "
+                "any-llm reaches (openai, anthropic, gemini, ...), its API key in the "
+                "environment.",
+            ),
+            (
+                self.model_box,
+                "The model that assesses, among those the AI reports, its own default "
+                "first; or any name typed.",
+            ),
+            (
+                self.effort_box,
+                "How hard the model thinks, among the levels it reports it supports; "
+                "empty: its own default. More effort, a closer reading, but slower and "
+                "costlier.",
+            ),
+        ):
+            hint(w, tip)
+        self.assess_context = tk.StringVar(
+            value=self.s.assess_context if self.s.assess_context in CONTEXTS else "document"
+        )
+        reads = ttk.Frame(card)
+        for value, text, tip in (
+            (
+                "document",
+                "Changes + new version",
+                "The changes (a word diff: the old wording beside the new) and the whole "
+                "new version, for the model to check them against the rest of the "
+                "document: citations, cross-references, terms. The old version needs no "
+                "sending: its unchanged paragraphs are in the new one, the rest in the "
+                "changes. More to read, a better check.",
+            ),
+            (
+                "changes",
+                "Changes only",
+                "The changes alone (a word diff of the changed paragraphs): less to read, "
+                "but nothing of the text around them.",
+            ),
+        ):
+            button = ttk.Radiobutton(
+                reads,
+                text=text,
+                value=value,
+                variable=self.assess_context,
+                bootstyle="secondary-outline-toolbutton",
+                padding=(8, 3),
+            )
+            button.pack(side="left")
+            hint(button, tip)
+        field_row(card, 1, "Reads", reads, "What the model is sent, besides the instructions.")
+        self.assess_instructions = tk.StringVar(value=self.s.assess_instructions)
+        ttk.Label(card, text="Instructions").grid(row=2, column=0, sticky="w", **PAD)
+        entry = ttk.Entry(card, textvariable=self.assess_instructions)
+        entry.grid(row=2, column=1, sticky="ew", **PAD)
+        hint(
+            entry,
+            "Your own instructions, added to the prompt: the journal, what a co-author "
+            'asked for, what to look at (e.g. "the journal is Research Policy; check that '
+            'the introduction was cut by a fifth"); or a text file holding them.',
+        )
+        browse(
+            card,
+            lambda: self.pick_into(self.assess_instructions, "Instructions for the AI"),
+            "Choose a text file holding the instructions",
+        ).grid(row=2, column=2, **PAD)
+        self.assess_ai.trace_add("write", lambda *_: self.update_models())
+        self.assess_model.trace_add("write", lambda *_: self.update_efforts())
+        self.update_models(keep=True)  # the model and effort saved stay
+        # the providers any-llm reaches, for the AI list
+        self.ask("providers", providers)
+
+    def pick_into(self, var: tk.StringVar, title: str) -> None:
+        chosen = filedialog.askopenfilename(
+            parent=self.root, title=title, filetypes=[("Text", "*.txt *.md"), ("All", "*.*")]
+        )
+        if chosen:
+            var.set(chosen)
+
+    def ask(self, kind: str, find: Callable[[], list]) -> None:
+        """Look for something in the background (an AI's models, the
+        providers), without holding the window up; add_found puts it in its
+        list once found."""
+        if kind in self.asking:
+            return
+        self.asking.add(kind)
+
+        def work() -> None:
+            try:
+                self.found.put((kind, find(), ""))
+            except Exception as e:
+                self.found.put((kind, [], str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(200, self.add_found)
+
+    def add_found(self) -> None:
+        """Put what the background found in the lists, as it comes; an AI
+        that could not say its models says why in the status line."""
+        while True:
+            try:
+                kind, found, error = self.found.get_nowait()
+            except queue.Empty:
+                break
+            self.asking.discard(kind)
+            if kind == "providers":
+                others = [p for p in found if p not in AIS]
+                self.ai_box.configure(values=(*AIS, *others))
+                continue
+            self.ai_models[kind] = found
+            if error:
+                self.status.set(f"The models of {kind} are not known: {error}")
+            if self.assess_ai.get().strip() == kind:
+                self.update_models(keep=True)
+        if self.asking:
+            self.root.after(200, self.add_found)
+
+    def update_models(self, keep: bool = False) -> None:
+        """The model list of the AI chosen, as the AI reports it (asked for
+        in the background the first time); none for none. The model shown
+        becomes the AI's own default, the first it reports, unless keep and
+        one is already chosen."""
+        ai = self.assess_ai.get().strip()
+        self.model_box.state(["disabled"] if ai in ("", NO_ASSESSMENT) else ["!disabled"])
+        if ai in ("", NO_ASSESSMENT):
+            self.model_box.configure(values=())
+            self.update_efforts()
+            return
+        if ai not in self.ai_models:
+            # "Loading…" until the AI has said its models; the model and
+            # effort chosen before kept for then
+            if self.assess_model.get() != LOADING:
+                self.pending = (
+                    (self.assess_model.get().strip(), self.assess_effort.get().strip())
+                    if keep
+                    else ("", "")
+                )
+            self.model_box.configure(values=())
+            self.assess_model.set(LOADING)
+            self.assess_effort.set(LOADING)
+            self.model_box.state(["disabled"])
+            self.effort_box.state(["disabled"])
+            self.ask(ai, lambda: models_of(ai))
+            return
+        models = [m.name for m in self.ai_models[ai]]
+        self.model_box.configure(values=models)
+        if self.assess_model.get() == LOADING:
+            model, effort = self.pending
+            self.pending = ("", "")
+            self.assess_model.set(model or (models[0] if models else ""))
+            if effort and effort in self.effort_box["values"]:
+                self.assess_effort.set(effort)
+            return
+        if keep and self.assess_model.get().strip():
+            self.update_efforts(keep=True)
+            return
+        self.assess_model.set(models[0] if models else "")
+
+    def chosen_model(self) -> ModelInfo | None:
+        """The model chosen, as its AI reports it; None when unknown."""
+        name = self.assess_model.get().strip()
+        found = self.ai_models.get(self.assess_ai.get().strip(), [])
+        return next((m for m in found if m.name == name), None)
+
+    def update_efforts(self, keep: bool = False) -> None:
+        """The efforts the model chosen reports it supports, its own default
+        chosen (none said: empty, the model's default), unless keep and one
+        it supports is chosen already."""
+        model = self.chosen_model()
+        levels = [level for level, _ in model.efforts] if model else []
+        self.effort_box.configure(values=levels)
+        ai = self.assess_ai.get().strip()
+        self.effort_box.state(["disabled"] if ai in ("", NO_ASSESSMENT) else ["!disabled"])
+        if keep and (self.assess_effort.get() in levels or model is None):
+            return
+        self.assess_effort.set(model.default_effort if model else "")
+
+    def model_hint(self, value: str) -> str:
+        found = self.ai_models.get(self.assess_ai.get().strip(), [])
+        return next((m.description for m in found if m.name == value), "")
+
+    def effort_hint(self, value: str) -> str:
+        model = self.chosen_model()
+        said = dict(model.efforts).get(value, "") if model else ""
+        default = " (the model's default)" if model and value == model.default_effort else ""
+        return f"{said}{default}".strip()
+
+    def assess_spec(self) -> str:
+        """The AI assessment asked for, as --assess takes it: "claude",
+        "claude/opus", "ollama/qwen3"; "" for none. Claude Code's own
+        default is asked for by naming no model."""
+        ai, model = self.assess_ai.get().strip(), self.assess_model.get().strip()
+        if model == LOADING:
+            model = self.pending[0]  # the one chosen before, or the AI's default
+        if ai in ("", NO_ASSESSMENT):
+            return ""
+        if not model or (ai == "claude" and model == CLAUDE_DEFAULT):
+            return ai
+        return f"{ai}/{model}"
+
     def build_bottom(self, page: ttk.Frame) -> None:
         """The status line and the buttons."""
         bottom = ttk.Frame(page)
         bottom.pack(fill="x", pady=(12, 0))
         self.status = tk.StringVar(value=READY)
         ttk.Label(bottom, textvariable=self.status, bootstyle="secondary").pack(side="left")
+        self.compare_icon = ttk.Icon("play-fill", size=16, color="white")
+        self.cancel_icon = ttk.Icon("stop-fill", size=16, color="white")
         self.button = ttk.Button(
             bottom,
             text="Compare",
-            image=ttk.Icon("play-fill", size=16, color="white"),
+            image=self.compare_icon,
             compound="left",
             command=self.run,
             default="active",
@@ -844,7 +1218,13 @@ class App:
             padding=(16, 6),
         )
         self.button.pack(side="right")
-        hint(self.button, "Compare, write the output and open it (Ctrl+Enter)")
+        # its tooltip changes with it: Compare, or Cancel while one runs
+        self.button_tip = ttk.ToolTip(
+            self.button,
+            text="Compare, write the output and open it (Ctrl+Enter)",
+            wraplength=HINT_WIDTH,
+            delay=HINT_DELAY_MS,
+        )
         reset = ttk.Button(
             bottom,
             text="Reset to defaults",
@@ -873,6 +1253,7 @@ class App:
             bottom, mode="indeterminate", bootstyle="striped", length=140
         )
         self.root.bind("<Control-Return>", lambda e: self.run())
+        self.root.bind("<Escape>", lambda e: self.cancel())
 
     def show_mode(self) -> None:
         """Show the fields of what is compared: a repository, files or folders."""
@@ -1027,6 +1408,14 @@ class App:
             output=self.output.get().strip(),
             output_format=self.output_format.get(),
             open_page=self.open_page.get(),
+            assess=self.assess_spec(),
+            assess_effort=(
+                self.pending[1]
+                if self.assess_effort.get() == LOADING
+                else self.assess_effort.get().strip()
+            ),
+            assess_context=self.assess_context.get(),
+            assess_instructions=self.assess_instructions.get().strip(),
         )
 
     def toggle_advanced(self) -> None:
@@ -1091,6 +1480,9 @@ class App:
             (self.untracked, d.untracked),
             (self.output_format, d.output_format),
             (self.open_page, d.open_page),
+            (self.assess_ai, d.assess or NO_ASSESSMENT),
+            (self.assess_context, d.assess_context),
+            (self.assess_instructions, d.assess_instructions),
         ):
             var.set(value)
         self.move_passages.set(d.move_passages)
@@ -1103,50 +1495,117 @@ class App:
     # Running -------------------------------------------------------------------
 
     def run(self) -> None:
+        if self.job is not None:
+            return  # one comparison at a time
         s = self.collect()
-        self.button.state(["disabled"])
-        self.status.set("Comparing…")
+        if s.assess:
+            try:
+                parse_backend(s.assess)
+            except AssessError as e:
+                messagebox.showerror("prosediff", f"AI assessment: {e}")
+                return
+        self.set_stage("Starting…")
         self.progress.pack(side="right", padx=12)
         self.progress.start(12)
-
-        def work() -> None:
-            try:
-                self.results.put(("done", generate(s), s))
-            except (
-                git.InvalidGitRepositoryError,
-                git.NoSuchPathError,
-                git.BadName,
-                git.GitCommandError,
-                FilterError,
-                RuntimeError,  # git diff failed or timed out (git_opcodes)
-                SourceError,
-                ValueError,
-                OSError,
-            ) as e:
-                self.results.put(("error", e, s))
-
-        threading.Thread(target=work, daemon=True).start()
+        # a process of its own, which Cancel stops with all it started
+        context = multiprocessing.get_context("spawn")
+        self.messages = context.Queue()
+        self.job = context.Process(target=run_job, args=(s, self.messages), daemon=True)
+        self.job.start()
+        self.job_settings = s
+        self.show_cancel(True)
         self.root.after(100, self.poll)
 
-    def poll(self) -> None:
-        """Pick up the result of the background comparison (tkinter must
-        only be touched from its own thread)."""
-        try:
-            kind, value, s = self.results.get_nowait()
-        except queue.Empty:
-            self.root.after(100, self.poll)
+    def cancel(self) -> None:
+        """Stop the comparison running, and all it started."""
+        if self.job is None:
             return
-        self.button.state(["!disabled"])
+        stop_process_tree(self.job.pid)
+        self.finish_job()
+        self.status.set("Cancelled.")
+
+    def finish_job(self) -> None:
+        self.job = None
         self.progress.stop()
         self.progress.pack_forget()
+        self.show_cancel(False)
+
+    def show_cancel(self, running: bool) -> None:
+        """The button Compare, or Cancel while a comparison runs."""
+        if running:
+            self.button.configure(
+                text="Cancel", image=self.cancel_icon, command=self.cancel, bootstyle="danger"
+            )
+            self.button_tip.text = "Stop this comparison and the AI assessment (Esc)"
+        else:
+            self.button.configure(
+                text="Compare", image=self.compare_icon, command=self.run, bootstyle="primary"
+            )
+            self.button_tip.text = "Compare, write the output and open it (Ctrl+Enter)"
+
+    def set_stage(self, stage: str) -> None:
+        self.stage, self.stage_started = stage, time.monotonic()
+        self.status.set(stage)
+
+    def poll(self) -> None:
+        """Pick up what the comparison's process says: each stage, shown
+        with the seconds it has taken so far, then its result (tkinter must
+        only be touched from its own thread)."""
+        if self.job is None:
+            return  # cancelled
+        try:
+            kind, value = self.messages.get_nowait()
+        except queue.Empty:
+            if not self.job.is_alive():
+                # its last word may still be on its way when it has ended
+                try:
+                    kind, value = self.messages.get(timeout=2)
+                except queue.Empty:
+                    code = self.job.exitcode
+                    self.finish_job()
+                    self.status.set("Not compared.")
+                    messagebox.showerror(
+                        "prosediff",
+                        f"The comparison stopped without a result (exit code {code}).",
+                    )
+                    return
+                self.handle(kind, value)
+                return
+            seconds = time.monotonic() - self.stage_started
+            if seconds >= 1:
+                self.status.set(f"{self.stage} {seconds:,.0f} s")
+            self.root.after(100, self.poll)
+            return
+        self.handle(kind, value)
+
+    def handle(self, kind: str, value) -> None:
+        """One message of the comparison's process: a stage, its result, or
+        its error."""
+        if kind == "stage":
+            self.set_stage(value)
+            self.root.after(100, self.poll)
+            return
+        s = self.job_settings
+        self.finish_job()
         if kind == "error":
             self.status.set("Not compared.")
-            messagebox.showerror("prosediff", str(value) or type(value).__name__)
+            messagebox.showerror("prosediff", value)
             return
-        path, c = value
-        n, counts = len(c.files), c.counts
-        summary = f"{counted(n, 'file')} changed, +{counts.additions:,} −{counts.deletions:,} lines"
+        result: JobResult = value
+        path, assessment = result.path, result.assessment
+        summary = (
+            f"{counted(result.files, 'file')} changed, "
+            f"+{result.additions:,} −{result.deletions:,} lines"
+        )
+        if assessment is not None:
+            summary += (
+                "; the assessment failed"
+                if assessment.error
+                else f"; assessed: {assessment.verdict or 'see the report'}"
+            )
         self.status.set(f"{summary}: {path.name}")
+        if assessment is not None and assessment.error:
+            messagebox.showwarning("prosediff", f"The AI assessment failed: {assessment.error}")
         ttk.ToastNotification(
             "prosediff",
             f"{summary}\n{path.name}",
@@ -1291,6 +1750,37 @@ def received(args: list[str]) -> str:
     return "\n".join(lines)
 
 
+class _AllocConsoleOptions(ctypes.Structure):
+    _fields_ = (
+        ("mode", ctypes.c_int),
+        ("use_show_window", ctypes.c_int),
+        ("show_window", ctypes.c_ushort),
+    )
+
+
+ALLOC_CONSOLE_MODE_NO_WINDOW = 2
+
+
+def invisible_console() -> bool:
+    """On Windows, a console without a window for the window program, when it
+    has none: the console programs it starts (Claude Code for an AI
+    assessment, Codex) share it rather than each opening a console window of
+    its own, which the Claude Agent SDK, starting its program with no flags,
+    would otherwise do. Needs Windows 11 24H2 (AllocConsoleWithOptions);
+    earlier, nothing is done. Whether a console was made."""
+    if sys.platform != "win32":
+        return False
+    kernel32 = ctypes.windll.kernel32
+    # attached to a console, with a window or not (GetConsoleWindow sees
+    # only a console's window)
+    attached = kernel32.GetConsoleProcessList((ctypes.c_ulong * 1)(), 1) > 0
+    if attached or not hasattr(kernel32, "AllocConsoleWithOptions"):
+        return False  # a console already, or a Windows without the call
+    options = _AllocConsoleOptions(ALLOC_CONSOLE_MODE_NO_WINDOW, 0, 0)
+    result = ctypes.c_int(0)
+    return kernel32.AllocConsoleWithOptions(ctypes.byref(options), ctypes.byref(result)) == 0
+
+
 def own_taskbar_button() -> None:
     """On Windows, a taskbar button of prosediff's own, showing its icon,
     rather than one grouped with every other Python program under Python's.
@@ -1419,6 +1909,7 @@ def main(argv: list[str] | None = None) -> None:
     arguments received, and the program exits once it is dismissed."""
     args = sys.argv[1:] if argv is None else argv
     settings, note = settings_from_args(args, load_settings())
+    invisible_console()
     own_taskbar_button()
     root = tk.Tk()
     set_icon(root)

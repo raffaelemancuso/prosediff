@@ -8,7 +8,8 @@ from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from prosediff.diff import CONTEXT, Comparison, all_rows
+from prosediff.assess import Assessment, AssessRequest, assess
+from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
 from prosediff.language import file_language_note, flag_code, paragraph_language_note
@@ -125,12 +126,14 @@ def render(
     align: str = "left",
     sentences: Comparison | None = None,
     split: str = "paragraph",
+    assessment: Assessment | None = None,
 ) -> str:
     """The HTML report; align ("left" or "justify") sets how wrapped lines are
     aligned. split says how the comparison compared prose, "paragraph" or
     "sentence"; given sentences, the same comparison sentence by sentence,
     the report holds both (comparison then paragraph by paragraph), and a
-    switch of its toolbar shows one or the other."""
+    switch of its toolbar shows one or the other. An AI's assessment of the
+    changes, given, heads the report."""
     if align not in ALIGNMENTS:
         raise ValueError(f"align must be one of {ALIGNMENTS}, not {align!r}")
     template = _env.get_template("report.html.j2")
@@ -142,6 +145,7 @@ def render(
         split="paragraph" if sentences is not None else split,
         paths=paths or [],
         align=align,
+        assessment=assessment,
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         version=package_version(),
         homepage=HOMEPAGE,
@@ -160,17 +164,56 @@ def write_output(
     context: int | str | None = CONTEXT,
     sentences: Comparison | None = None,
     split: str = "paragraph",
+    assessment: Assessment | None = None,
 ) -> None:
     """Write the HTML report (fmt "html"), the unified diff ("diff") or the word
     diff ("wdiff"), LF line ends on every system. The text formats have
     context unchanged lines around each change (None: every line; "auto":
     git's 3). sentences and split as in render; a text format holds one
-    comparison only."""
+    comparison only. An AI's assessment, given, heads the HTML report and is
+    written beside the output too, as Markdown (assessment_path)."""
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {tuple(FORMATS)}, not {fmt!r}")
     if fmt != "html":
         text = unified(comparison, CONTEXT if context == "auto" else context, fmt)
     else:
-        text = render(comparison, paths, align=align, sentences=sentences, split=split)
+        text = render(
+            comparison, paths, align=align, sentences=sentences, split=split, assessment=assessment
+        )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+    if assessment is not None:
+        with open(assessment_path(path), "w", encoding="utf-8", newline="\n") as f:
+            f.write(assessment.as_markdown(comparison.repo_name))
+
+
+def assessment_path(output: Path) -> Path:
+    """Where the assessment of an output goes: report_assessment.md beside
+    report.html."""
+    return output.with_name(f"{output.stem}_assessment.md")
+
+
+def assess_comparison(comparison: Comparison, request: AssessRequest) -> Assessment:
+    """The assessment of a comparison's changes by the AI request names
+    (prosediff.assess): its word diff, the changed lines alone, comments
+    included, and the whole new version (new_version) when the request's
+    context says so, sent to the model."""
+    return assess(
+        unified(comparison, 0, "wdiff"),
+        comparison.repo_name,
+        request,
+        document=new_version(comparison) if request.context == "document" else "",
+    )
+
+
+def new_version(comparison: Comparison) -> str:
+    """The new version of every changed file, whole, as the word diff
+    writes its lines (a document's formatting in Markdown, its comments in
+    CriticMarkup), each file headed by its path when there are several."""
+    parts = []
+    for f in comparison.files:
+        if f.binary or not f.new_lines:
+            continue
+        text = "\n\n".join(comment_text(line, f.comments) for line in f.new_lines)
+        parts.append(f"=== {f.path} ===\n\n{text}" if len(comparison.files) > 1 else text)
+    return "\n\n".join(parts)

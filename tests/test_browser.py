@@ -110,72 +110,110 @@ def test_next_and_previous_change(page):
     assert counter.inner_text() == "2 / 3"
 
 
-def test_unchanged_lines_and_files_open_and_close(page):
-    """A fold opens on its own; the files close and open all at once, and
-    jumping to a change opens its file."""
+def test_unchanged_lines_and_a_file_open_and_close(page):
+    """A fold opens on its own; a file closes by its heading, and jumping to
+    a change opens it. One file has no list of files and no buttons for all
+    of them."""
     hidden = page.locator("tbody[hidden]").first
     assert not hidden.is_visible()
     folds = page.locator("tbody[hidden]").count()
     page.locator(".expand").first.click()
     assert page.locator("tbody[hidden]").count() == folds - 1
     assert page.get_by_text("Line 10 of the text.").first.is_visible()
-    page.click('[data-files="close"]')
-    assert page.evaluate("[...document.querySelectorAll('details.file')].every(d => !d.open)")
+    assert page.locator("[data-files], nav").count() == 0
+    page.click("details.file > summary")
+    assert not page.evaluate("document.querySelector('details.file').open")
     page.keyboard.press("n")
     assert page.evaluate("document.querySelector('details.file').open")
+
+
+def test_files_listed_and_opened_and_closed_all_at_once(browser, tmp_path):
+    """Two files: listed, each linked, and closed and opened all at once."""
+    old, new = tmp_path / "old", tmp_path / "new"
+    for side, text in ((old, "One.\n"), (new, "Two.\n")):
+        side.mkdir()
+        (side / "a.md").write_text(text, encoding="utf-8")
+        (side / "b.md").write_text(text, encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new))
+    assert page.locator("nav a").all_inner_texts() == ["a.md", "b.md"]
+    assert "2 files changed" in page.inner_text(".files-changed")
     page.click('[data-files="close"]')
+    assert page.evaluate("[...document.querySelectorAll('details.file')].every(d => !d.open)")
     page.click('[data-files="open"]')
     assert page.evaluate("[...document.querySelectorAll('details.file')].every(d => d.open)")
 
 
+def test_view_menu_opens_and_closes(page):
+    """The View menu holds the switches few use: its button opens it, a
+    switch leaves it open, Escape or a click outside closes it."""
+    panel = page.locator("#view-menu")
+    button = page.locator(".menu-button")
+    assert not panel.is_visible()
+    button.click()
+    assert panel.is_visible() and button.get_attribute("aria-expanded") == "true"
+    names = panel.locator(".label").all_inner_texts()
+    assert names == [
+        "Formatted",
+        "Formatting changes",
+        "Comments inline",
+        "Comment tooltips",
+        "Paragraph spacing",
+    ]
+    page.click('[data-toggle="inline"]')
+    assert panel.is_visible() and "inline" in page.evaluate("document.body.className")
+    page.keyboard.press("Escape")
+    assert not panel.is_visible() and button.get_attribute("aria-expanded") == "false"
+    button.click()
+    page.mouse.click(5, 5)
+    assert not panel.is_visible()
+
+
 def test_views_are_remembered(page):
-    """One column (u), raw Markdown (f), tinted edits (t) and comments
-    written out (i): each switched on by its key, remembered across a
-    reload, switched off by its button."""
-    background = "e => getComputedStyle(e).backgroundImage"
+    """One column (u), raw Markdown (f) and comments written out (i): each
+    switched on by its key, remembered across a reload, switched off by its
+    button. An edited line is never tinted as a whole: only its changed
+    words are."""
     after = "e => getComputedStyle(e, '::after').content"
 
-    def tint():
-        return page.locator("tr.replace td.right").first.evaluate(background)
+    def edited_line_colour():
+        cell = page.locator("tr.replace td.right").first
+        return cell.evaluate("e => getComputedStyle(e).getPropertyValue('--tint').trim()")
 
     def comment():
         return page.locator(".comment").first.evaluate(after)
 
-    # the defaults: two columns, formatted, untinted, comments as markers
+    # the defaults: two columns, formatted, comments as markers
     assert "unified" not in page.evaluate("document.body.className")
     assert not page.locator(".s-syn").first.is_visible()
     assert page.get_attribute('[data-toggle="formatted"]', "aria-pressed") == "true"
     assert page.locator(".s-strong").first.evaluate("e => getComputedStyle(e).fontWeight") == "700"
-    untinted = tint()
+    assert edited_line_colour() == "transparent"
     assert comment() in ("none", "normal")
-    for key in "ufti":
+    for key in "ufit":  # t, the tint of before, does nothing
         page.keyboard.press(key)
     # an unchanged row shows its new side only
     left = page.locator("tr.equal td.left").first
     assert left.evaluate("e => getComputedStyle(e).display") == "none"
     assert page.locator(".s-syn").first.is_visible()
-    assert tint() != untinted
-    # the tint stops above the space between paragraphs
-    cell = page.locator("tr.replace td.right").first
-    assert "calc" in cell.evaluate("e => getComputedStyle(e).backgroundSize")
+    assert edited_line_colour() == "transparent"
     assert "Anna" in comment() and "Old remark." in comment()
-    for name in ("unified", "tint", "inline"):
+    for name in ("unified", "inline"):
         assert page.get_attribute(f'[data-toggle="{name}"]', "aria-pressed") == "true"
     page.reload()
     assert "unified" in page.evaluate("document.body.className")
     assert page.locator(".s-syn").first.is_visible()
-    assert tint() != untinted
     assert "Anna" in comment()
-    for name in ("unified", "tint", "inline"):
-        page.click(f'[data-toggle="{name}"]')
+    page.click('[data-toggle="unified"]')
+    page.click(".menu-button")  # the others are in the View menu
+    page.click('[data-toggle="inline"]')
     assert "unified" not in page.evaluate("document.body.className")
-    assert tint() == untinted
     assert comment() in ("none", "normal")
 
 
 def test_toolbar_help_tooltips(page):
     tip = page.locator("#tip")
     assert page.locator(".toolbar [title]").count() == 0  # no browser tooltip
+    page.click(".menu-button")
     page.hover('[data-toggle="formatted"]')
     assert tip.is_visible()
     assert tip.locator("b").inner_text() == "Formatted"
@@ -192,6 +230,7 @@ def test_space_between_paragraphs(page):
     default = cell.evaluate(gap)
     assert default > 0
     assert page.inner_text(".gap-value") == "0.75"
+    page.click(".menu-button")  # in the View menu
     page.click('[data-gap="1"]')
     assert cell.evaluate(gap) > default
     assert page.inner_text(".gap-value") == "1.00"
@@ -202,6 +241,7 @@ def test_space_between_paragraphs(page):
     assert page.locator("tr.replace td.right").first.evaluate(gap) == 0
     assert page.is_disabled('[data-gap="-1"]')
     # an ARIA spinbutton: focused, the arrow keys, Page Up and End step it
+    page.click(".menu-button")
     spin = page.get_by_role("spinbutton", name="Space between paragraphs")
     spin.focus()
     page.keyboard.press("ArrowUp")
@@ -349,6 +389,26 @@ def test_comment_flash_with_reduced_motion(browser, tmp_path):
     page.wait_for_function('!CSS.highlights.has("comment-flash")', timeout=5_000)
 
 
+def test_comments_panel_folds_from_its_header(browser, tmp_path):
+    """The comments panel folds and opens from its header, as a file does;
+    its Show and Sort buttons there sort and filter without folding it."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("First line.\n", encoding="utf-8")
+    came = '[Came.]{.comment-start id="2" author="A" date="2026-09-25T10:00:00Z"}'
+    new.write_text(f"First line.{came}\n", encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new))
+    panel = page.locator("details.comments-panel")
+    assert panel.evaluate("d => d.open")
+    page.click('[data-sort="date"]')
+    page.click('[data-show="new"]')
+    assert panel.evaluate("d => d.open")
+    page.click(".comments-head h2")
+    assert not panel.evaluate("d => d.open")
+    assert not page.locator(".comments-panel li").first.is_visible()
+    page.click(".comments-head h2")
+    assert panel.evaluate("d => d.open")
+
+
 def test_comments_filtered_by_status(browser, tmp_path):
     """The comments panel shows all its comments, or only the new or the
     removed ones, with a dashed line between those shown; remembered."""
@@ -409,6 +469,7 @@ def test_comment_tooltip(page):
     box = page.locator("tr.replace td.code.right").first.bounding_box()
     page.mouse.move(box["x"] + box["width"] - 3, box["y"] + box["height"] - 3)
     assert not tip.is_visible()
+    page.click(".menu-button")  # in the View menu
     page.uncheck('[data-tips="comments"]')
     page.reload()
     assert not page.is_checked('[data-tips="comments"]')

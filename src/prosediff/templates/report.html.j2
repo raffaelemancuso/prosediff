@@ -39,17 +39,24 @@
 body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
   font: 14px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
 main { max-width: 1600px; margin: 0 auto; }
-h1 { font-size: 20px; margin: 0 0 12px; }
+h1 { font-size: 20px; margin: 0 0 6px; }
+h1 .full-path { font-size: 12px; font-weight: 400; margin-left: 8px; }
 h2 { font-size: 15px; margin: 0 0 6px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; }
 :focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
-.revisions { display: grid; grid-template-columns: auto auto 1fr; gap: 2px 12px;
-  margin-bottom: 12px; }
+/* The header: the title, then a line for each side, its path (outside
+   git) on the same line. */
+.revisions { display: grid; grid-template-columns: auto auto auto 1fr; gap: 2px 12px;
+  align-items: baseline; margin-bottom: 12px; }
 .role { color: var(--muted); }
 .revisions code { font-weight: 600; }
-.revisions .full-path { grid-column: 2 / 4; font-family: ui-monospace, monospace;
-  font-size: 0.9em; color: var(--muted); overflow-wrap: anywhere; }
+.full-path { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted);
+  overflow-wrap: anywhere; }
+@media (max-width: 800px) {
+  .revisions { grid-template-columns: auto auto 1fr; }
+  .revisions .full-path { grid-column: 2 / 4; }
+}
 .commits, .comments-panel { margin-bottom: 12px; }
 .commits summary, .comments-panel summary { cursor: pointer; color: var(--muted); }
 .commits ol { margin: 6px 0 0; padding-left: 0; list-style: none; }
@@ -76,19 +83,52 @@ td.code.flash { background-color: var(--flash) !important; }
 td.code .comment { cursor: pointer; }
 .comment.flash { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
 .comments-switch .dir { margin-left: 2px; }
-.comments-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+/* The panel folds from its header, as the files and the AI assessment do;
+   its buttons there do not fold it. */
+.comments-panel > summary.comments-head { display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 16px; color: var(--fg); }
 .comments-head h2 { margin: 0; }
-.comments-switch { display: inline-flex; gap: 8px; align-items: baseline; }
-.comments-switch button { font: inherit; color: var(--link); background: none; border: 0;
-  padding: 0 4px; border-radius: 4px; cursor: pointer; }
-.comments-switch button:hover { text-decoration: underline; }
-.comments-switch button[aria-pressed="true"] { background: var(--skip); color: var(--fg);
+.comments-head h2::before, .assessment > summary h2::before { content: "▾"; display: inline-block; width: 1em;
+  color: var(--muted); font-weight: 400; }
+.comments-panel:not([open]) .comments-head h2::before,
+.assessment:not([open]) > summary h2::before { content: "▸"; }
+.comments-panel:not([open]) .comments-switch { display: none; }
+.comments-panel > summary::-webkit-details-marker, .assessment > summary::-webkit-details-marker { display: none; }
+.comments-panel > summary, .assessment > summary { list-style: none; }
+.comments-switch { display: inline-flex; gap: 4px; align-items: baseline; }
+.comments-switch .role { margin-right: 2px; }
+/* The one style of the buttons in the page: link-coloured text, a tint on
+   hover, and, pressed, a tinted box ringed in the link colour, as the
+   toolbar's switches. */
+.btn { font: inherit; color: var(--link); background: none; border: 0; cursor: pointer;
+  padding: 1px 6px; border-radius: 5px; }
+.btn:hover { background: var(--skip); }
+.btn[aria-pressed="true"] { background: var(--skip); color: var(--fg);
   box-shadow: inset 0 0 0 1px var(--link); }
-.summary { color: var(--muted); margin-bottom: 8px; display: flex; gap: 12px;
-  flex-wrap: wrap; align-items: center; }
-.summary button, .expand { font: inherit; color: var(--link); background: none;
+/* The AI's assessment: a box under the header, folding like a file, its
+   verdict a coloured badge. */
+.assessment { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;
+  margin-bottom: 12px; }
+.assessment > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 12px; }
+.assessment > summary h2 { display: inline; margin: 0; }
+.verdict { font-weight: 600; padding: 0 8px; border-radius: 999px; }
+.verdict-improves { color: var(--add); background: var(--ins-line); }
+.verdict-mixed { color: var(--fmt); background: var(--fmt-bg); }
+.verdict-worsens { color: var(--rem); background: var(--del-line); }
+.assess-body { max-width: 80em; }
+.assess-body h1, .assess-body h2, .assess-body h3 { font-size: 14px; margin: 14px 0 4px; }
+.assess-body p, .assess-body ul, .assess-body ol { margin: 4px 0; }
+.assess-body li { margin: 2px 0; }
+.assess-body code { font-size: 0.9em; background: var(--panel); padding: 0 3px; border-radius: 3px; }
+.assess-note { font-size: 12px; margin: 10px 0 2px; }
+.assess-error { color: var(--rem); margin: 6px 0 2px; }
+.summary { color: var(--muted); margin-bottom: 12px; }
+.summary p { margin: 0 0 4px; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 8px; }
+.expand { font: inherit; color: var(--link); background: none;
   border: 0; padding: 0; cursor: pointer; }
-.summary button:hover, .expand:hover { text-decoration: underline; }
+.expand:hover { text-decoration: underline; }
 .add { color: var(--add); } .rem { color: var(--rem); }
 nav ul { list-style: none; padding: 0; margin: 0 0 24px;
   border: 1px solid var(--border); border-radius: 6px; }
@@ -157,9 +197,6 @@ td { --tint: transparent; --tint-gap: 0px;
 table.prose td.code, table.prose td.no { --tint-gap: var(--para-gap); }
 tr.delete td.left { --tint: var(--del-line); }
 tr.insert td.right { --tint: var(--ins-line); }
-/* The "Tint edited lines" view tints the whole edited line again. */
-body.tint tr.replace td.left { --tint: var(--del-line); }
-body.tint tr.replace td.right { --tint: var(--ins-line); }
 tr.delete td.no.l, tr.replace td.no.l { --tint: var(--del-line); }
 tr.insert td.no.r, tr.replace td.no.r { --tint: var(--ins-line); }
 del { background: var(--del-word); text-decoration: none; border-radius: 2px; }
@@ -189,20 +226,19 @@ body.passages tr.only-moved .sign { color: var(--move); }
 /* The "Moved passages" switch: off, a row shows its plain word diff, each
    passage removed and added in place, and the counts follow. */
 body:not(.passages) .pv-on, body.passages .pv-off { display: none; }
-.summary .units, .summary .files-changed { margin: 0 0 4px; flex-basis: 100%; }
 /* The split switch shows the split shown: a block of lines (paragraphs),
    or a line ending in a full stop (sentences). */
 .toolbar .split-switch .sentences, .toolbar .split-switch[aria-pressed="true"] .paragraphs { display: none; }
 .toolbar .split-switch[aria-pressed="true"] .sentences { display: inline; }
 .toolbar .split-switch { gap: 4px; padding: 4px 6px; }
 .toolbar .split-switch .split-name { font-size: 12px; }
-/* Which view is shown, above it. */
-.view-label { display: inline-block; margin: 0 0 12px; padding: 3px 10px;
-  border: 1px solid var(--link); border-radius: 6px; background: var(--skip); }
-.view-label button { font: inherit; color: var(--link); background: none; border: 0;
-  padding: 0 0 0 8px; cursor: pointer; }
-.view-label button:hover { text-decoration: underline; }
-@media print { .view-label button { display: none; } }
+/* Which view is shown: a pill at the head of the summary, with a button
+   to the other view when the report holds both. */
+.view-label { display: inline-flex; align-items: baseline; gap: 2px; padding: 0 2px 0 8px;
+  border: 1px solid var(--link); border-radius: 999px; background: var(--skip);
+  color: var(--fg); }
+.view-label b { font-weight: 600; }
+.view-label:not(:has(button)) { padding-right: 8px; }
 /* A line from each moved line to where it went, over the file's table;
    hovering either end highlights both rows and their line. Hidden in one
    column, where both ends stand in one column, and on paper. */
@@ -293,7 +329,24 @@ footer a { color: inherit; }
 .toolbar button.icon:hover { background: var(--skip); }
 .toolbar button.icon[aria-pressed="true"] { background: var(--skip);
   box-shadow: inset 0 0 0 1px var(--link); }
-.toolbar button:disabled { color: var(--muted); cursor: default; }.toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
+.toolbar button:disabled { color: var(--muted); cursor: default; }
+/* The View menu: the switches few use, each named, above the toolbar. */
+.toolbar .menu { position: relative; display: inline-flex; }
+.toolbar .menu-button { display: inline-flex; align-items: center; gap: 2px;
+  padding: 3px 6px; border-radius: 5px; }
+.toolbar .menu-button:hover, .toolbar .menu-button[aria-expanded="true"] { background: var(--skip); }
+.menu-panel { position: absolute; right: 0; bottom: calc(100% + 10px); display: flex;
+  flex-direction: column; gap: 2px; min-width: 16em; padding: 6px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px #0003; }
+.menu-panel[hidden] { display: none; }
+.toolbar .menu-panel button.icon, .menu-panel .item { display: flex; align-items: center;
+  gap: 8px; width: 100%; padding: 4px 6px; color: var(--fg); text-align: left; }
+.menu-panel .label { flex: 1; white-space: nowrap; }
+/* On or off shows in the tinted box alone: the names stay one weight. */
+.toolbar .menu-panel button[aria-pressed="true"] { font-weight: inherit; }
+.menu-panel kbd { font: 11px ui-monospace, monospace; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
+.toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
   font-variant-numeric: tabular-nums; }
 .toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 /* The spacing stepper: − and + either side of the value, in one bordered
@@ -338,7 +391,8 @@ thead.print, .print-note { display: none; }
 @media print {
   body { padding: 0; font-size: 11px; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .toolbar, .summary button, .comments-switch { display: none; }
+  .toolbar, .btn, .comments-switch { display: none; }
+  .view-label { border: 0; background: none; padding: 0; }
   /* No disclosure triangles: nothing to click on paper. */
   summary { list-style: none; }
   summary::-webkit-details-marker { display: none; }
@@ -391,7 +445,8 @@ thead.print, .print-note { display: none; }
 </head>
 <body>
 <main>
-<h1>{{ c.repo_name }}</h1>
+<header>
+<h1>{{ c.repo_name }}{% if c.location %}<span class="full-path">{{ c.location }}</span>{% endif %}</h1>
 
 {# A paragraph's language in the gutter, when the file's paragraphs differ. #}
 {% macro gutter_flag(f, no, lang) -%}
@@ -408,16 +463,14 @@ thead.print, .print-note { display: none; }
 {{ r.subject }}{% if r.author or r.date %} <span class="role">— {{ r.author }}{% if r.author and r.date %}, {% endif %}{{ r.date }}</span>{% endif %}
 {%- endmacro %}
 <div class="revisions">
-  <span class="role">Base (older)</span>
-  <code title="{{ c.base.hexsha }}">{{ c.base.short }}</code>
-  <span>{{ side(c.base) }}</span>
-  {% if not c.location %}<span></span><span class="full-path">{{ c.base.hexsha }}</span>{% endif %}
-  <span class="role">Target (newer)</span>
-  <code title="{{ c.target.hexsha }}">{{ c.target.short }}</code>
-  <span>{{ side(c.target) }}</span>
-  {% if not c.location %}<span></span><span class="full-path">{{ c.target.hexsha }}</span>{% endif %}
-  {% if c.location %}<span class="role">Repository</span><span class="full-path">{{ c.location }}</span>{% endif %}
+  {% for label, r in (("Base (older)", c.base), ("Target (newer)", c.target)) %}
+  <span class="role">{{ label }}</span>
+  <code title="{{ r.hexsha }}">{{ r.short }}</code>
+  <span>{{ side(r) }}</span>
+  {% if not c.location %}<span class="full-path">{{ r.hexsha }}</span>{% else %}<span></span>{% endif %}
+  {% endfor %}
 </div>
+</header>
 
 {% if c.commits %}
 <details class="commits"{% if c.commits_total <= 10 %} open{% endif %}>
@@ -479,57 +532,73 @@ thead.print, .print-note { display: none; }
 {{ unit_of(c.files, split) }}s
 {%- endmacro %}
 
-{# The body of the report for one comparison; prefix sets its ids apart when
-   the report holds two, one per split. #}
-{% macro report_body(c, split, prefix="") %}
-{% if c.comments %}
-{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
-<section class="comments-panel" aria-labelledby="{{ prefix }}comments-title">
-  <div class="comments-head">
-    <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
-    <span class="comments-switch" role="group" aria-label="Show comments">
-      <span class="role">Show</span>
-      <button type="button" data-show="all" aria-pressed="true">all</button>
-      <button type="button" data-show="new" aria-pressed="false">new</button>
-      <button type="button" data-show="removed" aria-pressed="false">removed</button>
-    </span>
-    <span class="comments-switch" role="group" aria-label="Sort comments">
-      <span class="role">Sort by</span>
-      <button type="button" data-sort="place" aria-pressed="true" title="In the order they appear in the report; again to reverse">reading order<span class="dir" aria-hidden="true">↓</span></button>
-      <button type="button" data-sort="date" aria-pressed="false" title="By when they were written; again to reverse">date<span class="dir" aria-hidden="true"></span></button>
-    </span>
-  </div>
-  {{ comment_list(c.comments_in_reading_order(("new", "removed"))) }}
-</section>
-{% endif %}
+{# Which view this is: prose compared paragraph by paragraph or sentence
+   by sentence, and, when the report holds both (other), a button to the
+   other. #}
+{% macro view_label(split, other=none) -%}
+<span class="view-label" title="The prose compared {{ split }} by {{ split }}"><b>{{ split | capitalize }} view</b>{% if other %}<button type="button" class="btn" data-split-to="{{ other }}" title="Show the prose compared {{ other }} by {{ other }} (s)">⇄ {{ other }}s</button>{% endif %}</span>
+{%- endmacro %}
 
-
-
+{# The body of the report for one comparison: its summary, its comments,
+   its files. prefix sets its ids apart when the report holds two, one per
+   split; other is the other split then. #}
+{% macro report_body(c, split, prefix="", other=none) %}
 {% if not c.files %}
 <p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
 {% else %}
+{% set n, y = c.counts, c.without_passages %}
+{% set prose = unit_of(c.files, split) != "line" %}
 <div class="summary">
-  {% set n, y = c.counts, c.without_passages %}
-  {% if n.changed_lines or n.inserted_lines or n.deleted_lines or n.moved or n.moved_passages %}
-  <p class="units"><b>{{ unit_name(c, split) | capitalize }}:</b>
+  {% if prose or n.changed_lines or n.inserted_lines or n.deleted_lines or n.moved or n.moved_passages %}
+  <p class="units">{% if prose %}{{ view_label(split, other) }}{% endif %}
+    <span><b>{{ unit_name(c, split) | capitalize }}:</b>
     {{ n.changed_lines | comma }} changed,
     {{ both(n.inserted_lines, y.inserted_lines) }} inserted,
     {{ both(n.deleted_lines, y.deleted_lines) }} deleted,
     {{ n.moved | comma }} moved{% if n.moved_passages %}<span class="pv-on">;
-    {{ n.moved_passages | counted("passage") }} moved within or between them</span>{% endif %}</p>
+    {{ n.moved_passages | counted("passage") }} moved within or between them</span>{% endif %}{% if paths and c.files | length == 1 %},
+    in {{ paths | join(", ") }}{% endif %}</span></p>
   {% endif %}
-  <span class="files-changed">{{ c.files | length | counted("file") }} changed:
+  {% if c.files | length > 1 %}
+  <p class="files-changed"><span>{{ c.files | length | counted("file") }} changed:
   {{ counts(c, unit_of(c.files, split)) }}{% if paths %}, in {{ paths | join(", ") }}{% endif %}</span>
-  <button type="button" data-files="open">Expand all</button>
-  <button type="button" data-files="close">Collapse all</button>
+  <button type="button" class="btn" data-files="open">Expand all</button>
+  <button type="button" class="btn" data-files="close">Collapse all</button></p>
+  {% endif %}
 </div>
+{% endif %}
+{% if c.comments %}
+{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
+<details class="comments-panel" open>
+  <summary class="comments-head">
+    <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
+    <span class="comments-switch" role="group" aria-label="Show comments">
+      <span class="role">Show</span>
+      <button type="button" class="btn" data-show="all" aria-pressed="true">all</button>
+      <button type="button" class="btn" data-show="new" aria-pressed="false">new</button>
+      <button type="button" class="btn" data-show="removed" aria-pressed="false">removed</button>
+    </span>
+    <span class="comments-switch" role="group" aria-label="Sort comments">
+      <span class="role">Sort by</span>
+      <button type="button" class="btn" data-sort="place" aria-pressed="true" title="In the order they appear in the report; again to reverse">reading order<span class="dir" aria-hidden="true">↓</span></button>
+      <button type="button" class="btn" data-sort="date" aria-pressed="false" title="By when they were written; again to reverse">date<span class="dir" aria-hidden="true"></span></button>
+    </span>
+  </summary>
+  {{ comment_list(c.comments_in_reading_order(("new", "removed"))) }}
+</details>
+{% endif %}
 
+
+
+{% if c.files %}
+{% if c.files | length > 1 %}
 <nav aria-label="Changed files"><ul>
 {% for f in c.files %}
   <li><span class="change">{{ f.change }}</span><a href="#{{ f.anchor }}">{{ f.path }}</a>
     {% if not f.binary %}<span>{{ counts(f, unit_of([f], split)) }}</span>{% endif %}</li>
 {% endfor %}
 </ul></nav>
+{% endif %}
 
 {% set signs = {"delete": ("−", ""), "insert": ("", "+"), "replace": ("~", "~"), "moved-out": ("→", ""), "moved-in": ("", "←")} %}
 {% for f in c.files %}
@@ -595,22 +664,28 @@ thead.print, .print-note { display: none; }
 
 {% endmacro %}
 
-{# Which view this is: prose compared paragraph by paragraph or sentence
-   by sentence, and, when the report holds both, a button to the other. #}
-{% macro view_label(split, other=none) -%}
-<p class="view-label"><b>{{ split | capitalize }} view</b>: the prose compared {{ split }} by {{ split }}{% if other %} <button type="button" data-split-to="{{ other }}">show the {{ other }} view</button>{% endif %}</p>
-{%- endmacro %}
+{% if assessment %}
+<details class="assessment" open>
+  <summary><h2>AI assessment</h2>
+    {% if assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}
+    <span class="role">by {{ assessment.title }}{% if assessment.how %}, {{ assessment.how }}{% endif %}{% if assessment.seconds %}, in {{ "{:,.0f}".format(assessment.seconds) }} s{% endif %}</span></summary>
+  {% if assessment.error %}
+  <p class="assess-error">The assessment failed: {{ assessment.error }}</p>
+  {% else %}
+  <div class="assess-body">{{ assessment.html }}</div>
+  <p class="role assess-note">Written by an AI: check it against the text.</p>
+  {% endif %}
+</details>
+{% endif %}
+
 {% if alt %}
 <div class="split" data-split="paragraph" aria-label="Compared paragraph by paragraph">
-{{ view_label("paragraph", "sentence") }}
-{{ report_body(c, "paragraph") }}
+{{ report_body(c, "paragraph", "", "sentence") }}
 </div>
 <div class="split" data-split="sentence" aria-label="Compared sentence by sentence" hidden>
-{{ view_label("sentence", "paragraph") }}
-{{ report_body(alt, "sentence", "s-") }}
+{{ report_body(alt, "sentence", "s-", "paragraph") }}
 </div>
 {% else %}
-{% if c.files and unit_of(c.files, split) != "line" %}{{ view_label(split) }}{% endif %}
 {{ report_body(c, split) }}
 {% endif %}
 
@@ -625,11 +700,14 @@ thead.print, .print-note { display: none; }
   <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
   {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="true" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
-  <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
-  <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg></button>
-  <button type="button" class="icon" data-toggle="tint" aria-pressed="false" aria-label="Tint edited lines" title="Tint edited lines: the whole of an edited line, not only its changed words (t)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="5.5" width="14" height="5" rx="1" class="fill soft"/><path d="M3 8h10M3 3h7M3 13h9"/></svg></button>
-  <button type="button" class="icon" data-toggle="formats" aria-pressed="false" aria-label="Formatting changes" title="Formatting changes: text of a document made bold, italic, underlined, ..., its words unchanged (m)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h4.2a2.6 2.6 0 0 1 0 5.2H4zM4 7.7h4.8a2.9 2.9 0 0 1 0 5.8H4z"/><path d="M11.5 11.5l1.5 1.5 2.5-3" /></svg></button>
-  <span class="spacing"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span>
+  <span class="menu">
+    <button type="button" class="menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="view-menu">View<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <div class="menu-panel" id="view-menu" role="group" aria-label="More views" hidden>
+      <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg><span class="label">Formatted</span><kbd aria-hidden="true">f</kbd></button>
+      <button type="button" class="icon" data-toggle="formats" aria-pressed="false" aria-label="Formatting changes" title="Formatting changes: text of a document made bold, italic, underlined, ..., its words unchanged (m)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h4.2a2.6 2.6 0 0 1 0 5.2H4zM4 7.7h4.8a2.9 2.9 0 0 1 0 5.8H4z"/><path d="M11.5 11.5l1.5 1.5 2.5-3" /></svg><span class="label">Formatting changes</span><kbd aria-hidden="true">m</kbd></button>
+      <button type="button" class="icon" data-toggle="inline" aria-pressed="false" aria-label="Comments inline" title="Comments inline: each comment written out after its marker, as on paper (i)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg><span class="label">Comments inline</span><kbd aria-hidden="true">i</kbd></button>
+      <button type="button" class="icon" role="checkbox" aria-checked="true" data-tips="comments" aria-label="Comment tooltips" title="Comment tooltips: the author, text and date of a comment, on hovering its marker"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4.5 5.5h7M4.5 8.5h5"/></svg><span class="label">Comment tooltips</span></button>
+      <span class="spacing item"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span><span class="label">Paragraph spacing</span>
     <span class="stepper">
       <button type="button" tabindex="-1" aria-hidden="true" data-gap="-1" title="Less space between paragraphs ([)">−</button>
       <span class="gap-value" role="spinbutton" tabindex="0" aria-label="Space between paragraphs"
@@ -637,7 +715,8 @@ thead.print, .print-note { display: none; }
         title="Space between paragraphs, in lines: arrow keys to change, Home for none, End for the most">0.75</span>
       <button type="button" tabindex="-1" aria-hidden="true" data-gap="1" title="More space between paragraphs (])">+</button>
     </span></span>
-  <button type="button" class="icon" role="checkbox" aria-checked="true" data-tips="comments" aria-label="Comment tooltips" title="Comment tooltips: the author, text and date of a comment, on hovering its marker"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4.5 5.5h7M4.5 8.5h5"/></svg></button>
+    </div>
+  </span>
 </div>
 <script>
 (function () {
@@ -697,7 +776,7 @@ thead.print, .print-note { display: none; }
     if (shown === counter) showTip(counter);
   }
 
-  // The views (one column, formatted, tinted edited lines, comments inline)
+  // The views (one column, formatted, comments inline, ...)
   // are classes of the body, remembered where the browser allows.
   function setView(name, on) {
     document.body.classList.toggle(name, on);
@@ -707,10 +786,30 @@ thead.print, .print-note { display: none; }
     try { localStorage.setItem("prosediff-" + name, on ? "1" : "0"); } catch (e) {}
   }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
+  // The View menu: its button opens and closes it; Escape, or a click
+  // outside it, closes it. Its switches leave it open, to switch several.
+  var menuButton = document.querySelector(".menu-button");
+  var menuPanel = document.getElementById("view-menu");
+  function setMenu(open) {
+    if (!menuPanel) return;
+    menuPanel.hidden = !open;
+    menuButton.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  document.addEventListener("click", function (e) {
+    if (!menuPanel) return;
+    if (e.target.closest(".menu-button")) setMenu(menuPanel.hidden);
+    else if (!e.target.closest(".menu-panel")) setMenu(false);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && menuPanel && !menuPanel.hidden) {
+      setMenu(false);
+      menuButton.focus();
+    }
+  });
   // Formatted text and formatting changes are on by default, the other
   // views off; a choice the
   // browser remembers wins.
-  var VIEW_DEFAULT = { unified: false, formatted: true, tint: false, inline: false, formats: true,
+  var VIEW_DEFAULT = { unified: false, formatted: true, inline: false, formats: true,
                        movelinks: true, passages: true };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
@@ -815,6 +914,9 @@ thead.print, .print-note { display: none; }
     }
     var nav = e.target.closest("[data-nav]");
     if (nav) { go(current + Number(nav.dataset.nav)); return; }
+    // a button in the comments panel's header: not a click on the header,
+    // which would fold the panel
+    if (e.target.closest(".comments-head .btn")) e.preventDefault();
     var sort = e.target.closest("[data-sort]");
     if (sort) {
       var by = sort.dataset.sort;
@@ -869,7 +971,7 @@ thead.print, .print-note { display: none; }
     if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
-                 t: function () { toggle("tint"); }, i: function () { toggle("inline"); },
+                 i: function () { toggle("inline"); },
                  m: function () { toggle("formats"); }, l: function () { toggle("movelinks"); },
                  v: function () { toggle("passages"); },
                  s: function () { if (splitSwitch) setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true); },
@@ -1053,6 +1155,14 @@ thead.print, .print-note { display: none; }
   function placeTip() {
     if (!shown) return;
     var r = shown.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    // a switch of the View menu: beside the menu, not over its other rows
+    var menu = shown.closest(".menu-panel");
+    if (menu) {
+      var m = menu.getBoundingClientRect();
+      tip.style.left = Math.max(8, m.left - t.width - 8) + "px";
+      tip.style.top = Math.max(8, Math.min(r.top, window.innerHeight - t.height - 8)) + "px";
+      return;
+    }
     var left = Math.max(8, Math.min(anchorX || r.left, r.right - 8, window.innerWidth - t.width - 8));
     var top = r.bottom + 6 + t.height > window.innerHeight ? r.top - t.height - 6 : r.bottom + 6;
     tip.style.left = Math.max(8, left) + "px";

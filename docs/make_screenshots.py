@@ -1,15 +1,20 @@
 """Remake the README screenshots from a demo repository.
 
-    uv run --with pillow python docs/make_screenshots.py
+    uv run --with pillow python docs/make_screenshots.py [--assess AI]
 
 The page is photographed by Playwright's Chromium (uv run playwright
 install chromium, once); the window by Pillow, which needs a desktop: the window
 shows on screen for a moment. The demo text and its authors are made up.
+With --assess (e.g. claude), the AI named really assesses the demo's changes,
+and the report's AI assessment is photographed too (screenshot_assessment.png);
+without it, that screenshot is left as it is.
 """
 
+import argparse
 import ctypes
 import sys
 import tempfile
+import time
 import tkinter as tk
 from pathlib import Path
 
@@ -18,9 +23,14 @@ from PIL import ImageGrab
 from playwright.sync_api import sync_playwright
 
 from prosediff import compare, render
+from prosediff.assess import AssessRequest
 from prosediff.gui import App, Settings
+from prosediff.render import assess_comparison
 
 DOCS = Path(__file__).parent
+# The demo sits in a temporary folder, whose path names the user: the report
+# and the window show this one instead.
+SHOWN_PATH = r"C:\Users\me\books\wonderland"
 
 
 def note(text: str, author: str, date: str, cid: int) -> str:
@@ -95,7 +105,9 @@ def demo_repo(root: Path) -> tuple[Path, str]:
 
 def shoot_page(repo: Path, out: Path) -> None:
     page_file = repo.parent / "page.html"
-    page_file.write_text(render(compare(repo, "HEAD~1", "HEAD"), align="justify"), encoding="utf-8")
+    c = compare(repo, "HEAD~1", "HEAD")
+    c.location = SHOWN_PATH
+    page_file.write_text(render(c, align="justify"), encoding="utf-8")
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 900}, device_scale_factor=1)
@@ -105,13 +117,43 @@ def shoot_page(repo: Path, out: Path) -> None:
         browser.close()
 
 
+def shoot_assessment(repo: Path, out: Path, ai: str) -> None:
+    """The report's AI assessment, made now by the AI named."""
+    c = compare(repo, "HEAD~1", "HEAD")
+    c.location = SHOWN_PATH
+    assessment = assess_comparison(c, AssessRequest(ai))
+    if assessment.error:
+        sys.exit(f"the assessment failed: {assessment.error}")
+    page_file = repo.parent / "assessed.html"
+    page_file.write_text(render(c, align="justify", assessment=assessment), encoding="utf-8")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900}, device_scale_factor=1)
+        page.goto(page_file.as_uri())
+        box = page.locator("details.assessment").bounding_box()
+        page.screenshot(
+            path=str(out),
+            clip={"x": 0, "y": 0, "width": 1280, "height": box["y"] + box["height"] + 16},
+        )
+        browser.close()
+
+
 def shoot_window(repo: Path, out: Path) -> None:
     if sys.platform == "win32":  # pixel coordinates, whatever the display scaling
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     root = tk.Tk()
-    app = App(root, Settings(repo=str(repo), output="", align="justify"))
-    # The demo sits in a temporary folder, whose path names the user.
-    app.repo.set(r"C:\Users\me\books\wonderland")
+    app = App(
+        root,
+        Settings(
+            repo=str(repo), output="", align="justify", assess="claude/opus", assess_effort="high"
+        ),
+    )
+    app.repo.set(SHOWN_PATH)
+    # the model lists as the AI reports them, not "Loading…": at most 30 s
+    waited = time.monotonic()
+    while app.asking and time.monotonic() - waited < 30:
+        root.update()
+        time.sleep(0.05)
     root.update()
     root.lift()
     root.attributes("-topmost", True)
@@ -124,8 +166,16 @@ def shoot_window(repo: Path, out: Path) -> None:
 
 
 if __name__ == "__main__":
-    with tempfile.TemporaryDirectory() as tmp:
+    ap = argparse.ArgumentParser(description="Remake the README screenshots.")
+    ap.add_argument("--assess", metavar="AI", help="photograph a real AI assessment by AI too")
+    args = ap.parse_args()
+    written = [DOCS / "screenshot_page.png", DOCS / "screenshot_window.png"]
+    # a helper process of the window may still hold the demo folder: left behind
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         repo, _ = demo_repo(Path(tmp) / "wonderland")
-        shoot_page(repo, DOCS / "screenshot_page.png")
-        shoot_window(repo, DOCS / "screenshot_window.png")
-    print("written:", DOCS / "screenshot_page.png", DOCS / "screenshot_window.png")
+        shoot_page(repo, written[0])
+        shoot_window(repo, written[1])
+        if args.assess:
+            written.append(DOCS / "screenshot_assessment.png")
+            shoot_assessment(repo, written[2], args.assess)
+    print("written:", *written)

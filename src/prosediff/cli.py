@@ -10,6 +10,15 @@ from pathlib import Path
 
 import git
 
+from prosediff.assess import (
+    ASSESS_TIMEOUT,
+    CONTEXTS,
+    AssessError,
+    AssessRequest,
+    login_codex,
+    models_of,
+    parse_backend,
+)
 from prosediff.diff import (
     AUTO_ENCODING,
     COMMENT_MODES,
@@ -39,6 +48,8 @@ from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
     SPLITS,
+    assess_comparison,
+    assessment_path,
     check_split,
     counted,
     default_output,
@@ -311,6 +322,57 @@ def build_parser() -> argparse.ArgumentParser:
         "(default: auto, UTF-8 unless a file cannot be read in it or reads with "
         "control characters, then guessed with cchardet, or charset-normalizer)",
     )
+    ai_group = ap.add_argument_group("AI assessment")
+    ai_group.add_argument(
+        "--assess",
+        metavar="AI",
+        help="have an AI assess the value of the changes as a whole (a verdict, what "
+        "changed, what improved, the problems to fix), at the top of the HTML report "
+        "and in OUTPUT_assessment.md: claude (Claude Code, on its login; "
+        "prosediff[claude]), codex (ChatGPT through Codex, on its login; "
+        "prosediff[codex]), or PROVIDER/MODEL through any-llm (prosediff[models]), "
+        "e.g. ollama/qwen3 for a local model or openai/gpt-5 with OPENAI_API_KEY set; "
+        "claude/MODEL and codex/MODEL choose their model among those they report "
+        "(--list-models), else the login's default",
+    )
+    ai_group.add_argument(
+        "--assess-effort",
+        metavar="LEVEL",
+        help="how hard the model thinks, one of the levels it reports it supports "
+        "(--list-models: e.g. low, medium, high, xhigh, max); default: the model's own",
+    )
+    ai_group.add_argument(
+        "--assess-context",
+        choices=CONTEXTS,
+        default="document",
+        help="what the model reads: document, the changes and the whole new version, to "
+        "check them against the rest of it (default; the old version is in them); changes, "
+        "the changes only",
+    )
+    ai_group.add_argument(
+        "--assess-instructions",
+        metavar="TEXT",
+        help="your own instructions, added to the prompt (e.g. 'the journal is Research "
+        "Policy; Laura asked to cut the introduction by a fifth'), or a file holding them",
+    )
+    ai_group.add_argument(
+        "--assess-timeout",
+        type=float,
+        default=ASSESS_TIMEOUT,
+        metavar="SECONDS",
+        help=f"give up on the assessment after this long (default: {ASSESS_TIMEOUT:,})",
+    )
+    ai_group.add_argument(
+        "--list-models",
+        metavar="AI",
+        help="list the models an AI reports it offers (claude, codex, ollama, or any "
+        "provider any-llm reaches), its default first, and the efforts each supports",
+    )
+    ai_group.add_argument(
+        "--login-codex",
+        action="store_true",
+        help="log in to ChatGPT for --assess codex, in the browser, once",
+    )
     git_group = ap.add_argument_group("git's own commands")
     git_group.add_argument(
         "--setup-git",
@@ -341,6 +403,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     mode = next((m for m in ("git", "files", "folders") if getattr(args, m)), None)
+    if args.list_models:
+        if mode or args.repo:
+            ap.error("--list-models takes no other argument")
+        return _list_models(args.list_models)
+    if args.login_codex:
+        if mode or args.repo:
+            ap.error("--login-codex takes no other argument")
+        return _login_codex()
     if args.global_ and not args.setup_git:
         ap.error("--global goes with --setup-git")
     if mode and (args.setup_git or args.to_markdown):
@@ -361,6 +431,15 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--git takes REPO and BASE" if args.git else f"--{mode} takes OLD and NEW")
 
     _check_compare_args(ap, args, mode)
+    if args.assess is not None:
+        try:
+            parse_backend(args.assess)
+        except AssessError as e:
+            ap.error(f"--assess: {e}")
+        if args.assess_timeout <= 0:
+            ap.error("--assess-timeout must be above 0")
+    elif args.assess_effort or args.assess_instructions:
+        ap.error("--assess-effort and --assess-instructions go with --assess")
 
     fmt = args.format or format_of(args.output)
     split = args.split or default_split(fmt)
@@ -428,6 +507,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{PROG}: {e}", file=sys.stderr)
         return 1
 
+    assessment = None
+    if args.assess is not None:
+        print(f"{PROG}: asking {args.assess} to assess the changes...", file=sys.stderr)
+        request = AssessRequest(
+            args.assess,
+            effort=args.assess_effort or "",
+            context=args.assess_context,
+            instructions=args.assess_instructions or "",
+            timeout=args.assess_timeout,
+        )
+        assessment = assess_comparison(comparison, request)
+        if assessment.error:
+            print(f"{PROG}: the assessment failed: {assessment.error}", file=sys.stderr)
+
     output = _output_path(args, fmt)
     write_output(
         comparison,
@@ -438,6 +531,7 @@ def main(argv: list[str] | None = None) -> int:
         context=None if args.full else (CONTEXT if args.context is None else args.context),
         sentences=sentences,
         split=split,
+        assessment=assessment,
     )
 
     c = comparison
@@ -445,9 +539,42 @@ def main(argv: list[str] | None = None) -> int:
         f"{PROG}: {c.base.short}..{c.target.short}: {counted(len(c.files), 'file')}, "
         f"+{c.counts.additions:,} -{c.counts.deletions:,} -> {output}"
     )
+    if assessment is not None:
+        verdict = f" ({assessment.verdict})" if assessment.verdict else ""
+        print(f"{PROG}: assessment{verdict} -> {assessment_path(output)}")
     if args.open:
         webbrowser.open(output.resolve().as_uri())
     return 0
+
+
+def _list_models(ai: str) -> int:
+    try:
+        found = models_of(ai.strip().lower())
+    except AssessError as e:
+        print(f"{PROG}: {e}", file=sys.stderr)
+        return 1
+    if not found:
+        print(f"{PROG}: {ai} reports no models", file=sys.stderr)
+        return 1
+    width = max(len(m.name) for m in found)
+    for m in found:
+        print(f"{m.name:<{width}}  {m.description}".rstrip())
+        if m.efforts:
+            levels = [f"{e}*" if e == m.default_effort else e for e, _ in m.efforts]
+            print(f"{'':<{width}}  effort: {', '.join(levels)}")
+    if any(m.default_effort for m in found):
+        print("(*: the model's default effort)")
+    return 0
+
+
+def _login_codex() -> int:
+    try:
+        ok = login_codex()
+    except AssessError as e:
+        print(f"{PROG}: {e}", file=sys.stderr)
+        return 1
+    print(f"{PROG}: {'logged in to ChatGPT' if ok else 'the login did not succeed'}")
+    return 0 if ok else 1
 
 
 def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, mode: str) -> None:
