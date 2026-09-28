@@ -35,10 +35,13 @@ from rapidfuzz.distance import Indel
 
 from prosediff import document, footnotes
 from prosediff.comments import (  # noqa: F401  (re-exported)
+    ANY_PLACEHOLDER,
     COMMENT_MARK,
+    END_PLACEHOLDER,
     PLACEHOLDER,
     CommentEntry,
     Comments,
+    end_of,
     fold_comments,
     placeholders_in,
     placeholders_of,
@@ -46,9 +49,11 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
     show_comments,
 )
 from prosediff.document import (
+    CommentEnd,
     CommentMark,
     Document,
     Line,
+    comment_end_markdown,
     comment_markdown,
     quoted_author,
     short_date,
@@ -397,6 +402,9 @@ class Comparison:
     commits_total: int = 0
     # Folded comments, for the comments panel.
     comments: list[CommentEntry] = field(default_factory=list)
+    # The absolute path of the repository compared; "" for files and folders
+    # outside git, whose absolute paths are base.hexsha and target.hexsha.
+    location: str = ""
 
     @property
     def counts(self) -> Counts:
@@ -414,6 +422,16 @@ class Comparison:
 
     def comments_with(self, status: str) -> list[CommentEntry]:
         return [c for c in self.comments if c.status == status]
+
+    def comments_in_reading_order(self, statuses: tuple[str, ...]) -> list[CommentEntry]:
+        """The comments of those statuses in the order the report shows them:
+        file by file, then row by row; one no row shows at the end of its
+        file."""
+        file_no = {f.path: i for i, f in enumerate(self.files)}
+        return sorted(
+            (c for c in self.comments if c.status in statuses),
+            key=lambda c: (file_no.get(c.path, len(file_no)), c.order is None, c.order or 0),
+        )
 
 
 CHANGE_NAMES = {
@@ -776,11 +794,12 @@ def _offsets(tokens: list[str]) -> list[int]:
 
 
 def comments_only(old: str, new: str) -> bool:
-    """Whether a change is made of comment markers alone (and blanks)."""
+    """Whether a change is made of comment markers alone (and blanks): where
+    comments start, or where their text ends."""
     return (
-        not PLACEHOLDER.sub("", old).strip()
-        and not PLACEHOLDER.sub("", new).strip()
-        and bool(PLACEHOLDER.search(old) or PLACEHOLDER.search(new))
+        not ANY_PLACEHOLDER.sub("", old).strip()
+        and not ANY_PLACEHOLDER.sub("", new).strip()
+        and bool(ANY_PLACEHOLDER.search(old) or ANY_PLACEHOLDER.search(new))
     )
 
 
@@ -1086,8 +1105,9 @@ def word_diff(
 
 
 def similarity_tokens(line: str) -> list[str]:
-    """What line similarity compares: words and punctuation, spacing aside."""
-    return [t for t in TOKEN.findall(line) if not t.isspace()]
+    """What line similarity compares: words and punctuation, spacing and
+    the ends of comments' text aside."""
+    return [t for t in TOKEN.findall(line) if not t.isspace() and not END_PLACEHOLDER.match(t)]
 
 
 def token_similarity(a: list[str], b: list[str], cutoff: float) -> float:
@@ -2319,7 +2339,8 @@ def without_shared_comments(
     shared = in_old | in_new if every else in_old & in_new
     if not shared:
         return old, new, old_labels, new_labels
-    marks = "".join(sorted(shared))
+    # a comment goes with the end of its text
+    marks = "".join(sorted(shared | {end_of(ph) for ph in shared}))
     pattern = re.compile(f"[ \\t]*(?:[{marks}][ \\t]*)+")
 
     def strip(line: str) -> str:
@@ -2511,17 +2532,30 @@ def build_files(
     # The languages a document marks are used, or the one given or guessed.
     marked_languages = options.language in (DOCUMENT, DEFAULT)
 
-    def comment(c: CommentMark) -> str:
-        """What a document's comment is in its text: a placeholder, folded;
-        nothing, when it has no text to show; or the span pandoc writes."""
-        if not fold:
-            return comment_markdown(c)
-        if not c.text and not options.empty_comments:
-            return ""
-        mark = comments.placeholder(quoted_author(c.author), c.text, short_date(c.date))
-        return mark if mark is not None else comment_markdown(c)
-
     def document_lines(doc: Document | None) -> list[Line]:
+        # a comment's id in this document -> its placeholder, for the end
+        # of its text: the ids are the document's own
+        started: dict[str, str] = {}
+
+        def comment(c: CommentMark | CommentEnd) -> str:
+            """What a document's comment, or the end of its text, is in its
+            text: a placeholder, folded; nothing, when it has no text to
+            show; or the span pandoc writes."""
+            if isinstance(c, CommentEnd):
+                if not fold:
+                    return comment_end_markdown(c)
+                mark = started.pop(c.id, None)
+                return end_of(mark) if mark is not None else ""
+            if not fold:
+                return comment_markdown(c)
+            if not c.text and not options.empty_comments:
+                return ""
+            mark = comments.placeholder(quoted_author(c.author), c.text, short_date(c.date))
+            if mark is None:
+                return comment_markdown(c)
+            started[c.id] = mark
+            return mark
+
         found = document.lines(doc, comment) if doc is not None else []
         if not marked_languages:
             for line in found:
@@ -2658,6 +2692,8 @@ def build_files(
             panel += comment_entries(fd, old, new, comments)
             # added since the base: only the new side has them
             added = frozenset(placeholders_of(new) - placeholders_of(old))
+            # removed since the base: only the old side has them
+            gone = frozenset(placeholders_of(old) - placeholders_of(new))
             # The comments both sides had are gone: a row still showing one
             # has a new or removed comment, and is a stop of the navigation
             # like an edited one.
@@ -2665,7 +2701,7 @@ def build_files(
                 if r.kind != "skip" and (placeholders_in(r.left) or placeholders_in(r.right)):
                     r.first_of_change = True
             for view in row_views(fd.rows):
-                view.left = show_comments(view.left, comments)
+                view.left = show_comments(view.left, comments, removed=gone)
                 view.right = show_comments(view.right, comments, added)
     return panel
 
@@ -2702,8 +2738,9 @@ def diff_line(line: str, notes: dict[str, str]) -> str:
 def comment_text(line: str, comments: Comments | None) -> str:
     """A line of the text formats with its comments written out in
     CriticMarkup, {>>Author (date): text<<}."""
-    if comments is None or not len(comments) or not PLACEHOLDER.search(line):
+    if comments is None or not len(comments) or not ANY_PLACEHOLDER.search(line):
         return line
+    line = END_PLACEHOLDER.sub("", line)
 
     def comment(m: re.Match) -> str:
         c = comments.get(m[0])
@@ -2737,15 +2774,18 @@ def comment_entries(
             else "removed"
         )
         row = located.get(("old" if status == "removed" else "new", ph))
-        anchor, line, label = fd.anchor, None, ""
+        anchor, line, label, order = fd.anchor, None, "", None
         if row is not None:
+            order = rows.index(row)
             if not row.anchor:
-                row.anchor = f"{fd.anchor}-row{rows.index(row) + 1}"
+                row.anchor = f"{fd.anchor}-row{order + 1}"
             anchor = row.anchor
             line = row.left_no if status == "removed" else row.right_no
             label = row.left_label if status == "removed" else row.right_label
         c = comments.get(ph)
-        entries.append(CommentEntry(c.author, c.text, status, fd.path, anchor, line, c.date, label))
+        entries.append(
+            CommentEntry(c.author, c.text, status, fd.path, anchor, line, c.date, label, order)
+        )
     entries.sort(key=lambda e: (e.line is None, e.line or 0))
     return entries
 
@@ -2840,6 +2880,7 @@ def compare(
         commits=commits,
         commits_total=total,
         comments=panel,
+        location=str(root.resolve()),
     )
 
 

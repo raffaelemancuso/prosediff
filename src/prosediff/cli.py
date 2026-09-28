@@ -42,6 +42,7 @@ from prosediff.render import (
     check_split,
     counted,
     default_output,
+    default_split,
     format_of,
     package_version,
     write_output,
@@ -286,9 +287,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=SPLITS,
         default=None,
         help="how the prose of Markdown files and Word and OpenDocument documents is "
-        "compared: paragraph by paragraph (default), sentence by sentence (moved "
-        "sentences are recognised, lines are labelled 12.1, 12.2, ...), or both, in "
-        "one HTML report whose toolbar switches between the two",
+        "compared: paragraph by paragraph, sentence by sentence (moved sentences are "
+        "recognised, lines are labelled 12.1, 12.2, ...), or both, in one HTML report "
+        "whose toolbar switches between the two (default: both for the HTML report, "
+        "paragraph for a diff)",
     )
     ap.add_argument(
         "--language",
@@ -360,8 +362,8 @@ def main(argv: list[str] | None = None) -> int:
 
     _check_compare_args(ap, args, mode)
 
-    split = args.split or "paragraph"
     fmt = args.format or format_of(args.output)
+    split = args.split or default_split(fmt)
     try:
         check_split(split, fmt)
     except ValueError as e:

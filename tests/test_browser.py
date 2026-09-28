@@ -222,6 +222,149 @@ def test_comment_link_goes_to_its_row(page):
     target = page.locator("tr.target")
     assert target.count() == 1
     assert "Line 20" in target.inner_text()
+    # the paragraph the comment is in flashes, and so does its marker
+    page.wait_for_selector("tr.target td.code.right.flash", timeout=5_000)
+    assert page.locator("tr.target td.code.right .comment.flash").count() == 1
+    page.wait_for_selector("td.code.flash", state="detached", timeout=5_000)
+    # following the same link again flashes it again
+    page.locator(".comments-panel a").first.click()
+    page.wait_for_selector("tr.target td.code.right.flash", timeout=5_000)
+
+
+def test_comments_sorted_by_place_or_date(browser, tmp_path):
+    """The comments panel lists its comments in reading order, or by date,
+    oldest first; the choice is remembered."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("First line.\n\nSecond line.\n", encoding="utf-8")
+    late = '[Late.]{.comment-start id="1" author="A" date="2026-09-25T10:00:00Z"}'
+    early = '[Early.]{.comment-start id="2" author="A" date="2026-09-20T10:00:00Z"}'
+    new.write_text(f"First line.{late}\n\nSecond line.{early}\n", encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new))
+
+    def listed():
+        return page.locator(".comments-panel li a").all_inner_texts()
+
+    assert listed() == ["Late.", "Early."]
+    page.click('[data-sort="date"]')
+    assert listed() == ["Early.", "Late."]
+    assert page.get_attribute('[data-sort="date"]', "aria-pressed") == "true"
+    page.reload()
+    assert listed() == ["Early.", "Late."]
+    page.click('[data-sort="place"]')
+    assert listed() == ["Late.", "Early."]
+    # the order shown, clicked again, is reversed, and remembered
+    page.click('[data-sort="place"]')
+    assert listed() == ["Early.", "Late."]
+    assert page.inner_text('[data-sort="place"] .dir') == "↑"
+    page.click('[data-sort="date"]')
+    assert listed() == ["Early.", "Late."]
+    page.click('[data-sort="date"]')
+    assert listed() == ["Late.", "Early."]
+    assert page.get_attribute('[data-sort="date"]', "aria-label") == "date, descending"
+    page.reload()
+    assert listed() == ["Late.", "Early."]
+
+
+def anchored_report(browser, tmp_path, **context_options):
+    """A report of a comment added on a few words of one paragraph, and one
+    whose words run on into the next paragraph."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("One two three four.\n\nFive six seven.\n", encoding="utf-8")
+    one = '[Here.]{.comment-start id="1" author="A" date="2026-09-25T10:00:00Z"}'
+    two = '[Across.]{.comment-start id="2" author="A" date="2026-09-26T10:00:00Z"}'
+    new.write_text(
+        f'One {one}two three[]{{.comment-end id="1"}} {two}four.\n\n'
+        'Five six[]{.comment-end id="2"} seven.\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "page.html"
+    out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
+    page = browser.new_context(**context_options).new_page()
+    page.goto(out.as_uri())
+    return page
+
+
+def highlighted(page) -> str:
+    return page.evaluate(
+        """() => { const h = CSS.highlights.get("comment-flash");
+                   return h ? [...h].map(r => r.toString()).join("|") : null; }"""
+    )
+
+
+def test_comment_link_flashes_the_words_it_is_anchored_to(browser, tmp_path):
+    """Following a comment's link highlights the words it is anchored to,
+    not its paragraph, across paragraphs too; then the highlight goes."""
+    page = anchored_report(browser, tmp_path)
+    page.locator(".comments-panel a", has_text="Here.").click()
+    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
+    assert highlighted(page).replace("­", "") == "two three"
+    assert page.locator("td.code.flash").count() == 0
+    assert page.locator(".comment.flash").count() == 1
+    page.wait_for_function('!CSS.highlights.has("comment-flash")', timeout=5_000)
+    page.locator(".comments-panel a", has_text="Across.").click()
+    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
+    first, second = highlighted(page).replace("­", "").split("|")
+    assert first == "four." and second.startswith("Five six")
+    assert "seven" not in second
+
+
+def test_comment_whose_words_are_gone_flashes_its_marker_only(browser, tmp_path):
+    """A comment whose words went (its text ends where it starts) rings its
+    marker and highlights nothing: not its paragraph either."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("One two.\n", encoding="utf-8")
+    note = '[Gone.]{.comment-start id="1" author="A" date="2026-09-25T10:00:00Z"}'
+    new.write_text(f'One two.{note}[]{{.comment-end id="1"}}\n', encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
+    page.locator(".comments-panel a").first.click()
+    page.wait_for_selector(".comment.flash", timeout=5_000)
+    assert highlighted(page) is None
+    assert page.locator("td.code.flash").count() == 0
+
+
+def test_comment_flash_with_reduced_motion(browser, tmp_path):
+    """A system asking for reduced motion still sees the words flash: once,
+    steadily, not animated away."""
+    page = anchored_report(browser, tmp_path, reduced_motion="reduce")
+    page.locator(".comments-panel a", has_text="Here.").click()
+    page.wait_for_function('CSS.highlights.has("comment-flash")', timeout=5_000)
+    page.wait_for_timeout(1_000)
+    assert highlighted(page).replace("­", "") == "two three"
+    page.wait_for_function('!CSS.highlights.has("comment-flash")', timeout=5_000)
+
+
+def test_comments_filtered_by_status(browser, tmp_path):
+    """The comments panel shows all its comments, or only the new or the
+    removed ones, with a dashed line between those shown; remembered."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    gone = '[Gone.]{.comment-start id="1" author="A" date="2026-09-20T10:00:00Z"}'
+    came = '[Came.]{.comment-start id="2" author="A" date="2026-09-25T10:00:00Z"}'
+    old.write_text(f"First line.{gone}\n\nSecond line.\n", encoding="utf-8")
+    new.write_text(f"First line.\n\nSecond line.{came}\n", encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new))
+    items = page.locator(".comments-panel li")
+
+    def shown():
+        return [li.locator("a").inner_text() for li in items.all() if li.is_visible()]
+
+    def top_borders():
+        return [
+            li.evaluate("e => getComputedStyle(e).borderTopStyle")
+            for li in items.all()
+            if li.is_visible()
+        ]
+
+    assert shown() == ["Gone.", "Came."]
+    assert top_borders() == ["none", "dashed"]
+    page.click('[data-show="new"]')
+    assert shown() == ["Came."] and top_borders() == ["none"]
+    page.click('[data-show="removed"]')
+    assert shown() == ["Gone."]
+    page.reload()
+    assert shown() == ["Gone."]
+    assert page.get_attribute('[data-show="removed"]', "aria-pressed") == "true"
+    page.click('[data-show="all"]')
+    assert shown() == ["Gone.", "Came."]
 
 
 def test_comment_tooltip(page):

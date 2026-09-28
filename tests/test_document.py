@@ -92,7 +92,7 @@ def test_formatting_changes(tmp_path):
     html = render(c)
     assert '<span class="fmt" data-fmt="made &#34;plain&#34; bold">' in html
     assert 'class="equal fmt-row"' in html
-    assert "formatting changed in 1 line" in html
+    assert "formatting changed in 1 paragraph" in html
     assert 'data-toggle="formats"' in html
 
 

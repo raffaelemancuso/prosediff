@@ -58,6 +58,14 @@ class CommentMark:
 
 
 @dataclass
+class CommentEnd:
+    """Where the text a comment is anchored to ends: the id of its
+    CommentMark, in the same document."""
+
+    id: str
+
+
+@dataclass
 class NoteRef:
     """A reference to a footnote or endnote: its number among them."""
 
@@ -75,7 +83,7 @@ class Image:
         return cls(f"[image: {description}]" if description else "[image]")
 
 
-Inline = Text | Span | CommentMark | NoteRef | Image
+Inline = Text | Span | CommentMark | CommentEnd | NoteRef | Image
 
 
 @dataclass
@@ -116,13 +124,14 @@ def is_blank(inlines: Iterable) -> bool:
 def comments_only(inlines: list) -> bool:
     """Whether inlines are comments and nothing else: a paragraph deleted as
     a whole keeps them, for the next paragraph."""
-    return any(isinstance(i, CommentMark) for i in inlines) and is_blank(inlines)
+    return any(isinstance(i, CommentMark | CommentEnd) for i in inlines) and is_blank(inlines)
 
 
-def comments_in(inlines: Iterable) -> list[CommentMark]:
+def comments_in(inlines: Iterable) -> list[CommentMark | CommentEnd]:
+    """The comments of inlines, where they start and where their text ends."""
     out = []
     for i in inlines:
-        if isinstance(i, CommentMark):
+        if isinstance(i, CommentMark | CommentEnd):
             out.append(i)
         elif isinstance(i, Span):
             out += comments_in(i.children)
@@ -260,6 +269,11 @@ def comment_markdown(c: CommentMark) -> str:
     return f'[{note}]{{.comment-start id="{c.id}" author="{author}" date="{c.date}"}}'
 
 
+def comment_end_markdown(c: CommentEnd) -> str:
+    """The end of a comment's text as pandoc writes it: []{.comment-end ...}."""
+    return f'[]{{.comment-end id="{c.id}"}}'
+
+
 FORMATTING = (STRONG, EM, UNDERLINE, STRIKE, SUP, SUB)
 
 
@@ -308,6 +322,8 @@ def markdown(inlines: list) -> str:
 def _markdown_one(i) -> str:
     if isinstance(i, CommentMark):
         return comment_markdown(i)
+    if isinstance(i, CommentEnd):
+        return comment_end_markdown(i)
     if isinstance(i, NoteRef):
         return f"[^{i.number}]"
     if isinstance(i, Image):
@@ -435,7 +451,7 @@ def _add(
     out: Builder,
     inlines: Iterable,
     styles: frozenset[str],
-    comment: Callable[[CommentMark], str],
+    comment: Callable[[CommentMark | CommentEnd], str],
 ) -> None:
     for i in inlines:
         if isinstance(i, Text):
@@ -444,7 +460,7 @@ def _add(
             out.add(i.text, styles)
         elif isinstance(i, NoteRef):
             out.add(f"[^{i.number}]")
-        elif isinstance(i, CommentMark):
+        elif isinstance(i, CommentMark | CommentEnd):
             out.add(comment(i))
         elif i.kind == "link":
             _add(out, i.children, styles | {"link"}, comment)
@@ -452,10 +468,11 @@ def _add(
             _add(out, i.children, styles | change_marks(i.kind, i.author, i.date), comment)
 
 
-def lines(doc: Document, comment: Callable[[CommentMark], str]) -> list[Line]:
+def lines(doc: Document, comment: Callable[[CommentMark | CommentEnd], str]) -> list[Line]:
     """The lines prosediff compares: one per paragraph, heading, list item,
-    table row and footnote. comment is what a comment becomes in the text:
-    a placeholder, the Markdown pandoc writes for it, or nothing."""
+    table row and footnote. comment is what a comment, or the end of its
+    text, becomes in the text: a placeholder, the Markdown pandoc writes for
+    it, or nothing."""
     out = []
     for block in doc.blocks + doc.notes:
         lang = block.language or ""

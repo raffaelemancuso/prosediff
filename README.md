@@ -64,7 +64,7 @@ prosediff sits between the two:
   draft_returned.docx` shows what a co-author changed, whatever they tracked
   or did not. Their tracked changes are accepted (or rejected) exactly as
   Word would, spaces included, and **their comments are kept**: each shown
-  where it sits, with its author and date, new comments marked 🆕, and all
+  where it sits, with its author and date, new comments marked 🆕, removed ones 🗑️, and all
   listed in a panel. Only new and removed comments are shown: those already
   in the old version are left out, even where they moved. The same works on
   OpenDocument texts (.odt) from LibreOffice, both read directly (no
@@ -137,11 +137,11 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--full`                   | show every line of each changed file                          |
 | `--max-hidden N`           | unchanged lines embedded per gap for the HTML report to reveal (default 500); longer gaps are left out, to keep the HTML report light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
-| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (🆕 when added), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
+| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (🆕 when added, 🗑️ when removed), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
 | `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
 | `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or keep them all, shown as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file (not Word or OpenDocument files, which are not read as Markdown) are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
-| `--split paragraph\|sentence\|both` | how the prose of Markdown files and Word and OpenDocument documents is compared: paragraph by paragraph (default); sentence by sentence, where a sentence moved between paragraphs is recognised and each sentence is labelled with its line and its place in it (`12.3`); or both, in one HTML report whose toolbar switches between the two (`s`), a diff holding one only. In the GUI, "Compare by" |
+| `--split paragraph\|sentence\|both` | how the prose of Markdown files and Word and OpenDocument documents is compared: paragraph by paragraph; sentence by sentence, where a sentence moved between paragraphs is recognised and each sentence is labelled with its line and its place in it (`12.3`); or both, in one HTML report whose toolbar switches between the two (`s`), a diff holding one only. Default: both for the HTML report, paragraph by paragraph for a diff. In the GUI, "Compare by" |
 | `--language CODE`          | the language of the prose: its rules split sentences with `--split sentence` (about forty languages are known; others fall back to a simple rule), and the HTML report hyphenates wrapped lines by it. A code, e.g. `en`, `it`, `de`, `fr`, `pt-br`; `document`, the languages Word and OpenDocument files mark their text with, in the runs' and the styles' settings: each paragraph is split and hyphenated by its own, and the file's language is the one most of its letters are marked with, for the paragraphs that mark none (an error for Markdown and text files); or `guess`, guessed from each file's text (py3langid). Default: `document` for Word and OpenDocument files, `guess` for the others and for a document that marks no language. A file whose language is unknown (too short or too mixed to guess) is split by English rules and not hyphenated |
 | `--encoding NAME`          | the encoding of text and Markdown files, e.g. `utf-8`, `cp1252`, `latin-1` (Word and OpenDocument files carry their own). Default `auto`: UTF-8, unless a file cannot be read as UTF-8 or reads with control characters; then the encoding is guessed with [cchardet](https://pypi.org/project/cchardet/) (Mozilla's uchardet, reliable even on a few words), or, when its guess cannot read the file, with [charset-normalizer](https://pypi.org/project/charset-normalizer/); Windows-1252 is preferred when it reads the text alike, and the file header says which was used. In the GUI, the "Text encoding" box |
 | `--move-similarity X`      | how alike, above 0 and at most 1, an edited paragraph (a line of other files) must be to where it reappears to count as moved, by `--move-algorithm` (default 0.7; 1: only lines moved unchanged). Since 0.5.0 it no longer applies to sentences, which have their own setting below |
@@ -238,27 +238,29 @@ shows the fields of one of three sources:
   of "Only" (`--include`) are compared.
 
 The options sit in two cards, each explained by a tooltip (rest the pointer
-on it, or on its ⓘ):
+on it, or on its ⓘ; in a drop-down list, on an item to learn what it
+means):
 
 - **What is compared**: Word and OpenDocument tracked changes, how prose
-  is compared ("Compare by": paragraphs, sentences or both), how alike a
-  paragraph and a sentence must stay to count as moved and how that is
-  measured (a threshold and an algorithm for each, "Moved paragraphs" and
-  "Moved sentences"), whether passages moved within or between paragraphs
-  are followed too ("Moved passages"), the document language (`default`: the one Word and
-  OpenDocument files mark, the others guessed; `document`; `guess`, guessed
-  from each file; or a code such as `it`), which splits sentences and
-  hyphenates lines, the encoding of text files, and a switch to ignore
-  whitespace.
+  is compared ("Compare by": paragraphs, sentences or both, the default),
+  the document language (`default`: the one Word and OpenDocument files
+  mark, the others guessed; `document`; `guess`, guessed from each file;
+  or a code such as `it`), which splits sentences and hyphenates lines, a
+  switch to ignore whitespace, and whether passages moved within or
+  between paragraphs are followed too ("Moved passages").
 - **How it is shown**: the comments (markers, text or none), comments
   without text, context lines or whole files, and the alignment of wrapped
   lines.
 
 Below them, **Advanced settings** (hidden until clicked) holds the settings
-few need to change: how moved passages are told from chance likeness, the
-same as the `--passage-*` options, each explained by its tooltip, with a
-button putting them back to their defaults. Only the values changed from
-the defaults are saved, so the others follow prosediff's defaults.
+few need to change: how alike a paragraph and a sentence must stay to
+count as moved and how that is measured (a threshold and an algorithm for
+each, "Moved paragraphs" and "Moved sentences"); how moved passages are
+told from chance likeness, the same as the `--passage-*` options, each
+explained by its tooltip; and the encoding of text files ("Text
+encoding"). Only the moved-passage values changed from the defaults are
+saved, so the others follow prosediff's defaults; "Reset to defaults"
+puts every option back.
 
 Under **Output**, the format (HTML report, unified diff or word diff, the
 extension of the file following it) and where to save it (by default,
@@ -278,9 +280,15 @@ back to its default (what is compared and where the output goes stay).
   are listed).
 - A comments panel: every comment with its author and date, marked new,
   removed or unchanged, each linked to the line it sits in (unchanged
-  comments are in a collapsed list). In the text, a comment is a 💬 marker,
-  or 🆕 when it was added since the base; hovering or focusing it shows the
-  author in bold, the comment below and its date in grey.
+  comments are in a collapsed list). It shows all of them, or only the new
+  or the removed ones, in reading order or by date, either way up (click
+  the order shown again to reverse it). Following a comment's link
+  flashes the words the comment is anchored to, across paragraphs too
+  (only its marker when those words were deleted with a tracked change;
+  its whole paragraph when a Markdown file does not say where its text
+  ends). In the text, a comment is a 💬 marker, 🆕 when it was added
+  since the base, or 🗑️ when it was removed; hovering or focusing it
+  shows the author in bold, the comment below and its date in grey.
 - At the top, how many paragraphs (or sentences; lines, for files other than
   prose) were changed, inserted, deleted and moved.
 - The changed files with their counts of lines and words added and removed

@@ -47,7 +47,10 @@ def test_comment_is_a_span_with_escaped_brackets(written):
     from prosediff.comments import Comments, fold_comments
 
     assert '[Is \\[this\\] right?]{.comment-start id="0" author="Anna" date="' in written, written
-    assert written.rstrip().endswith("A sentence with a [bracket] and a remark.")
+    # where its text ends too, as pandoc writes it
+    assert written.rstrip().endswith(
+        'A sentence with a [bracket] and a remark.[]{.comment-end id="0"}'
+    )
     comments = Comments()
     folded = fold_comments(written, comments)
     (placeholder,) = [ch for ch in folded if 0xE000 <= ord(ch) <= 0xF8FF]

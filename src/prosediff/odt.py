@@ -9,7 +9,8 @@ prosediff.document.Document:
   their kind, footnotes and endnotes numbered blocks of their own; each run
   keeps the styles of its spans (bold, italic, underline, struck through,
   superscript, subscript), each link its target;
-- each comment (office:annotation) is kept where it starts;
+- each comment (office:annotation) is kept where it starts, and where the
+  text it is anchored to ends (office:annotation-end);
 - tracked changes are settled as asked. An insertion is the text between
   text:change-start and text:change-end; a deletion is a text:change point
   whose text is kept in text:tracked-changes. Accepting keeps the inserted
@@ -37,6 +38,7 @@ from prosediff.document import (
     SUP,
     UNDERLINE,
     Block,
+    CommentEnd,
     CommentMark,
     DocumentReader,
     Image,
@@ -81,7 +83,6 @@ SILENT = {
     "text:reference-mark-end",
     "text:alphabetical-index-mark",
     "text:toc-mark",
-    "office:annotation-end",
 }
 
 
@@ -121,6 +122,8 @@ class Reader(DocumentReader):
         self.open: list[str] = []  # the insertions the walk is inside
         self.notes: list[Block] = []  # footnotes and endnotes, as referenced
         self.comment_count = 0
+        # an annotation's office:name -> the id of its CommentMark
+        self.comment_names: dict[str, str] = {}
         self.styles: dict[str, frozenset[str]] = {}
 
     def language_of(self, paragraphs: list[Element]) -> str | None:
@@ -221,8 +224,11 @@ class Reader(DocumentReader):
     def comment(self, el: Element) -> CommentMark:
         self.comment_count += 1
         texts = [p.text_recursive for p in el.get_elements("text:p")]
+        cid = str(self.comment_count - 1)
+        if name := el.get_attribute_string("office:name"):
+            self.comment_names[name] = cid
         return CommentMark(
-            str(self.comment_count - 1),
+            cid,
             _text_of(el, "dc:creator"),
             spaced(" ".join(texts)),
             _text_of(el, "dc:date")[:19],
@@ -266,6 +272,10 @@ class Reader(DocumentReader):
                     out.append((NoteRef(number), where))
             elif tag == "office:annotation":
                 out.append((self.comment(child), None))
+            elif tag == "office:annotation-end":
+                cid = self.comment_names.pop(child.get_attribute_string("office:name") or "", None)
+                if cid is not None:
+                    out.append((CommentEnd(cid), None))
             elif tag == "text:change-start":
                 cid = child.get_attribute_string("text:change-id")
                 if self.regions.get(cid or "", ("",))[0] == "insertion":

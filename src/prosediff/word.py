@@ -47,6 +47,7 @@ from prosediff.document import (
     SUP,
     UNDERLINE,
     Block,
+    CommentEnd,
     CommentMark,
     Document,
     DocumentReader,
@@ -114,6 +115,7 @@ class Reader(DocumentReader):
     notes: dict = field(default_factory=dict)  # ("footnote"/"endnote", id) -> element
     note_order: list = field(default_factory=list)  # [(kind, id)] as referenced
     shown_comments: set = field(default_factory=set)
+    ended_comments: set = field(default_factory=set)
     # The styles of the paragraph being read that its runs do not restate:
     # a heading's own (its text is bold as a heading, not as bold text).
     plain: frozenset = frozenset()
@@ -130,6 +132,13 @@ class Reader(DocumentReader):
         # a date without a time midnight
         date = c._comment_elm.get(qn("w:date")) or ""
         return [CommentMark(cid, c.author or "", spaced(c.text), date)]
+
+    def comment_end(self, cid: str) -> list:
+        """Where the text of a comment ends, once, after where it starts."""
+        if cid not in self.shown_comments or cid in self.ended_comments:
+            return []
+        self.ended_comments.add(cid)
+        return [CommentEnd(cid)]
 
     def note_ref(self, kind: str, nid: str) -> list:
         key = (kind, nid)
@@ -180,6 +189,8 @@ class Reader(DocumentReader):
                 out += self.run(child, paragraph, deleted, dropping)
             elif tag == qn("w:commentRangeStart"):
                 out += self.comment(child.get(qn("w:id")))
+            elif tag == qn("w:commentRangeEnd"):
+                out += self.comment_end(child.get(qn("w:id")))
             elif tag in INSERTED or tag in DELETED:
                 is_deletion = tag in DELETED
                 kind = "deletion" if is_deletion else "insertion"

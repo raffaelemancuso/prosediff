@@ -48,6 +48,12 @@ ALIGNMENTS = ("left", "justify")
 SPLITS = ("paragraph", "sentence", "both")
 
 
+def default_split(fmt: str) -> str:
+    """The split when none is chosen: both for the HTML report, paragraph by
+    paragraph for a diff, which holds one."""
+    return "both" if fmt == "html" else "paragraph"
+
+
 def check_split(split: str, fmt: str) -> None:
     """Refuse both splits for a diff, which holds one (ValueError)."""
     if split == "both" and fmt != "html":

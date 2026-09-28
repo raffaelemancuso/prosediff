@@ -11,7 +11,7 @@
   --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
   --add: #1a7f37; --rem: #cf222e; --link: #0969da;
   --move-line: #fbefff; --move: #8250df; --current: #bf8700;
-  --fmt: #9a6700; --fmt-bg: #fff8c5;
+  --fmt: #9a6700; --fmt-bg: #fff8c5; --flash: #ffd33d99;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -20,7 +20,7 @@
     --ins-line: #2ea04326; --ins-word: #2ea04366; --skip: #388bfd1a;
     --add: #3fb950; --rem: #f85149; --link: #4493f8;
     --move-line: #ab7df826; --move: #ab7df8; --current: #d29922;
-    --fmt: #d29922; --fmt-bg: #bb800933;
+    --fmt: #d29922; --fmt-bg: #bb800933; --flash: #e3b34166;
   }
 }
 /* On paper, the light colours even when the browser is in dark mode: no
@@ -32,7 +32,7 @@
     --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
     --add: #1a7f37; --rem: #cf222e; --link: #0969da;
     --move-line: #fbefff; --move: #8250df; --current: #bf8700;
-    --fmt: #9a6700; --fmt-bg: #fff8c5;
+    --fmt: #9a6700; --fmt-bg: #fff8c5; --flash: #ffd33d99;
   }
 }
 * { box-sizing: border-box; }
@@ -48,6 +48,8 @@ h2 { font-size: 15px; margin: 0 0 6px; }
   margin-bottom: 12px; }
 .role { color: var(--muted); }
 .revisions code { font-weight: 600; }
+.revisions .full-path { grid-column: 2 / 4; font-family: ui-monospace, monospace;
+  font-size: 0.9em; color: var(--muted); overflow-wrap: anywhere; }
 .commits, .comments-panel { margin-bottom: 12px; }
 .commits summary, .comments-panel summary { cursor: pointer; color: var(--muted); }
 .commits ol { margin: 6px 0 0; padding-left: 0; list-style: none; }
@@ -56,11 +58,31 @@ h2 { font-size: 15px; margin: 0 0 6px; }
 .comments-panel { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
 .comments-panel ul { list-style: none; margin: 4px 0 8px; padding: 0; }
 .comments-panel li { display: grid; grid-template-columns: 6em 10em 1fr; gap: 8px;
-  padding: 2px 0; }
+  padding: 4px 0; }
+.comments-panel li[hidden] { display: none; }
+.comments-panel li:not([hidden]) ~ li:not([hidden]) { border-top: 1px dashed var(--border); }
 .comments-panel .status-new { color: var(--add); font-weight: 600; }
 .comments-panel .status-removed { color: var(--rem); font-weight: 600; }
 .comments-panel .status-unchanged { color: var(--muted); }
-.comments-panel a { color: inherit; }
+.comments-panel a { color: inherit; text-decoration: none; }
+.comments-panel a:hover { text-decoration: underline; }
+/* Following a comment's link flashes the text the comment is anchored to
+   (a highlight of the script's ranges), or its paragraph when where that
+   text ends is not known, and rings its marker. The script switches them on
+   and off: no animation, which a system asking for reduced motion would
+   stop. */
+::highlight(comment-flash) { background-color: var(--flash); }
+td.code.flash { background-color: var(--flash) !important; }
+.comment.flash { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
+.comments-switch .dir { margin-left: 2px; }
+.comments-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+.comments-head h2 { margin: 0; }
+.comments-switch { display: inline-flex; gap: 8px; align-items: baseline; }
+.comments-switch button { font: inherit; color: var(--link); background: none; border: 0;
+  padding: 0 4px; border-radius: 4px; cursor: pointer; }
+.comments-switch button:hover { text-decoration: underline; }
+.comments-switch button[aria-pressed="true"] { background: var(--skip); color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--link); }
 .summary { color: var(--muted); margin-bottom: 8px; display: flex; gap: 12px;
   flex-wrap: wrap; align-items: center; }
 .summary button, .expand { font: inherit; color: var(--link); background: none;
@@ -166,7 +188,7 @@ body.passages tr.only-moved .sign { color: var(--move); }
 /* The "Moved passages" switch: off, a row shows its plain word diff, each
    passage removed and added in place, and the counts follow. */
 body:not(.passages) .pv-on, body.passages .pv-off { display: none; }
-.summary .units { margin: 0 0 4px; }
+.summary .units, .summary .files-changed { margin: 0 0 4px; flex-basis: 100%; }
 /* The split switch shows the split shown: a block of lines (paragraphs),
    or a line ending in a full stop (sentences). */
 .toolbar .split-switch .sentences, .toolbar .split-switch[aria-pressed="true"] .paragraphs { display: none; }
@@ -185,8 +207,8 @@ tr.pair-hot td { outline: 1px solid var(--move); outline-offset: -1px; }
 td[data-move] { cursor: help; }
 .comment { font-size: 0.85em; background: var(--panel); border-radius: 3px;
   padding: 0 2px; }
-/* A new comment's icon says it all: no box around it. */
-.comment.new { background: none; padding: 0; }
+/* A new or removed comment's icon says it all: no box around it. */
+.comment.new, .comment.removed { background: none; padding: 0; }
 /* The one tooltip of the HTML report, for comments (the author in bold, the
    comment below, its date in grey) and the toolbar's help. The script
    places it next to what is hovered or focused, so no file box clips it. */
@@ -261,8 +283,7 @@ footer a { color: inherit; }
 .toolbar button.icon:hover { background: var(--skip); }
 .toolbar button.icon[aria-pressed="true"] { background: var(--skip);
   box-shadow: inset 0 0 0 1px var(--link); }
-.toolbar button:disabled { color: var(--muted); cursor: default; }
-.toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
+.toolbar button:disabled { color: var(--muted); cursor: default; }.toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
   font-variant-numeric: tabular-nums; }
 .toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
 /* The spacing stepper: − and + either side of the value, in one bordered
@@ -283,7 +304,7 @@ footer a { color: inherit; }
 body.inline .comment::after { content: " " attr(data-author) ": " attr(data-text);
   font-family: -apple-system, "Segoe UI", sans-serif; font-style: italic;
   color: var(--muted); }
-body.inline .comment, body.inline .comment.new { background: var(--panel);
+body.inline .comment, body.inline .comment.new, body.inline .comment.removed { background: var(--panel);
   border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
 /* No help cursor where the tooltip is switched off. */
 body.no-comments-tips .comment { cursor: auto; }
@@ -307,7 +328,7 @@ thead.print, .print-note { display: none; }
 @media print {
   body { padding: 0; font-size: 11px; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .toolbar, .summary button { display: none; }
+  .toolbar, .summary button, .comments-switch { display: none; }
   /* No disclosure triangles: nothing to click on paper. */
   summary { list-style: none; }
   summary::-webkit-details-marker { display: none; }
@@ -328,7 +349,7 @@ thead.print, .print-note { display: none; }
   .comment::after { content: " " attr(data-author) ": " attr(data-text);
     font-family: -apple-system, "Segoe UI", sans-serif; font-style: italic;
     color: var(--muted); }
-  .comment, .comment.new { background: var(--panel); border: 1px solid var(--border);
+  .comment, .comment.new, .comment.removed { background: var(--panel); border: 1px solid var(--border);
     border-radius: 3px; padding: 0 3px; }
   .print-note { display: block; font-family: -apple-system, "Segoe UI", sans-serif;
     font-size: 0.85em; color: var(--move); }
@@ -369,7 +390,7 @@ thead.print, .print-note { display: none; }
 {% macro comment_list(items) %}
   <ul>
   {% for e in items %}
-    <li><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
+    <li data-place="{{ loop.index }}" data-date="{{ e.date }}" data-status="{{ e.status }}"><span class="status-{{ e.status }}"><span aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}" data-comment="{{ e.text }}" data-side="{{ "left" if e.status == "removed" else "right" }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
   {% endfor %}
   </ul>
 {% endmacro %}
@@ -380,9 +401,12 @@ thead.print, .print-note { display: none; }
   <span class="role">Base (older)</span>
   <code title="{{ c.base.hexsha }}">{{ c.base.short }}</code>
   <span>{{ side(c.base) }}</span>
+  {% if not c.location %}<span></span><span class="full-path">{{ c.base.hexsha }}</span>{% endif %}
   <span class="role">Target (newer)</span>
   <code title="{{ c.target.hexsha }}">{{ c.target.short }}</code>
   <span>{{ side(c.target) }}</span>
+  {% if not c.location %}<span></span><span class="full-path">{{ c.target.hexsha }}</span>{% endif %}
+  {% if c.location %}<span class="role">Repository</span><span class="full-path">{{ c.location }}</span>{% endif %}
 </div>
 
 {% if c.commits %}
@@ -424,20 +448,25 @@ thead.print, .print-note { display: none; }
 {% if on == off %}{{ on | comma }}{% else %}<span class="pv-on">{{ on | comma }}</span><span class="pv-off">{{ off | comma }}</span>{% endif %}
 {%- endmacro %}
 
-{% macro counts(x) -%}
+{# The counts of a file or a comparison, its lines called by unit (a
+   paragraph, a sentence or a line: unit_of). #}
+{% macro counts(x, unit) -%}
 {% set n, y = x.counts, x.without_passages %}
-<span class="add" title="lines added">+{{ both(n.additions, y.additions) }}</span>
-<span class="rem" title="lines removed">−{{ both(n.deletions, y.deletions) }}</span>
-<span class="role">lines,</span>
+<span class="add" title="{{ unit }}s added">+{{ both(n.additions, y.additions) }}</span>
+<span class="rem" title="{{ unit }}s removed">−{{ both(n.deletions, y.deletions) }}</span>
+<span class="role">{{ unit }}s,</span>
 <span class="add" title="words added">+{{ both(n.words_added, y.words_added) }}</span>
 <span class="rem" title="words removed">−{{ both(n.words_removed, y.words_removed) }}</span>
-<span class="role">words{% if n.moved %}, {{ n.moved | counted("moved line") }}{% endif %}{% if n.moved_passages %}<span class="pv-on">, {{ n.moved_passages | counted("moved passage") }}</span>{% endif %}</span>
+<span class="role">words{% if n.moved %}, {{ n.moved | counted("moved " ~ unit) }}{% endif %}{% if n.moved_passages %}<span class="pv-on">, {{ n.moved_passages | counted("moved passage") }}</span>{% endif %}</span>
 {%- endmacro %}
 
-{# What a line is in a comparison: a paragraph or a sentence of prose, or a
-   line of other files. #}
+{# What a line is in files: a paragraph or a sentence of prose, when all
+   are prose, or else a line. #}
+{% macro unit_of(files, split) -%}
+{% if files and files | selectattr("markdown") | list | length == files | length %}{{ "sentence" if split == "sentence" else "paragraph" }}{% else %}line{% endif %}
+{%- endmacro %}
 {% macro unit_name(c, split) -%}
-{% if c.files and c.files | selectattr("markdown") | list | length == c.files | length %}{{ "sentences" if split == "sentence" else "paragraphs" }}{% else %}lines{% endif %}
+{{ unit_of(c.files, split) }}s
 {%- endmacro %}
 
 {# The body of the report for one comparison; prefix sets its ids apart when
@@ -446,8 +475,21 @@ thead.print, .print-note { display: none; }
 {% if c.comments %}
 {% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
 <section class="comments-panel" aria-labelledby="{{ prefix }}comments-title">
-  <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
-  {{ comment_list(new_c + gone_c) }}
+  <div class="comments-head">
+    <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
+    <span class="comments-switch" role="group" aria-label="Show comments">
+      <span class="role">Show</span>
+      <button type="button" data-show="all" aria-pressed="true">all</button>
+      <button type="button" data-show="new" aria-pressed="false">new</button>
+      <button type="button" data-show="removed" aria-pressed="false">removed</button>
+    </span>
+    <span class="comments-switch" role="group" aria-label="Sort comments">
+      <span class="role">Sort by</span>
+      <button type="button" data-sort="place" aria-pressed="true" title="In the order they appear in the report; again to reverse">reading order<span class="dir" aria-hidden="true">↓</span></button>
+      <button type="button" data-sort="date" aria-pressed="false" title="By when they were written; again to reverse">date<span class="dir" aria-hidden="true"></span></button>
+    </span>
+  </div>
+  {{ comment_list(c.comments_in_reading_order(("new", "removed"))) }}
 </section>
 {% endif %}
 
@@ -466,8 +508,8 @@ thead.print, .print-note { display: none; }
     {{ n.moved | comma }} moved{% if n.moved_passages %}<span class="pv-on">;
     {{ n.moved_passages | counted("passage") }} moved within or between them</span>{% endif %}</p>
   {% endif %}
-  <span>{{ c.files | length | counted("file") }} changed:
-  {{ counts(c) }}{% if paths %}, in {{ paths | join(", ") }}{% endif %}</span>
+  <span class="files-changed">{{ c.files | length | counted("file") }} changed:
+  {{ counts(c, unit_of(c.files, split)) }}{% if paths %}, in {{ paths | join(", ") }}{% endif %}</span>
   <button type="button" data-files="open">Expand all</button>
   <button type="button" data-files="close">Collapse all</button>
 </div>
@@ -475,19 +517,20 @@ thead.print, .print-note { display: none; }
 <nav aria-label="Changed files"><ul>
 {% for f in c.files %}
   <li><span class="change">{{ f.change }}</span><a href="#{{ f.anchor }}">{{ f.path }}</a>
-    {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}</li>
+    {% if not f.binary %}<span>{{ counts(f, unit_of([f], split)) }}</span>{% endif %}</li>
 {% endfor %}
 </ul></nav>
 
 {% set signs = {"delete": ("−", ""), "insert": ("", "+"), "replace": ("~", "~"), "moved-out": ("→", ""), "moved-in": ("", "←")} %}
-{% set spoken = {"delete": "removed line", "insert": "added line", "replace": "changed line", "moved-out": "moved line, from here", "moved-in": "moved line, to here"} %}
 {% for f in c.files %}
+{% set u = unit_of([f], split) | string %}
+{% set spoken = {"delete": "removed " ~ u, "insert": "added " ~ u, "replace": "changed " ~ u, "moved-out": "moved " ~ u ~ ", from here", "moved-in": "moved " ~ u ~ ", to here"} %}
 <details class="file" id="{{ f.anchor }}" open>
   <summary>
     <span class="path">{% if f.change == "renamed" %}{{ f.old_path }} → {% endif %}{{ f.path }}</span>
     <span class="role">{{ f.change }}</span>
-    {% if not f.binary %}<span>{{ counts(f) }}</span>{% endif %}
-    {% if f.formatted_rows %}<span class="fmt-count">formatting changed in {{ f.formatted_rows | counted("line") }}</span>{% endif %}
+    {% if not f.binary %}<span>{{ counts(f, u) }}</span>{% endif %}
+    {% if f.formatted_rows %}<span class="fmt-count">formatting changed in {{ f.formatted_rows | counted(u) }}</span>{% endif %}
     {% if f.note %}<span class="file-note">{{ f.note }}</span>{% endif %}
     {% if f.language %}<span class="file-note" title="{{ file_language_note(f.language, f.language_source) }}; its sentences are split and its lines hyphenated by it{% if f.mixed_languages %}, where a paragraph is marked with none of its own{% endif %}">{% if not f.mixed_languages %}{{ flag(f.language) }} {% endif %}language: {{ f.language }}{% if f.language_source == "guessed" %} (guessed){% elif f.language_source == "document" %} (from the document){% endif %}</span>{% endif %}
   </summary>
@@ -561,7 +604,7 @@ thead.print, .print-note { display: none; }
   <span class="counter" aria-live="polite" title="{{ c.change_count | counted("change") }}">{{ c.change_count | comma }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
   {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg></button>{% endif %}
-  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved line to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
+  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="true" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
   {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="true" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
   <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
   <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg></button>
@@ -662,6 +705,64 @@ thead.print, .print-note { display: none; }
   });
   if (document.body.classList.contains("formats")) unfoldFormats();
 
+  // The comments panel lists its comments in reading order ("place") or by
+  // date, in either direction (descending: from the end of the report, or
+  // the newest first), those without a date last; clicking the order shown
+  // reverses it. Remembered like the views.
+  var commentSort = { by: "place", descending: false };
+  function sortComments(by, descending, remember) {
+    commentSort = { by: by, descending: descending };
+    var sign = descending ? -1 : 1;
+    document.querySelectorAll(".comments-panel").forEach(function (panel) {
+      var list = panel.querySelector("ul");
+      if (!list) return;
+      var items = Array.prototype.slice.call(list.children);
+      items.sort(function (a, b) {
+        var x = a.dataset.date, y = b.dataset.date;
+        if (by === "date" && x !== y) return !x ? 1 : !y ? -1 : sign * (x < y ? -1 : 1);
+        return sign * (a.dataset.place - b.dataset.place);
+      });
+      items.forEach(function (li) { list.appendChild(li); });
+      panel.querySelectorAll("[data-sort]").forEach(function (b) {
+        var on = b.dataset.sort === by;
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+        b.querySelector(".dir").textContent = on ? (descending ? "↑" : "↓") : "";
+        b.setAttribute("aria-label", b.firstChild.textContent +
+          (on ? (descending ? ", descending" : ", ascending") : ""));
+      });
+    });
+    if (remember) {
+      try {
+        localStorage.setItem("prosediff-comments-sort", by);
+        localStorage.setItem("prosediff-comments-descending", descending ? "1" : "0");
+      } catch (e) {}
+    }
+  }
+  // The comments panel shows all its comments, or only the new or the
+  // removed ones; remembered like the views.
+  function showComments(which, remember) {
+    document.querySelectorAll(".comments-panel").forEach(function (panel) {
+      panel.querySelectorAll("li[data-status]").forEach(function (li) {
+        li.hidden = which !== "all" && li.dataset.status !== which;
+      });
+      panel.querySelectorAll("[data-show]").forEach(function (b) {
+        b.setAttribute("aria-pressed", b.dataset.show === which ? "true" : "false");
+      });
+    });
+    if (remember) {
+      try { localStorage.setItem("prosediff-comments-show", which); } catch (e) {}
+    }
+  }
+  try {
+    var savedSort = localStorage.getItem("prosediff-comments-sort");
+    var savedDescending = localStorage.getItem("prosediff-comments-descending") === "1";
+    if (savedSort === "date" || savedDescending) {
+      sortComments(savedSort === "date" ? "date" : "place", savedDescending, false);
+    }
+    var shownComments = localStorage.getItem("prosediff-comments-show");
+    if (shownComments === "new" || shownComments === "removed") showComments(shownComments, false);
+  } catch (e) {}
+
   // Reveal the run of unchanged lines a fold row stands for.
   function unfold(fold) {
     fold.nextElementSibling.hidden = false;
@@ -693,6 +794,14 @@ thead.print, .print-note { display: none; }
     }
     var nav = e.target.closest("[data-nav]");
     if (nav) { go(current + Number(nav.dataset.nav)); return; }
+    var sort = e.target.closest("[data-sort]");
+    if (sort) {
+      var by = sort.dataset.sort;
+      sortComments(by, by === commentSort.by ? !commentSort.descending : false, true);
+      return;
+    }
+    var show = e.target.closest("[data-show]");
+    if (show) { showComments(show.dataset.show, true); return; }
     var view = e.target.closest("[data-toggle]");
     if (view) { toggle(view.dataset.toggle); return; }
     var gap = e.target.closest("[data-gap]");
@@ -762,8 +871,94 @@ thead.print, .print-note { display: none; }
       document.querySelectorAll("tr.target").forEach(function (r) { r.classList.remove("target"); });
       t.classList.add("target");
       t.scrollIntoView({ block: "center" });
+      if (flashing) flashComment(t, flashing);
     }
+    flashing = null;
   }
+  // A comment's link, followed, flashes the text the comment is anchored
+  // to, on the side it is on (the old one for a removed comment), from its
+  // marker to the end of its text (a .comment-end of the same data-c), in
+  // one paragraph or across several; or, when where that text ends is not
+  // known, the whole paragraph; nothing when its words are gone (with a
+  // tracked change). Its marker is ringed. Twice on and off, or
+  // once and longer for a system that asks for reduced motion.
+  var flashing = null, flashRun = 0, flashOff = null;
+  var FLASH_STEPS = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? [[0, 1600]] : [[0, 550], [750, 1700]];
+  function pulse(on, off) {
+    if (flashOff) flashOff();  // the flash before, cut short
+    flashOff = off;
+    var run = ++flashRun;
+    FLASH_STEPS.forEach(function (step) {
+      setTimeout(function () { if (run === flashRun) on(); }, step[0]);
+      setTimeout(function () { if (run === flashRun) off(); }, step[1]);
+    });
+  }
+  // Whether el shows: none of its ancestors in the cell is hidden (the
+  // row's other version, with or without moved passages).
+  function shows(el, cell) {
+    for (var e = el; e && e !== cell; e = e.parentElement) {
+      if (getComputedStyle(e).display === "none") return false;
+    }
+    return true;
+  }
+  // The ranges of text from the marker to the end of the comment's text,
+  // one for each cell on the marker's side; none when that text is empty,
+  // null when no end follows.
+  function anchorRanges(row, side, marker) {
+    var rows = Array.prototype.slice.call(row.closest("table").rows);
+    var first = rows.indexOf(row), ranges = [];
+    for (var k = first; k < rows.length; k++) {
+      var cell = rows[k].querySelector("td.code." + side);
+      if (!cell) continue;
+      var range = document.createRange();
+      if (k === first) range.setStartAfter(marker); else range.setStart(cell, 0);
+      var end = Array.prototype.find.call(
+        cell.querySelectorAll('.comment-end[data-c="' + marker.dataset.c + '"]'),
+        function (e) {
+          return shows(e, cell) &&
+            (k !== first || marker.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING);
+        });
+      if (end) {
+        range.setEndBefore(end);
+        ranges.push(range);
+        var text = ranges.map(function (r) { return r.toString(); }).join("");
+        // none left (the words went with a tracked change): no range at all
+        return text.replace(/[\s\u00ad]/g, "") ? ranges : [];
+      }
+      range.setEnd(cell, cell.childNodes.length);
+      ranges.push(range);
+    }
+    return null;
+  }
+  function flashComment(row, link) {
+    var side = link.dataset.side;
+    var cell = row.querySelector("td.code." + side) || row.querySelector("td.code");
+    if (!cell) return;
+    var marker = Array.prototype.find.call(cell.querySelectorAll(".comment"), function (m) {
+      return m.dataset.text === link.dataset.comment && shows(m, cell);
+    });
+    var ranges = marker && window.CSS && CSS.highlights && typeof Highlight === "function"
+      ? anchorRanges(row, side, marker) : null;
+    var highlight = ranges && ranges.length ? new Highlight() : null;
+    if (highlight) ranges.forEach(function (r) { highlight.add(r); });
+    pulse(function () {
+      if (highlight) CSS.highlights.set("comment-flash", highlight);
+      else if (!ranges) cell.classList.add("flash");
+      if (marker) marker.classList.add("flash");
+    }, function () {
+      if (window.CSS && CSS.highlights) CSS.highlights.delete("comment-flash");
+      cell.classList.remove("flash");
+      if (marker) marker.classList.remove("flash");
+    });
+  }
+  document.addEventListener("click", function (e) {
+    var link = e.target.closest(".comments-panel a[data-comment]");
+    if (!link) return;
+    flashing = link;
+    // the same link again changes no hash: flash all the same
+    if (location.hash === link.getAttribute("href")) { e.preventDefault(); openTarget(); }
+  });
   window.addEventListener("hashchange", openTarget);
   openTarget();
 

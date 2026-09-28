@@ -3,7 +3,7 @@
 from helpers import END, NOTE, two_folders
 
 from prosediff import Options, compare, compare_paths, render
-from prosediff.comments import NEW_COMMENT_MARK
+from prosediff.comments import NEW_COMMENT_MARK, REMOVED_COMMENT_MARK, end_of, number_of
 from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
 
 MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
@@ -11,17 +11,21 @@ MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
 
 def test_fold_comments_replaces_span_with_one_placeholder():
     """A comment span becomes one placeholder character standing for its
-    author, text and date; the same comment with a new id, the same one."""
+    author, text and date, and the end of its text another, standing for
+    the same comment; the same comment with a new id, the same one."""
     comments = Comments()
     folded = fold_comments(f"Text {NOTE}anchor{END} more.", comments)
     assert len(comments) == 1
-    assert len(folded) == len("Text Xanchor more.")
+    assert len(folded) == len("Text XanchorY more.")
+    assert folded[12] == end_of(folded[5]) and not PLACEHOLDER.match(folded[12])
+    assert number_of(folded[12]) == number_of(folded[5]) == 0
     assert "comment" not in folded
     assert comments.get(folded[5]).author == "Anna"
     assert comments.get(folded[5]).text == "Too long."
     assert comments.get(folded[5]).date == "2026-09-23 23:40"
     renumbered = NOTE.replace('id="3"', 'id="25"')
-    again = fold_comments(f"Text {renumbered}anchor{END} more.", comments)
+    renumbered_end = END.replace('id="3"', 'id="25"')
+    again = fold_comments(f"Text {renumbered}anchor{renumbered_end} more.", comments)
     assert again == folded and len(comments) == 1
 
 
@@ -71,13 +75,17 @@ def test_plain_and_show_comments():
     folded = fold_comments(f"a {NOTE}b", comments)
     assert plain(folded) == f"a {COMMENT_MARK}b"
     html = str(show_comments(folded, comments))
-    assert f'<span class="comment" tabindex="0" role="note" {MARKER}' in html
+    assert f'<span class="comment" tabindex="0" role="note" data-c="0" {MARKER}' in html
     assert 'aria-label="comment by Anna, 2026-09-23 23:40: Too long."' in html
     assert f">{COMMENT_MARK}</span>" in html
     # a comment added since the base has its own icon
     new = str(show_comments(folded, comments, frozenset(PLACEHOLDER.findall(folded))))
     assert 'class="comment new"' in new and f">{NEW_COMMENT_MARK}</span>" in new
     assert 'aria-label="new comment by Anna' in new
+    # and so has a comment removed since the base
+    gone = str(show_comments(folded, comments, removed=frozenset(PLACEHOLDER.findall(folded))))
+    assert 'class="comment removed"' in gone and f">{REMOVED_COMMENT_MARK}</span>" in gone
+    assert 'aria-label="removed comment by Anna' in gone
 
 
 def test_a_comment_on_both_sides_is_not_shown(tmp_path):
@@ -190,10 +198,12 @@ def test_comments_panel_statuses_and_links(tmp_path):
     assert "Comments: 1 new, 1 removed</h2>" in html and "Too long." not in html
     for e in c.comments:
         assert f'id="{e.anchor}"' in html
-    # the new comment has its own icon, in the text and in the panel
+    # the new and the removed comment have their own icons, in the text and
+    # in the panel
     assert html.count('class="comment new"') == 1
+    assert html.count('class="comment removed"') == 1
     assert by_text["New remark."].icon == NEW_COMMENT_MARK
-    assert by_text["Old remark."].icon == COMMENT_MARK
+    assert by_text["Old remark."].icon == REMOVED_COMMENT_MARK
     assert not PLACEHOLDER.search(html)  # every comment became a marker
 
 

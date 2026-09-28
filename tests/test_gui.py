@@ -29,6 +29,25 @@ from prosediff.gui import (
 )
 
 
+def test_every_drop_down_item_has_a_hint():
+    """Each item of the drop-down lists is explained when the pointer rests
+    on it (gui.item_hints); a language code by the language's name."""
+    from prosediff.diff import COMMENT_MODES, MOVE_ALGORITHMS
+    from prosediff.render import ALIGNMENTS
+    from prosediff.sources import DOCX_CHANGES
+
+    for values, hints in (
+        (DOCX_CHANGES, gui.DOCX_CHANGE_HINTS),
+        (COMMENT_MODES, gui.COMMENT_HINTS),
+        (ALIGNMENTS, gui.ALIGNMENT_HINTS),
+        (tuple(MOVE_ALGORITHMS), gui.MOVE_ALGORITHM_HINTS),
+        (gui.ENCODINGS, gui.ENCODING_HINTS),
+    ):
+        assert set(values) == set(hints)
+    assert set(gui.LANGUAGE_HINTS) < set(gui.LANGUAGES)
+    assert gui.language_name("it") == "Italian"
+
+
 def test_arguments_prefill_a_repository(history):
     b, _ = history
     remembered = Settings(mode="files", repo="elsewhere", base="abc", target="def", paths=["x"])
@@ -473,7 +492,7 @@ def test_a_failed_comparison_shows_an_error(root, tmp_path, monkeypatch):
 def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     """Paragraphs and sentences have their own moved-line settings, shown at
     their defaults and remembered only when changed; comparing both ways
-    writes an HTML report holding both, and no diff."""
+    writes an HTML report holding both, and a diff paragraph by paragraph."""
     from prosediff.diff import move_defaults
 
     app = App(root, Settings())
@@ -491,9 +510,10 @@ def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     path, _ = generate(s)
     page = path.read_text(encoding="utf-8")
     assert 'data-split="paragraph"' in page and 'data-split="sentence"' in page
-    s.output_format = "diff"
-    with pytest.raises(ValueError, match="HTML report"):
-        generate(s)
+    # a diff holds one split: both compares paragraph by paragraph
+    s.output_format, s.output = "diff", str(tmp_path / "r.diff")
+    path, _ = generate(s)
+    assert path.suffix == ".diff" and path.read_text(encoding="utf-8")
 
 
 def test_advanced_moved_passage_settings(root, tmp_path):
@@ -521,7 +541,7 @@ def test_advanced_moved_passage_settings(root, tmp_path):
     path = tmp_path / "gui.json"
     assert save_settings(s, path)
     assert load_settings(path).moved_passages == {"min_words": 6, "partial_share": 0.5}
-    app.reset_passage_settings()
+    app.reset_options()  # "Reset to defaults"
     assert app.collect().moved_passages == {}
 
 

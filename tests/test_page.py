@@ -7,7 +7,7 @@ import re
 import pytest
 from conftest import RepoBuilder
 
-from prosediff import Options, compare, render
+from prosediff import Options, compare, compare_paths, render
 
 MOVED = "This sentence travels to the end of the file."
 
@@ -67,6 +67,19 @@ def test_render_side_by_side(page):
     assert "first &lt;draft&gt;" in html
     footer = re.search(r"<footer>(.*?)</footer>", html, re.S).group(1)
     assert 'by <a href="https://github.com/raffaelemancuso/prosediff">prosediff</a>' in footer
+
+
+def test_render_compared_paths(page, tmp_path):
+    """The report names in full what it compared: the repository, or the two
+    files outside git."""
+    b, html = page[0], page[4]
+    assert f'<span class="full-path">{b.path.resolve()}</span>' in html
+    old, new = tmp_path / "a.txt", tmp_path / "b.txt"
+    old.write_text("one\n")
+    new.write_text("two\n")
+    html = render(compare_paths(old, new))
+    for p in (old, new):
+        assert f'<span class="full-path">{p.resolve()}</span>' in html
 
 
 def test_render_thousand_separators(page):

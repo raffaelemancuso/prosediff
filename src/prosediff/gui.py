@@ -25,6 +25,7 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -49,7 +50,7 @@ from prosediff.diff import (
     move_defaults,
     setting_type,
 )
-from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
+from prosediff.language import DEFAULT, DOCUMENT, GUESS, language_name, normalize_language
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
@@ -58,6 +59,7 @@ from prosediff.render import (
     check_split,
     counted,
     default_output,
+    default_split,
     format_of,
     write_output,
 )
@@ -68,6 +70,42 @@ ENCODINGS = (AUTO_ENCODING, "utf-8", "cp1252", "latin-1", "utf-16", "cp1250", "c
 # The choices, then the common codes; any code can be typed.
 LANGUAGES = (DEFAULT, DOCUMENT, GUESS)
 LANGUAGES += ("en", "it", "de", "fr", "es", "pt", "nl", "pl", "sv", "da", "fi", "cs", "el")
+# What each item of the drop-down lists means (item_hints).
+ENCODING_HINTS = {
+    AUTO_ENCODING: "UTF-8, unless a file cannot be read in it; then guessed.",
+    "utf-8": "Unicode, the usual encoding today.",
+    "cp1252": "Windows, Western European languages.",
+    "latin-1": "ISO 8859-1, Western European languages.",
+    "utf-16": "Unicode in two bytes a character, as some Windows programs save text.",
+    "cp1250": "Windows, Central European languages.",
+    "cp1251": "Windows, Cyrillic.",
+}
+LANGUAGE_HINTS = {
+    DEFAULT: "The language Word and OpenDocument files are marked with (guessed when they "
+    "mark none); guessed for the other files.",
+    DOCUMENT: "The language Word and OpenDocument files are marked with.",
+    GUESS: "Guessed from each file's text.",
+}
+DOCX_CHANGE_HINTS = {
+    "accept": "Compare the documents with every tracked change accepted.",
+    "reject": "Compare the documents with every tracked change rejected.",
+    "all": "Show the tracked changes as Word does: insertions and deletions marked.",
+}
+COMMENT_HINTS = {
+    "markers": "Only the comments added or removed, set apart: a marker and a panel in the "
+    "HTML report, CriticMarkup in the diffs.",
+    "text": "Compared as part of the text, as pandoc writes them.",
+    "none": "Left out.",
+}
+ALIGNMENT_HINTS = {
+    "left": "Aligned on the left, ragged on the right.",
+    "justify": "Justified on both sides, hyphenated.",
+}
+MOVE_ALGORITHM_HINTS = {
+    "token-sort": "The share of their words and punctuation in common, whatever their order.",
+    "token-set": "The words both share against the rest of each, whatever their order: a "
+    "line inside a longer one scores high.",
+}
 WORKTREE = "Working tree (uncommitted changes)"
 INDEX = "Index (staged changes)"
 
@@ -142,7 +180,7 @@ class Settings:
     # prosediff's default, which the others follow whatever it becomes
     moved_passages: dict[str, float] = field(default_factory=dict)
     # how prose is compared: one of SPLITS
-    split: str = "paragraph"
+    split: str = "both"
     # a language code; "document": marked in Word and OpenDocument files;
     # "guess": guessed from each file's text; "default": document, else guess
     language: str = DEFAULT
@@ -267,7 +305,7 @@ def load_settings(path: Path | None = None) -> Settings:
     if s.mode not in MODES:
         s.mode = "git"
     if s.split not in SPLITS:
-        s.split = "paragraph"
+        s.split = "both"
     if s.comments not in COMMENT_MODES:
         s.comments = "markers"
     known_passage = {f.name for f in fields(MovedPassageSettings)}
@@ -321,7 +359,9 @@ def generate(s: Settings) -> tuple[Path, Comparison]:
     )
     old, new = sides(s)
     fmt = s.output_format if s.output_format in FORMATS else "html"
-    split = s.split if s.split in SPLITS else "paragraph"
+    split = s.split if s.split in SPLITS else default_split(fmt)
+    if split == "both" and fmt != "html":
+        split = default_split(fmt)  # a diff holds one split
     check_split(split, fmt)
 
     def run(options: Options) -> Comparison:
@@ -529,13 +569,20 @@ class App:
             compared,
             0,
             "Tracked changes",
-            ttk.Combobox(
-                compared, textvariable=self.docx, values=DOCX_CHANGES, state="readonly", width=12
+            item_hints(
+                ttk.Combobox(
+                    compared,
+                    textvariable=self.docx,
+                    values=DOCX_CHANGES,
+                    state="readonly",
+                    width=12,
+                ),
+                DOCX_CHANGE_HINTS.get,
             ),
             "Word and OpenDocument tracked changes: accept them, reject them, or show them "
             "all, as Word does.",
         )
-        self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "paragraph")
+        self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "both")
         splits = ttk.Frame(compared)
         split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
         for value, text in split_names:
@@ -556,49 +603,23 @@ class App:
             "moved between paragraphs is recognised), or both, in one HTML report whose "
             "toolbar switches between the two.",
         )
-        similarity, algorithm = moves_of(self.s, False).resolved(False)
-        self.move_similarity = tk.DoubleVar(value=similarity)
-        self.move_algorithm = tk.StringVar(value=algorithm)
-        similarity, algorithm = moves_of(self.s, True).resolved(True)
-        self.sentence_move_similarity = tk.DoubleVar(value=similarity)
-        self.sentence_move_algorithm = tk.StringVar(value=algorithm)
-        for row, what, similarity, algorithm, sentences in (
-            (2, "paragraphs", self.move_similarity, self.move_algorithm, False),
-            (3, "sentences", self.sentence_move_similarity, self.sentence_move_algorithm, True),
-        ):
-            default = "{:.2f} {}".format(*move_defaults(sentences))
-            field_row(
-                compared,
-                row,
-                f"Moved {what}",
-                move_fields(compared, similarity, algorithm),
-                f"How alike an edited {what[:-1]} must be to where it reappears to count as "
-                "moved (1: only unchanged), and how that is measured. token-sort: the words "
-                f"in common, whatever their order. Default: {default}"
-                + (" (lines of files other than prose too)." if not sentences else "."),
-            )
         self.language = tk.StringVar(value=self.s.language)
         # any code can be typed; the list holds the common ones
         field_row(
             compared,
-            4,
+            2,
             "Language",
-            ttk.Combobox(compared, textvariable=self.language, values=LANGUAGES, width=12),
+            item_hints(
+                ttk.Combobox(compared, textvariable=self.language, values=LANGUAGES, width=12),
+                lambda code: LANGUAGE_HINTS.get(code) or language_name(code),
+            ),
             "Splits sentences and hyphenates lines. default: the language Word and "
             "OpenDocument files are marked with, else guessed; or a code such as it.",
-        )
-        self.encoding = tk.StringVar(value=self.s.encoding)
-        field_row(
-            compared,
-            5,
-            "Text encoding",
-            ttk.Combobox(compared, textvariable=self.encoding, values=ENCODINGS, width=12),
-            "Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed.",
         )
         self.ignore_ws = tk.BooleanVar(value=self.s.ignore_whitespace)
         switch_row(
             compared,
-            6,
+            3,
             "Ignore whitespace",
             self.ignore_ws,
             "Lines that differ only in spacing are the same, as git diff -w.",
@@ -606,7 +627,7 @@ class App:
         self.move_passages = tk.BooleanVar(value=self.s.move_passages)
         switch_row(
             compared,
-            7,
+            4,
             "Moved passages",
             self.move_passages,
             "Also follow the passages moved within a paragraph or between two: words removed "
@@ -623,8 +644,15 @@ class App:
             shown,
             0,
             "Comments",
-            ttk.Combobox(
-                shown, textvariable=self.comments, values=COMMENT_MODES, state="readonly", width=12
+            item_hints(
+                ttk.Combobox(
+                    shown,
+                    textvariable=self.comments,
+                    values=COMMENT_MODES,
+                    state="readonly",
+                    width=12,
+                ),
+                COMMENT_HINTS.get,
             ),
             "markers: only the comments added or removed, set apart (a marker and a panel in "
             "the HTML report, CriticMarkup in the diffs); text: compared as text; none: left "
@@ -656,16 +684,21 @@ class App:
             shown,
             4,
             "Wrapped lines",
-            ttk.Combobox(
-                shown, textvariable=self.align, values=ALIGNMENTS, state="readonly", width=12
+            item_hints(
+                ttk.Combobox(
+                    shown, textvariable=self.align, values=ALIGNMENTS, state="readonly", width=12
+                ),
+                ALIGNMENT_HINTS.get,
             ),
             "How long lines that wrap are aligned in the HTML report.",
         )
 
     def build_advanced(self, page: ttk.Frame) -> None:
         """The advanced settings, hidden until asked for."""
-        # Advanced settings, hidden until asked for: how moved passages are
-        # told from chance likeness, one field for each of MovedPassageSettings
+        # Advanced settings, hidden until asked for: how alike moved paragraphs
+        # and sentences must be, how moved passages are told from chance
+        # likeness (one field for each of MovedPassageSettings), and the
+        # encoding of text files
         self.advanced_button = ttk.Button(
             page,
             text="▸ Advanced settings",
@@ -675,22 +708,49 @@ class App:
         )
         self.advanced_button.pack(anchor="w", pady=(8, 0))
         hint(self.advanced_button, "Show or hide the settings few need to change.")
-        self.advanced = ttk.Labelframe(
-            page, text="Moved passages: telling them from chance likeness", padding=(10, 8)
+        self.advanced = ttk.Frame(page)
+        moves = ttk.Labelframe(
+            self.advanced, text="Moved paragraphs and sentences", padding=(10, 8)
         )
-        self.advanced.columnconfigure((1, 3), weight=1)
+        moves.pack(fill="x")
+        similarity, algorithm = moves_of(self.s, False).resolved(False)
+        self.move_similarity = tk.DoubleVar(value=similarity)
+        self.move_algorithm = tk.StringVar(value=algorithm)
+        similarity, algorithm = moves_of(self.s, True).resolved(True)
+        self.sentence_move_similarity = tk.DoubleVar(value=similarity)
+        self.sentence_move_algorithm = tk.StringVar(value=algorithm)
+        for row, what, similarity, algorithm, sentences in (
+            (0, "paragraphs", self.move_similarity, self.move_algorithm, False),
+            (1, "sentences", self.sentence_move_similarity, self.sentence_move_algorithm, True),
+        ):
+            default = "{:.2f} {}".format(*move_defaults(sentences))
+            field_row(
+                moves,
+                row,
+                f"Moved {what}",
+                move_fields(moves, similarity, algorithm),
+                f"How alike an edited {what[:-1]} must be to where it reappears to count as "
+                "moved (1: only unchanged), and how that is measured. token-sort: the words "
+                f"in common, whatever their order. Default: {default}"
+                + (" (lines of files other than prose too)." if not sentences else "."),
+            )
+        passages = ttk.Labelframe(
+            self.advanced,
+            text="Moved passages: telling them from chance likeness",
+            padding=(10, 8),
+        )
+        passages.pack(fill="x", pady=(8, 0))
+        passages.columnconfigure((1, 3), weight=1)
         self.passage_vars: dict[str, tk.StringVar] = {}
         for k, f in enumerate(fields(MovedPassageSettings)):
             value = self.s.moved_passages.get(f.name, f.default)
             var = tk.StringVar(value=f"{value:g}" if f.metadata["share"] else f"{int(value):,}")
             self.passage_vars[f.name] = var
             spin = (
-                ttk.Spinbox(
-                    self.advanced, from_=0.01, to=1, increment=0.05, textvariable=var, width=10
-                )
+                ttk.Spinbox(passages, from_=0.01, to=1, increment=0.05, textvariable=var, width=10)
                 if f.metadata["share"]
                 else ttk.Spinbox(
-                    self.advanced,
+                    passages,
                     from_=f.metadata["low"],
                     to=10**7,
                     increment=1,
@@ -699,23 +759,26 @@ class App:
                 )
             )
             row, col = k // 2, (k % 2) * 2
-            label = ttk.Label(self.advanced, text=f.metadata["label"])
+            label = ttk.Label(passages, text=f.metadata["label"])
             label.grid(row=row, column=col, sticky="w", padx=(0 if col == 0 else 18, 6), pady=3)
             spin.grid(row=row, column=col + 1, sticky="w", pady=3)
             what = f.metadata["help"]
             tip = f"{what[0].upper()}{what[1:]}. Default: {f.default:,}."
             hint(label, tip)
             hint(spin, tip)
-        passage_defaults = ttk.Button(
-            self.advanced,
-            text="Defaults",
-            command=self.reset_passage_settings,
-            bootstyle="secondary-outline",
+        reading = ttk.Labelframe(self.advanced, text="Reading files", padding=(10, 8))
+        reading.pack(fill="x", pady=(8, 0))
+        self.encoding = tk.StringVar(value=self.s.encoding)
+        field_row(
+            reading,
+            0,
+            "Text encoding",
+            item_hints(
+                ttk.Combobox(reading, textvariable=self.encoding, values=ENCODINGS, width=12),
+                ENCODING_HINTS.get,
+            ),
+            "Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed.",
         )
-        passage_defaults.grid(
-            row=(len(self.passage_vars) + 1) // 2, column=3, sticky="e", pady=(6, 0)
-        )
-        hint(passage_defaults, "Put these settings back to prosediff's defaults.")
 
     def build_output(self, page: ttk.Frame) -> None:
         """The output: its format, where it goes, whether it opens."""
@@ -1100,6 +1163,45 @@ def hint(widget: tk.Misc, text: str) -> None:
     ttk.ToolTip(widget, text=text, wraplength=HINT_WIDTH, delay=HINT_DELAY_MS)
 
 
+def item_hints(combo: ttk.Combobox, tip: Callable[[str], str]) -> ttk.Combobox:
+    """What each item of a drop-down list means, shown beside the item under
+    the pointer while the list is open; tip gives an item's hint ("" for
+    none). Tk's combobox list is a plain Tk listbox with no Python widget
+    behind it (ttk::combobox::PopdownWindow), so ttkbootstrap's ToolTip
+    cannot take it: a small window of our own shows the hint."""
+    popdown = combo.tk.eval(f"ttk::combobox::PopdownWindow {combo}")
+    listbox = f"{popdown}.f.l"
+    window: list[tk.Toplevel] = []
+
+    def hide(*_) -> None:
+        while window:
+            window.pop().destroy()
+
+    def show(y: str) -> None:
+        hide()
+        if not int(combo.tk.call("winfo", "ismapped", popdown)):
+            return  # a motion left over once the list closed
+        index = int(combo.tk.call(listbox, "nearest", y))
+        text = tip(str(combo.tk.call(listbox, "get", index)))
+        if not text:
+            return
+        top = tk.Toplevel(combo)
+        top.wm_overrideredirect(True)
+        top.attributes("-topmost", True)
+        ttk.Label(
+            top, text=text, wraplength=HINT_WIDTH, padding=(8, 4), bootstyle="inverse-dark"
+        ).pack()
+        x0, y0 = int(combo.tk.call("winfo", "rootx", listbox)), int(y)
+        width = int(combo.tk.call("winfo", "width", listbox))
+        top.wm_geometry(f"+{x0 + width + 4}+{int(combo.tk.call('winfo', 'rooty', listbox)) + y0}")
+        window.append(top)
+
+    combo.tk.call("bind", listbox, "<Motion>", (combo.register(show), "%y"))
+    combo.tk.call("bind", listbox, "<Leave>", combo.register(hide))
+    combo.tk.call("bind", popdown, "<Unmap>", combo.register(hide))
+    return combo
+
+
 def browse(parent: tk.Misc, command, tip: str) -> ttk.Button:
     """A button that opens a file or folder dialog."""
     button = ttk.Button(
@@ -1151,8 +1253,11 @@ def move_fields(parent: tk.Misc, similarity: tk.DoubleVar, algorithm: tk.StringV
         textvariable=similarity,
         width=5,
     ).pack(side="left")
-    ttk.Combobox(
-        frame, textvariable=algorithm, values=tuple(MOVE_ALGORITHMS), state="readonly", width=11
+    item_hints(
+        ttk.Combobox(
+            frame, textvariable=algorithm, values=tuple(MOVE_ALGORITHMS), state="readonly", width=11
+        ),
+        MOVE_ALGORITHM_HINTS.get,
     ).pack(side="left", padx=(6, 0))
     return frame
 
