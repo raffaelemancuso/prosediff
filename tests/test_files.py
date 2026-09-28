@@ -223,7 +223,7 @@ def test_folders_page_goes_into_the_new_folder(tmp_path, monkeypatch):
     """Without -o, the HTML report comparing two folders is prosediff.html in the
     new one; compared again, the folders leave it out, whatever --include
     says. With --open it goes to the temporary folder, as git difftool -d
-    needs; two files keep diff.html."""
+    needs; two files, OLD_vs_NEW.html next to the new one."""
     old, new = tmp_path / "old", tmp_path / "new"
     for d in (old, new):
         d.mkdir()
@@ -241,7 +241,7 @@ def test_folders_page_goes_into_the_new_folder(tmp_path, monkeypatch):
     assert main(["--folders", str(old), str(new), "--open"]) == 0
     assert not page.exists() and "prosediff_" in opened[0]
     assert main(["--files", str(old / "paper.md"), str(new / "paper.md")]) == 0
-    assert (tmp_path / "diff.html").is_file()
+    assert (new / "paper_vs_paper.html").is_file() and not (tmp_path / "diff.html").exists()
 
 
 def test_a_hung_filter_is_stopped(tmp_path, monkeypatch):

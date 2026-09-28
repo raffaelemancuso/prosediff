@@ -28,6 +28,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import timedelta
 from functools import cache
 from pathlib import Path
 
@@ -157,6 +158,16 @@ def split_annotations(answer: str) -> tuple[str, list[Annotation]]:
     return text.strip(), notes
 
 
+def duration(seconds: float) -> str:
+    """A time taken, to the second, as a person says it: "41 seconds", "3
+    minutes and 41 seconds" (humanize)."""
+    import humanize
+
+    return humanize.precisedelta(
+        timedelta(seconds=round(seconds)), minimum_unit="seconds", format="%0.0f"
+    )
+
+
 class AssessError(RuntimeError):
     """The assessment could not be made: a backend missing, a login, a
     model, a timeout."""
@@ -168,7 +179,7 @@ class AssessRequest:
     "ollama/qwen3"), how hard to think (effort: one the model supports, ""
     for its default), what it reads (context: one of CONTEXTS), the
     instructions of the person asking (added to the prompt), how long it
-    may take, whether the text sent is saved beside the output
+    may take, whether the text sent is put in the HTML report
     (save_prompt: Assessment.prompt_text), and whether the model marks the
     problems in the text (annotate: Assessment.annotations)."""
 
@@ -193,7 +204,7 @@ class Assessment:
     effort: str = ""
     context: str = ""
     # the text sent to the model, as sent: its system prompt and its message
-    # ("" when it was never sent), and whether it is saved beside the output
+    # ("" when it was never sent), and whether the HTML report shows it
     system: str = ""
     prompt: str = ""
     save_prompt: bool = False
@@ -228,6 +239,11 @@ class Assessment:
         return f"{name} ({self.model})" if self.model else name
 
     @property
+    def took(self) -> str:
+        """How long the model took: "20 seconds", "1 minute and 3 seconds"."""
+        return duration(self.seconds)
+
+    @property
     def how(self) -> str:
         """How it was asked: "effort high, from the changes and the new
         version"."""
@@ -239,24 +255,6 @@ class Assessment:
                 else "from the changes only"
             )
         return ", ".join(parts)
-
-    def as_markdown(self, subject: str) -> str:
-        """The assessment as a Markdown file of its own, subject its title."""
-        head = f"# AI assessment of {subject}\n\nBy {self.title}"
-        if self.how:
-            head += f", {self.how}"
-        if self.seconds:
-            head += f", in {self.seconds:,.0f} s"
-        body = f"Failed: {self.error}" if self.error else self.markdown.strip()
-        if self.annotations:
-            marked = []
-            for n, a in enumerate(self.annotations, 1):
-                where = "the new version" if a.side == "new" else "the old version"
-                quote = f'"{a.start}"' if a.end == a.start else f'"{a.start}" … "{a.end}"'
-                item = f"{n}. {quote} ({where}): {a.problem}"
-                marked.append(f"{item}\n   Proposed: {a.solution}" if a.solution else item)
-            body += "\n\n## Marked in the text\n\n" + "\n".join(marked)
-        return f"{head}.\n\n{body}\n"
 
     def prompt_text(self) -> str:
         """The text sent to the model, exactly: which AI and how it was asked,

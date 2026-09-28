@@ -14,12 +14,23 @@ sync_api = pytest.importorskip("playwright.sync_api")
 NOTE = '[Old remark.]{.comment-start id="1" author="Anna" date="2026-09-23T10:15:00Z"}'
 
 
+# The panels, closed until opened.
+PANELS = "details.comments-panel, details.assessment"
+
+
+def open_panels(page):
+    """Open the panels of the report shown in page, as a click on each would."""
+    page.evaluate(f"document.querySelectorAll('{PANELS}').forEach(d => {{ d.open = true; }})")
+
+
 def open_report(browser, tmp_path, comparison, **render_options):
-    """The HTML report of comparison, opened in a new page of browser."""
+    """The HTML report of comparison, opened in a new page of browser, its
+    panels opened."""
     out = tmp_path / "page.html"
     out.write_text(render(comparison, **render_options), encoding="utf-8")
     page = browser.new_context().new_page()
     page.goto(out.as_uri())
+    open_panels(page)
     return page
 
 
@@ -61,7 +72,18 @@ def page(browser, page_file):
     context = browser.new_context()
     p = context.new_page()
     p.goto(page_file.as_uri())
+    open_panels(p)
     yield p
+    context.close()
+
+
+def test_panels_start_closed(browser, page_file):
+    """The comments panel, as the AI's, starts closed."""
+    context = browser.new_context()
+    p = context.new_page()
+    p.goto(page_file.as_uri())
+    assert p.locator("details.comments-panel").count() == 1
+    assert p.evaluate(f"[...document.querySelectorAll('{PANELS}')].every(d => !d.open)")
     context.close()
 
 
@@ -327,6 +349,7 @@ def test_comments_sorted_by_place_or_date(browser, tmp_path):
     assert listed() == ["Early.", "Late."]
     assert page.get_attribute('[data-sort="date"]', "aria-pressed") == "true"
     page.reload()
+    open_panels(page)
     assert listed() == ["Early.", "Late."]
     page.click('[data-sort="place"]')
     assert listed() == ["Late.", "Early."]
@@ -340,6 +363,7 @@ def test_comments_sorted_by_place_or_date(browser, tmp_path):
     assert listed() == ["Late.", "Early."]
     assert page.get_attribute('[data-sort="date"]', "aria-label") == "date, descending"
     page.reload()
+    open_panels(page)
     assert listed() == ["Late.", "Early."]
 
 
@@ -359,6 +383,7 @@ def anchored_report(browser, tmp_path, **context_options):
     out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
     page = browser.new_context(**context_options).new_page()
     page.goto(out.as_uri())
+    open_panels(page)
     return page
 
 
@@ -394,6 +419,17 @@ def test_comment_link_pins_the_words_it_is_anchored_to(browser, tmp_path):
     assert first == "four." and second.startswith("Five six")
     assert "seven" not in second
     assert page.locator(".comment.pinned").count() == 1 and "Across." in tip.inner_text()
+    # pinned, its tooltip can be dragged out of the way, and stays there
+    before = tip.bounding_box()
+    page.mouse.move(before["x"] + 20, before["y"] + 10)
+    page.mouse.down()
+    page.mouse.move(before["x"] + 20 - 150, before["y"] + 10 + 80, steps=5)
+    page.mouse.up()
+    after = tip.bounding_box()
+    assert (round(after["x"] - before["x"]), round(after["y"] - before["y"])) == (-150, 80)
+    page.mouse.wheel(0, 200)
+    page.wait_for_timeout(200)
+    assert tip.bounding_box()["y"] == after["y"]
     page.locator(".comments-panel a", has_text="Across.").click()
     page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
     assert page.locator(".comment.pinned").count() == 0 and not tip.is_visible()
@@ -510,6 +546,37 @@ def test_problems_marked_by_the_ai(browser, tmp_path):
     page.context.close()
 
 
+def test_ai_marks_in_a_moved_passage_row(browser, tmp_path):
+    """A row holding a moved passage is written twice, with the passage
+    shown as moved and without: a problem marked in it has a badge in the
+    one shown, whether moved passages are on or off."""
+    from prosediff.assess import Annotation, Assessment
+
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    moved = "This sentence moves to the end of the text."
+    old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
+    new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
+    a = Assessment("claude", "## Verdict\n**Mixed**.", "m")
+    a.annotations = [Annotation("new", "A middle one", "of the text.", "Moved.", "")]
+    c = compare_paths(old, new, Options(context=None))
+    page = open_report(browser, tmp_path, c, assessment=a)
+    shown = page.locator(".ai-mark:visible")
+    assert page.locator("td.right .pv-on").count() > 0  # the row has two versions
+    assert shown.all_inner_texts() == ["⚠ 1"]
+    assert page.locator(".ai-notes li.missing").count() == 0
+    shown.click()
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    assert highlighted(page).replace("\u00ad", "") == f"A middle one stays. {moved}"
+    page.keyboard.press("Escape")
+    page.keyboard.press("v")  # moved passages on: the other version, its own badge
+    assert shown.all_inner_texts() == ["⚠ 1"]
+    assert shown.evaluate("m => !!m.closest('.pv-on')")
+    page.click('[data-ai-nav="1"]')
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    assert page.locator("#tip").is_visible()
+    page.context.close()
+
+
 def test_comments_filtered_by_status(browser, tmp_path):
     """The comments panel shows all its comments, or only the new or the
     removed ones, with a dashed line between those shown; remembered. It
@@ -540,6 +607,7 @@ def test_comments_filtered_by_status(browser, tmp_path):
     page.click('[data-show="removed"]')
     assert shown() == ["Gone."]
     page.reload()
+    open_panels(page)
     assert shown() == ["Gone."]
     assert page.get_attribute('[data-show="removed"]', "aria-pressed") == "true"
     page.click('[data-show="all"]')

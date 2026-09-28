@@ -146,10 +146,10 @@ def test_cli_writes_a_unified_diff(tmp_path, monkeypatch):
     assert out.read_bytes().decode() == (
         "--- a/t.txt\n+++ b/t.txt\n@@ -4,3 +4,3 @@\n line 4\n-line 5\n+line five\n line 6\n"
     )
-    # --format diff names the default output .diff
+    # --format diff names the default output .diff, next to the new file
     monkeypatch.chdir(tmp_path)
     assert main(["--files", str(old), str(new), "--format", "diff"]) == 0
-    assert (tmp_path / "diff.diff").read_text().count("\n ") == 6
+    assert (tmp_path / "b" / "t_vs_t.diff").read_text().count("\n ") == 6
     # into the new folder, as prosediff.diff; an image is named, not shown
     (tmp_path / "a" / "p.png").write_bytes(b"\x89PNG\x00a")
     (tmp_path / "b" / "p.png").write_bytes(b"\x89PNG\x00b")

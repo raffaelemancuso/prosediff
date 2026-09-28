@@ -23,7 +23,7 @@ from prosediff.assess import (
     split_annotations,
 )
 from prosediff.cli import main
-from prosediff.render import assess_comparison, assessment_path, new_version, prompt_path
+from prosediff.render import assess_comparison, new_version
 
 ANSWER = """## Verdict
 **Improves**: the introduction is tighter.
@@ -130,9 +130,6 @@ def test_the_problems_marked_in_the_text(tmp_path):
     a = assess_comparison_with(c, AssessRequest("claude"), fake(MARKED))
     assert [n.start for n in a.annotations] == ["One changed", "One line."]
     assert "```" not in a.markdown
-    md = a.as_markdown("b.md")
-    assert '## Marked in the text\n\n1. "One changed" … "line." (the new version): Vague.' in md
-    assert "   Proposed: Say what changed." in md
     runner = fake(MARKED)
     plain = assess_comparison_with(c, AssessRequest("claude", annotate=False), runner)
     assert runner.asked[0][1] == SYSTEM and plain.annotations == []
@@ -218,14 +215,16 @@ def test_the_report_holds_the_assessment(tmp_path):
     """The assessment heads the HTML report, its Markdown rendered and its
     HTML escaped, its verdict a badge, how it was asked said; the problems
     it marked in an AI marks panel, held for the script to find in the text,
-    the toolbar stepping through them; a failed one says why."""
+    the toolbar stepping through them; the panels closed; the text sent to
+    the AI at the end, when asked for; a failed one says why."""
     old, new = two_files(tmp_path, "One line.\n", "One changed line.\n")
     c = compare_paths(old, new)
     a = Assessment("ollama/qwen3", ANSWER + "\n<script>x</script>\n", "qwen3", 42.4)
     html = render(c, assessment=a)
-    assert '<details class="assessment" open>' in html
+    assert '<details class="assessment">' in html
+    assert "Text sent to the AI" not in html
     assert '<span class="verdict verdict-improves">Improves</span>' in html
-    assert "by ollama/qwen3 (qwen3), in 42 s" in html
+    assert "by ollama/qwen3 (qwen3), in 42 seconds" in html
     assert "<h2>Problems to fix</h2>" in html and "<ol>" in html
     assert "<script>x</script>" not in html and "&lt;script&gt;" in html
     # no marks: no panel, no data, no arrows
@@ -234,25 +233,32 @@ def test_the_report_holds_the_assessment(tmp_path):
     a.effort, a.context = "max", "document"
     a.annotations = split_annotations(MARKED)[1]
     html = render(c, assessment=a)
-    assert "by ollama/qwen3 (qwen3), effort max, from the changes and the new version, in 42 s" in (
-        html
+    assert (
+        "by ollama/qwen3 (qwen3), effort max, from the changes and the new version, in 42 seconds"
+        in (html)
     )
     assert "<h2>AI marks: 2 problems</h2>" in html
+    assert '<details class="comments-panel ai-notes">' in html
     assert "It marked 2 problems in the text" in html
     assert '<script type="application/json" id="ai-notes-data">' in html
     assert 'data-ai-nav="1"' in html
     assert "Say what changed." in html and "(old version)" in html
+    a.system, a.prompt, a.save_prompt = "Be a reviewer.", "The <changes>.", True
+    html = render(c, assessment=a)
+    assert '<details class="assessment prompt-sent">' in html
+    assert "===== system prompt =====\nBe a reviewer.\n" in html
+    assert "The &lt;changes&gt;." in html
     failed = render(c, assessment=Assessment("codex", error="no login"))
     assert "The assessment failed: no login" in failed
     assert 'class="assessment"' not in render(c)
 
 
-def test_cli_assess_writes_the_report_and_the_markdown(tmp_path, monkeypatch, capsys):
-    """--assess puts the assessment in the report and beside it, as
-    Markdown, asked as --assess-effort, --assess-context and
-    --assess-instructions say; --assess-save-prompt saves the exact text
-    sent, none saved without it; a failure still writes the report, and the
-    text sent, and says so."""
+def test_cli_assess_writes_the_report(tmp_path, monkeypatch, capsys):
+    """--assess puts the assessment in the report, and nothing beside it,
+    asked as --assess-effort, --assess-context and --assess-instructions say;
+    --assess-save-prompt puts the exact text sent at its end, none without
+    it; a failure still writes the report, and the text sent, and says so; a
+    .diff has no place for it."""
     old, new = two_files(tmp_path, "One line.\n", "One changed line.\n")
     runner = fake(model="claude-opus-5-5")
     monkeypatch.setattr(assess_module, "run_backend", runner)
@@ -260,39 +266,30 @@ def test_cli_assess_writes_the_report_and_the_markdown(tmp_path, monkeypatch, ca
     args = ["--files", str(old), str(new), "-o", str(out), "--assess", "claude"]
     asked = ["--assess-effort", "max", "--assess-instructions", "Be brief."]
     assert main([*args, *asked, "--assess-save-prompt"]) == 0
-    ((_, system, prompt, _, effort, _),) = runner.asked
+    ((_, _, prompt, _, effort, _),) = runner.asked
     assert effort == "max" and "<document>" in prompt and "Be brief." in prompt
-    assert "verdict-improves" in out.read_text(encoding="utf-8")
-    md = assessment_path(out)
-    assert md == tmp_path / "r_assessment.md"
-    text = md.read_text(encoding="utf-8")
-    assert text.startswith(
-        "# AI assessment of a.md → b.md\n\nBy Claude Code (claude-opus-5-5), effort max, "
-        "from the changes and the new version, in "
-    )
-    assert "## Problems to fix" in text
-    saved = prompt_path(out)
-    assert saved == tmp_path / "r_assessment_prompt.txt"
-    assert saved.read_bytes().decode("utf-8") == (
-        "The text prosediff sent to the model (claude, effort max, from the changes "
-        "and the new version).\n\n"
-        f"===== system prompt =====\n{system}\n===== end of system prompt =====\n\n"
-        f"===== message =====\n{prompt}\n===== end of message =====\n"
-    )
-    printed = capsys.readouterr().out
-    assert "assessment (improves) -> " in printed and "the text sent to the model -> " in printed
-    saved.unlink()
+    html = out.read_text(encoding="utf-8")
+    assert "verdict-improves" in html
+    assert "by Claude Code (claude-opus-5-5), effort max, from the changes and the new" in html
+    assert "The text prosediff sent to the model (claude, effort max, from the" in html
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == ["a.md", "b.md", "r.html"]
+    assert "assessment (improves), at the top of the HTML report" in capsys.readouterr().out
     assert main([*args, "--assess-context", "changes"]) == 0
-    assert "<document>" not in runner.asked[1][2] and not saved.exists()
+    assert "<document>" not in runner.asked[1][2]
+    assert "Text sent to the AI" not in out.read_text(encoding="utf-8")
 
     def failing(*_):
         raise AssessError("no login")
 
     monkeypatch.setattr(assess_module, "run_backend", failing)
     assert main([*args, "--assess-save-prompt"]) == 0
-    assert "The assessment failed: no login" in out.read_text(encoding="utf-8")
+    html = out.read_text(encoding="utf-8")
+    assert "The assessment failed: no login" in html
+    assert "===== message =====\nThe whole new version of a.md" in html
     assert "the assessment failed: no login" in capsys.readouterr().err
-    assert "===== message =====\nThe whole new version of a.md" in saved.read_text("utf-8")
+    with pytest.raises(SystemExit):
+        main([*args, "--format", "diff"])
+    assert "--assess goes in the HTML report" in capsys.readouterr().err
 
 
 def test_cli_refuses_what_makes_no_sense(tmp_path, capsys):

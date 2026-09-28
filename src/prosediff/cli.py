@@ -49,14 +49,12 @@ from prosediff.render import (
     FORMATS,
     SPLITS,
     assess_comparison,
-    assessment_path,
     check_split,
     counted,
     default_output,
     default_split,
     format_of,
     package_version,
-    prompt_path,
     write_output,
 )
 from prosediff.sources import (
@@ -148,7 +146,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         help="output file (default: with --open, a new HTML report in the temporary folder; "
-        "otherwise, for two folders, prosediff.html in the new one, else diff.html; "
+        "otherwise, for two folders, prosediff.html in the new one; for two files, "
+        "OLD_vs_NEW.html next to the new one; else diff.html; "
         ".diff or .wdiff for --format diff or wdiff)",
     )
     ap.add_argument(
@@ -329,7 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="AI",
         help="have an AI assess the value of the changes as a whole (a verdict, what "
         "changed, what improved, the problems to fix), at the top of the HTML report "
-        "and in OUTPUT_assessment.md: claude (Claude Code, on its login; "
+        "(not in a .diff or .wdiff): claude (Claude Code, on its login; "
         "prosediff[claude]), codex (ChatGPT through Codex, on its login; "
         "prosediff[codex]), or PROVIDER/MODEL through any-llm (prosediff[models]), "
         "e.g. ollama/qwen3 for a local model or openai/gpt-5 with OPENAI_API_KEY set; "
@@ -368,8 +367,8 @@ def build_parser() -> argparse.ArgumentParser:
     ai_group.add_argument(
         "--assess-save-prompt",
         action="store_true",
-        help="also save the exact text sent to the model (its system prompt and its "
-        "message) beside the output, as OUTPUT_assessment_prompt.txt",
+        help="also put the exact text sent to the model (its system prompt and its "
+        "message) in the HTML report, in a closed panel at its end",
     )
     ai_group.add_argument(
         "--assess-timeout",
@@ -458,6 +457,8 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--assess-effort, --assess-instructions and --assess-save-prompt go with --assess")
 
     fmt = args.format or format_of(args.output)
+    if args.assess is not None and fmt != "html":
+        ap.error(f"--assess goes in the HTML report: a .{fmt} has no place for it")
     split = args.split or default_split(fmt)
     try:
         check_split(split, fmt)
@@ -559,9 +560,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if assessment is not None:
         verdict = f" ({assessment.verdict})" if assessment.verdict else ""
-        print(f"{PROG}: assessment{verdict} -> {assessment_path(output)}")
-        if assessment.save_prompt and assessment.prompt:
-            print(f"{PROG}: the text sent to the model -> {prompt_path(output)}")
+        print(f"{PROG}: assessment{verdict}, at the top of the HTML report")
     if args.open:
         webbrowser.open(output.resolve().as_uri())
     return 0
@@ -638,12 +637,12 @@ def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, m
 def _output_path(args: argparse.Namespace, fmt: str) -> Path:
     """Where the output goes: -o; with --open, a file in the temporary
     folder (git difftool -d gives two temporary folders, gone once prosediff
-    returns); comparing two folders, the default page of the new one; else
-    diff.html (.diff, .wdiff) here."""
+    returns); comparing two folders or two files, into the new folder or next
+    to the new file (default_page); else diff.html (.diff, .wdiff) here."""
     output = args.output
     if output is None and args.open:
         output = default_output(fmt)
-    if output is None and args.folders:
+    if output is None and (args.folders or args.files):
         output = default_page(Path(args.repo), Path(args.base))
         if output is not None:
             output = output.with_suffix(FORMATS[fmt])

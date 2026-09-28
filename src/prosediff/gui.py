@@ -32,6 +32,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from tkinter import ttk as tk_ttk
 
 import git
 import psutil
@@ -44,6 +45,7 @@ from prosediff.assess import (
     Assessment,
     AssessRequest,
     ModelInfo,
+    duration,
     models_of,
     parse_backend,
     providers,
@@ -257,27 +259,12 @@ def single_file(args: list[str]) -> Path | None:
     return None
 
 
-def page_beside(old: Path, new: Path) -> str:
-    """Where the HTML report comparing two files goes: next to the new one, named
-    after both, so HTML reports of different pairs do not overwrite each other; that
-    comparing two folders, into the new one (default_page)."""
-    if folder_page := default_page(old, new):
-        return str(folder_page.resolve())
-    return str(new.resolve().parent / f"{old.stem}_vs_{new.stem}.html")
-
-
 def with_second_file(s: Settings, first: Path, second: Path) -> Settings:
     """The settings comparing two files, the older (by modification time)
     on the left: the draft sent before the one returned. The HTML report goes next
     to the newer."""
     older, newer = sorted((first, second), key=lambda p: (p.stat().st_mtime, str(p)))
-    return replace(
-        s,
-        mode="files",
-        old=str(older.resolve()),
-        new=str(newer.resolve()),
-        output=page_beside(older, newer),
-    )
+    return replace(s, mode="files", old=str(older.resolve()), new=str(newer.resolve()), output="")
 
 
 def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
@@ -296,6 +283,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
             # the other file is asked for when the window opens (main)
             s.mode = "files"
             s.old, s.new = str(path.resolve()), ""
+            s.output = ""
             return s, ""
         if path.is_dir():
             try:
@@ -314,12 +302,12 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
         if both_files:
             s.mode = "files"
             s.old, s.new = str(old.resolve()), str(new.resolve())
-            s.output = page_beside(old, new)
+            s.output = ""  # next to the new one (App.follow_sides)
             return s, ""
         if old.is_dir() and new.is_dir():
             s.mode = "folders"
             s.old_folder, s.new_folder = str(old.resolve()), str(new.resolve())
-            s.output = page_beside(old, new)
+            s.output = ""  # into the new one (App.follow_sides)
             return s, ""
         return s, "Two arguments must be two Markdown, Word or OpenDocument files, or two folders."
     if args:
@@ -447,7 +435,7 @@ def generate(
         out = default_page(Path(old), Path(new))
     out = Path(with_format(str(out), fmt)) if out is not None else default_output(fmt)
     assessment = None
-    if s.assess:
+    if s.assess and fmt == "html":  # a .diff or .wdiff has no place for it
         request = AssessRequest(
             s.assess,
             effort=s.assess_effort,
@@ -946,9 +934,15 @@ class App:
         output_entry.grid(row=1, column=1, sticky="ew", **PAD)
         hint(
             output_entry,
-            "Empty: comparing two folders, prosediff.html (or .diff, .wdiff) in the new one; "
-            "otherwise a new file in the temporary folder.",
+            "By default next to the new file (OLD_vs_NEW.html), or into the new folder "
+            "(prosediff.html), following them as they change; comparing git versions, "
+            "a new file in the temporary folder. A file chosen here stays.",
         )
+        # Save to, while it is the default: it follows the sides (follow_sides)
+        self.auto_output = ""
+        for var in (self.mode, self.old, self.new, self.old_folder, self.new_folder):
+            var.trace_add("write", lambda *_: self.follow_sides())
+        self.follow_sides()
         save = ttk.Button(
             out,
             image=ttk.Icon("save", size=16),
@@ -965,6 +959,7 @@ class App:
         reports; what it reads; the instructions of the person asking."""
         card = ttk.Labelframe(page, text="AI assessment", padding=(10, 8))
         card.pack(fill="x", pady=(10, 0))
+        self.ai_card = card
         card.columnconfigure(1, weight=1)
         ai, _, model = (self.s.assess or NO_ASSESSMENT).partition("/")
         self.assess_ai = tk.StringVar(value=ai)
@@ -1006,7 +1001,7 @@ class App:
                 self.ai_box,
                 "Have an AI assess the value of the changes as a whole: a verdict, what "
                 "changed, what improved and the problems to fix, at the top of the HTML "
-                "report and in a Markdown file beside it. claude: Claude Code; codex: "
+                "report (the HTML report only). claude: Claude Code; codex: "
                 "ChatGPT through Codex; ollama: a local model; or another provider "
                 "any-llm reaches (openai, anthropic, gemini, ...), its API key in the "
                 "environment.",
@@ -1089,8 +1084,9 @@ class App:
             (
                 "Save the text sent to the AI",
                 self.assess_save_prompt,
-                "Also save, beside the output, the exact text the AI was sent (its system "
-                "prompt and its message), as a .txt file: to see what it read.",
+                "Also put the exact text the AI was sent (its system prompt and its "
+                "message) in the HTML report, in a closed panel at its end: to see what "
+                "it read.",
             ),
         ):
             switch = toggle(switches, text, var)
@@ -1102,14 +1098,36 @@ class App:
         self.assess_ai.trace_add("write", lambda *_: self.update_models())
         self.assess_model.trace_add("write", lambda *_: self.update_efforts())
         self.update_models(keep=True)  # the model and effort saved stay
+        self.output_format.trace_add("write", lambda *_: self.update_ai_card())
+        self.update_ai_card()
         # the providers any-llm reaches, for the AI list
         self.ask("providers", providers)
 
+    def ai_active(self) -> bool:
+        """Whether an AI will assess: one is chosen, and the output is the HTML
+        report, the only one with room for its assessment."""
+        chosen = self.assess_ai.get().strip() not in ("", NO_ASSESSMENT)
+        return chosen and self.output_format.get() == "html"
+
+    def update_ai_card(self) -> None:
+        """The AI assessment card, greyed out whole unless the output is the
+        HTML report; its model, effort and switches then as the AI says."""
+        html = self.output_format.get() == "html"
+        widgets = [self.ai_card]
+        while widgets:
+            w = widgets.pop()
+            widgets.extend(w.winfo_children())
+            if isinstance(w, tk_ttk.Widget):
+                w.state(["!disabled"] if html else ["disabled"])
+        self.update_ai_switches()
+        on = self.ai_active() and self.assess_model.get() != LOADING
+        for box in (self.model_box, self.effort_box):
+            box.state(["!disabled"] if on else ["disabled"])
+
     def update_ai_switches(self) -> None:
-        """The AI assessment's switches, greyed out while no AI is chosen."""
-        none = self.assess_ai.get().strip() in ("", NO_ASSESSMENT)
+        """The AI assessment's switches, greyed out while no AI will assess."""
         for switch in self.ai_switches:
-            switch.state(["disabled"] if none else ["!disabled"])
+            switch.state(["!disabled"] if self.ai_active() else ["disabled"])
 
     def pick_into(self, var: tk.StringVar, title: str) -> None:
         chosen = filedialog.askopenfilename(
@@ -1162,7 +1180,7 @@ class App:
         becomes the AI's own default, the first it reports, unless keep and
         one is already chosen."""
         ai = self.assess_ai.get().strip()
-        self.model_box.state(["disabled"] if ai in ("", NO_ASSESSMENT) else ["!disabled"])
+        self.model_box.state(["!disabled"] if self.ai_active() else ["disabled"])
         if ai in ("", NO_ASSESSMENT):
             self.model_box.configure(values=())
             self.update_efforts()
@@ -1210,8 +1228,7 @@ class App:
         model = self.chosen_model()
         levels = [level for level, _ in model.efforts] if model else []
         self.effort_box.configure(values=levels)
-        ai = self.assess_ai.get().strip()
-        self.effort_box.state(["disabled"] if ai in ("", NO_ASSESSMENT) else ["!disabled"])
+        self.effort_box.state(["!disabled"] if self.ai_active() else ["disabled"])
         if keep and (self.assess_effort.get() in levels or model is None):
             return
         self.assess_effort.set(model.default_effort if model else "")
@@ -1325,7 +1342,30 @@ class App:
 
     def rename_output(self) -> None:
         """Give the Save to file the extension of the format chosen."""
+        default = self.output.get().strip() == self.auto_output
         self.output.set(with_format(self.output.get().strip(), self.output_format.get()))
+        if default:
+            self.auto_output = self.output.get().strip()
+
+    def sides_page(self) -> str:
+        """Where the output goes by default: next to the new file, into the new
+        folder (default_page); "" comparing git versions, or sides not yet chosen."""
+        mode = self.mode.get()
+        if mode == "git":
+            return ""
+        old, new = (self.old, self.new) if mode == "files" else (self.old_folder, self.new_folder)
+        if not old.get().strip() or not new.get().strip():
+            return ""
+        page = default_page(Path(old.get().strip()), Path(new.get().strip()))
+        return with_format(str(page.resolve()), self.output_format.get()) if page else ""
+
+    def follow_sides(self) -> None:
+        """Keep Save to on the default as the sides change: an empty one, or one
+        still on the default of the sides before, is moved; one chosen stays."""
+        if self.output.get().strip() not in ("", self.auto_output):
+            return
+        self.auto_output = self.sides_page()
+        self.output.set(self.auto_output)
 
     def update_empty_comments(self) -> None:
         """Comments without text are a choice of markers only."""
@@ -1445,7 +1485,10 @@ class App:
             split=self.split.get(),
             language=language,
             encoding=encoding,
-            output=self.output.get().strip(),
+            # the default is kept as "": it follows the sides next time
+            output=(
+                "" if self.output.get().strip() == self.auto_output else self.output.get().strip()
+            ),
             output_format=self.output_format.get(),
             open_page=self.open_page.get(),
             assess=self.assess_spec(),
@@ -1542,7 +1585,7 @@ class App:
         if self.job is not None:
             return  # one comparison at a time
         s = self.collect()
-        if s.assess:
+        if s.assess and s.output_format == "html":
             try:
                 parse_backend(s.assess)
             except AssessError as e:
@@ -1617,7 +1660,7 @@ class App:
                 return
             seconds = time.monotonic() - self.stage_started
             if seconds >= 1:
-                self.status.set(f"{self.stage} {seconds:,.0f} s")
+                self.status.set(f"{self.stage} {duration(seconds)}")
             self.root.after(100, self.poll)
             return
         self.handle(kind, value)

@@ -114,9 +114,15 @@ def read_side(path: Path, include: str | None = None) -> dict[str, bytes]:
 
 
 def default_page(old: Path, new: Path) -> Path | None:
-    """Where the HTML report comparing two folders goes when no output is given:
-    into the new one, as FOLDER_PAGE. None for anything else."""
-    return new / FOLDER_PAGE if old.is_dir() and new.is_dir() else None
+    """Where the HTML report goes when no output is given: comparing two
+    folders, into the new one, as FOLDER_PAGE; comparing two files, next to the
+    new one, named after both, so reports of different pairs do not overwrite
+    each other. None for anything else."""
+    if old.is_dir() and new.is_dir():
+        return new / FOLDER_PAGE
+    if old.is_file() and new.is_file():
+        return new.parent / f"{old.stem}_vs_{new.stem}.html"
+    return None
 
 
 def describe_side(path: Path) -> tuple[str, str, str, str]:

@@ -42,7 +42,7 @@ a draft and the one returned whether or not the co-author tracked their
 edits. When they did, the tracked changes are accepted (or rejected, or kept
 as markup) as `--docx-changes` says.
 
-![An HTML report made by prosediff: two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a new comment's author, text and date in a tooltip, the comments panel above](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
+![An HTML report made by prosediff: at the top an AI's assessment of the revision, then the comments and the problems the AI marked; below, two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a problem the AI marked pinned in the text with its tooltip](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 ## Why prosediff
 
@@ -138,7 +138,7 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--untracked`              | with `--git` and the working tree, also show the untracked files `.gitignore` does not exclude |
 | `-w`, `--ignore-whitespace`| compare lines ignoring whitespace, as `git diff -w`           |
 | `-p`, `--path PATH`        | with `--git` or `--folders`, restrict the diff to this file or folder (repeatable) |
-| `-o`, `--output FILE`      | output file. Default: with `--open`, a new HTML report in the temporary folder; otherwise, comparing two folders, `prosediff.html` in the new one (never compared itself when the folders are compared again), else `diff.html` (`.diff` or `.wdiff` with `--format diff` or `wdiff`). The GUI puts the HTML report comparing two folders into the new one too |
+| `-o`, `--output FILE`      | output file. Default: with `--open`, a new HTML report in the temporary folder; otherwise, comparing two folders, `prosediff.html` in the new one (never compared itself when the folders are compared again); comparing two files, `OLD_vs_NEW.html` next to the new one; else `diff.html` (`.diff` or `.wdiff` with `--format diff` or `wdiff`). The GUI does the same |
 | `--format html\|diff\|wdiff` | `html`: the HTML report (default); `diff`: a unified diff, with `-U` lines of context (default 3) or `--full`, its lines paired as the HTML report pairs them (an edited line's removal followed by its new text). A text file's diff is a patch `git apply` and `patch` can apply. For Markdown files and Word and OpenDocument documents, the lines are those the HTML report compares: one per paragraph (or sentence, with `--by-sentence`), blank lines left out, numbered as in the HTML report; a document's formatting is written in Markdown (`**bold**`), the comments added or removed in [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit) (`{>>Author (date): text<<}`; those both sides have are left out, as in the HTML report), and tracked changes kept with `--docx-changes all` as `{++inserted++}` and `{--deleted--}`: a diff to read, not to apply. `wdiff`: a word diff, as `git diff --word-diff` writes one, the same lines with the words changed within each marked `[-removed-]{+added+}` (paired as in the HTML report), a line removed or added whole marked whole. Moved lines are marked only in the HTML report. Default: `diff` when the output file ends in `.diff` or `.patch`, `wdiff` for `.wdiff`. In the GUI, "Format" |
 | `-U`, `--context N`        | unchanged lines shown around each change, in every file; unset, 0 in Markdown files and Word documents (whose lines are whole paragraphs) and 3 in the others. In the GUI, the "Context lines" box: `auto` or a number |
 | `--full`                   | show every line of each changed file                          |
@@ -156,12 +156,12 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--move-passages`, `--no-move-passages` | also follow the passages moved within a paragraph (a line) or between two (default: on): a run of words removed in one place and added in another, gaps of up to two unchanged words allowed, at least four words (and 15 non-space characters) long, as alike as `--move-similarity` (or `--sentence-move-similarity`) and its algorithm say, is shown as moved rather than as a deletion and an unrelated insertion; a passage is also looked for inside a longer one (a sentence moved out of a paragraph deleted or rewritten). In the GUI, "Moved passages" |
 | `--passage-min-words N`, `--passage-min-chars N`, `--passage-max-gap N`, `--passage-shared-words N`, `--passage-content-letters N`, `--passage-edge-run N`, `--passage-partial-share X`, `--passage-rounds N`, `--passage-max-pairs N`, `--passage-rare-share X`, `--passage-rare-min N` | how moved passages are told from chance likeness (advanced; `prosediff --help` says what each does, and its default): the shortest passage (4 words, 15 characters), the unchanged words allowed inside one (2), the words of meaning two passages must share (2, of 4 letters or more), the words in common that can start or end one (2), when a passage is looked for inside a longer one (0.8), the rounds of matching (4), and past how many pairs only those sharing a rare word are tried (250,000; rare: in 1% of the passages, or 20). In the GUI, the fields of "Advanced settings" |
 | `--move-algorithm NAME`    | how that likeness is measured: `token-sort` (default), the words and punctuation two lines have in common whatever their order; `token-set`, the words both share against the rest of each. See [Moved lines](#moved-lines-algorithm-and-threshold). In the GUI, the list next to "Moved-line similarity" |
-| `--assess AI`              | have an AI assess the value of the changes as a whole, at the top of the HTML report and in `OUTPUT_assessment.md` beside the output (see [AI assessment](#ai-assessment)): `claude`, `codex`, or `PROVIDER/MODEL` (e.g. `ollama/qwen3`, `openai/gpt-5`); `claude/MODEL` and `codex/MODEL` choose their model among those they report (`--list-models`), else the one the login uses. In the GUI, the "AI assessment" card |
+| `--assess AI`              | have an AI assess the value of the changes as a whole, at the top of the HTML report, closed until opened (not in a `.diff` or `.wdiff`, which refuse it; see [AI assessment](#ai-assessment)): `claude`, `codex`, or `PROVIDER/MODEL` (e.g. `ollama/qwen3`, `openai/gpt-5`); `claude/MODEL` and `codex/MODEL` choose their model among those they report (`--list-models`), else the one the login uses. In the GUI, the "AI assessment" card |
 | `--assess-effort LEVEL`    | how hard the model thinks: one of the levels it reports it supports (`--list-models`; e.g. `low`, `medium`, `high`, `xhigh`, `max`). Default: the model's own |
 | `--assess-context document\|changes` | what the model reads: `document` (default), the changes and the whole new version, to check them against the rest of the document (citations, cross-references, terms); `changes`, the changes only. The old version is never sent apart: its unchanged paragraphs are in the new one, and what changed is in the changes. In the GUI, "Changes + new version" and "Changes only" |
 | `--assess-instructions TEXT` | your own instructions, added to the prompt (e.g. `"the journal is Research Policy; Laura asked to shorten the introduction"`), or a text file holding them |
 | `--assess-annotate`, `--no-assess-annotate` | have the AI mark each problem in the text (default: on): from its first words to its last, with what is wrong and the change it proposes; a numbered ⚠ badge before each in the HTML report, its passage highlighted when clicked, listed in an AI marks panel, and stepped through from the toolbar. In the GUI, "Mark problems in the text" |
-| `--assess-save-prompt`     | also save the exact text sent to the model, its system prompt and its message, beside the output as `OUTPUT_assessment_prompt.txt` (off by default): to see what it read. In the GUI, "Save the text sent to the AI" |
+| `--assess-save-prompt`     | also put the exact text sent to the model, its system prompt and its message, in the HTML report, in a closed panel at its end (off by default): to see what it read. In the GUI, "Save the text sent to the AI" |
 | `--assess-timeout SECONDS` | give up on the assessment after this long (default 900); the report is written all the same, saying why there is none |
 | `--list-models AI`         | list the models an AI reports it offers (`claude`, `codex`, `ollama`, or any provider any-llm reaches), its default first, and the efforts each supports |
 | `--login-codex`            | log in to ChatGPT, in the browser, for `--assess codex` (once) |
@@ -205,9 +205,10 @@ and judge them as a whole, as a co-author reading the returned draft would:
   placeholders, dangling citations, inconsistent terms or spelling, and the
   reviewers' comments left unanswered.
 
-It heads the HTML report, its verdict a coloured badge, and is written
-beside the output as Markdown (`report_assessment.md` for `report.html`),
-for any format.
+It heads the HTML report, its verdict a coloured badge, in a panel closed
+until you open it, as are the Comments and AI marks panels; a unified or
+word diff has no room for it, so the AI assessment goes with the HTML report
+only (in the window its card is greyed out for the other formats).
 
 ![The AI assessment at the top of a prosediff report: a verdict badge, what changed, the improvements and the problems to fix](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_assessment.png)
 
@@ -260,8 +261,8 @@ assessment is made is chosen with three more settings:
 What the AI is sent: the word diff of the changed paragraphs, comments
 included, the whole new version (unless `--assess-context changes`), and
 the instructions; no files, and no tools to run. `--assess-save-prompt`
-(in the window, "Save the text sent to the AI") saves that text, exactly as
-sent, beside the output. With `claude`, `codex` or an API, that text goes
+(in the window, "Save the text sent to the AI") puts that text, exactly as
+sent, at the end of the HTML report, in a panel closed until opened. With `claude`, `codex` or an API, that text goes
 to Anthropic's or OpenAI's (or the API's) servers under your account; with
 Ollama it stays on the computer. The HTML report itself still needs no
 network to read. A long revision is cut at about 100,000 tokens, the model
@@ -364,9 +365,10 @@ saved, so the others follow prosediff's defaults; "Reset to defaults"
 puts every option back.
 
 Under **Output**, the format (HTML report, unified diff or word diff, the
-extension of the file following it), where to save it (by default,
-comparing two folders, `prosediff.html` in the new one; otherwise a new file
-in the temporary folder).
+extension of the file following it), where to save it (by default next to the new
+file, as `OLD_vs_NEW.html`, or into the new folder, as `prosediff.html`,
+following the files or folders as they change; comparing git versions, a new
+file in the temporary folder; a file you choose stays).
 
 Under **AI assessment** (see [AI assessment](#ai-assessment)), the **AI**
 (none, `claude`, `codex`, `ollama`, or another provider any-llm reaches),
@@ -374,8 +376,9 @@ its **Model** and its **Effort**, each list as the AI reports it and its
 own defaults chosen (any name can be typed); what it **Reads**, the changes
 and the new version or the changes only; your **Instructions**, typed or
 from a text file; whether the AI marks the problems in the text (on by
-default); and whether the text sent to the AI is saved beside the output.
-The switches are greyed out while no AI is chosen.
+default); and whether the text sent to the AI is put at the end of the
+HTML report. The switches are greyed out while no AI is chosen, and the
+whole card unless the output is the HTML report.
 
 Compare (or Ctrl+Enter) writes it and opens it.
 The comparison runs in a process of its own, the status line saying the
@@ -411,8 +414,9 @@ back to its default (what is compared and where the output goes stay).
   or the removed ones, in reading order or by date, either way up (click
   the order shown again to reverse it). Clicking a comment, its link in
   the panel or its marker in the text, pins it: the words it is anchored
-  to stay highlighted, across paragraphs too, and its tooltip stays open,
-  until it is clicked again (or Esc)
+  to stay highlighted, across paragraphs too, and its tooltip stays open
+  (drag it out of the way if it covers the text), until it is clicked again
+  (or Esc)
   (only its marker ringed when those words were deleted with a tracked
   change; its whole paragraph when a Markdown file does not say where its
   text ends). In the text, a comment is a 💬 marker, after a green + (+💬) when it was added

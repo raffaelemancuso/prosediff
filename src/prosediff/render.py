@@ -170,8 +170,8 @@ def write_output(
     diff ("wdiff"), LF line ends on every system. The text formats have
     context unchanged lines around each change (None: every line; "auto":
     git's 3). sentences and split as in render; a text format holds one
-    comparison only. An AI's assessment, given, heads the HTML report and is
-    written beside the output too, as Markdown (assessment_path)."""
+    comparison only. An AI's assessment, given, heads the HTML report (and,
+    when asked for, the text sent to the AI ends it); a text format has none."""
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {tuple(FORMATS)}, not {fmt!r}")
     if fmt != "html":
@@ -182,24 +182,6 @@ def write_output(
         )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
-    if assessment is not None:
-        with open(assessment_path(path), "w", encoding="utf-8", newline="\n") as f:
-            f.write(assessment.as_markdown(comparison.repo_name))
-        if assessment.save_prompt and assessment.prompt:
-            with open(prompt_path(path), "w", encoding="utf-8", newline="\n") as f:
-                f.write(assessment.prompt_text())
-
-
-def assessment_path(output: Path) -> Path:
-    """Where the assessment of an output goes: report_assessment.md beside
-    report.html."""
-    return output.with_name(f"{output.stem}_assessment.md")
-
-
-def prompt_path(output: Path) -> Path:
-    """Where the text sent to the model goes, when asked:
-    report_assessment_prompt.txt beside report.html."""
-    return output.with_name(f"{output.stem}_assessment_prompt.txt")
 
 
 def assess_comparison(comparison: Comparison, request: AssessRequest) -> Assessment:

@@ -76,8 +76,8 @@ def test_arguments_prefill_two_files(tmp_path):
     d.write_bytes(b"x")
     s, note = settings_from_args([str(a), str(d)], Settings(output="elsewhere.html"))
     assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(d))
-    # the HTML report goes next to the last file, named after both
-    assert s.output == str(tmp_path / "v1_vs_v2.html")
+    # the output is the default, next to the new file (App.follow_sides)
+    assert s.output == ""
 
 
 def test_arguments_prefill_two_folders(tmp_path):
@@ -86,7 +86,7 @@ def test_arguments_prefill_two_folders(tmp_path):
     b.mkdir()
     s, note = settings_from_args([str(a), str(b)], Settings(mode="git"))
     assert note == "" and s.mode == "folders" and (s.old_folder, s.new_folder) == (str(a), str(b))
-    assert s.output == str(b / "prosediff.html")
+    assert s.output == ""  # into the new folder (App.follow_sides)
     # a folder and a file do not make a pair
     (tmp_path / "v1.md").write_text("x")
     _, note = settings_from_args([str(a), str(tmp_path / "v1.md")], Settings())
@@ -134,7 +134,7 @@ def test_the_older_file_goes_on_the_left(tmp_path):
     for first, second in ((sent, returned), (returned, sent)):
         s = with_second_file(Settings(), first, second)
         assert (s.mode, s.old, s.new) == ("files", str(sent), str(returned))
-        assert s.output == str(tmp_path / "sent_vs_returned.html")
+        assert s.output == ""  # next to the newer, as the window fills it
 
 
 def test_context_lines_box():
@@ -170,8 +170,9 @@ def test_generate_git(history, tmp_path):
 
 
 def test_generate_files_and_default_output(tmp_path):
-    """Two files make an HTML report in the temporary folder by default, compared
-    sentence by sentence when asked; without both files, an error."""
+    """Two files make an HTML report next to the new one by default, named after
+    both, compared sentence by sentence when asked; without both files, an
+    error."""
     moved = "Firms that adopted the new technology are compared with the others."
     a, b = two_files(
         tmp_path,
@@ -180,8 +181,7 @@ def test_generate_files_and_default_output(tmp_path):
     )
     s = Settings(mode="files", old=str(a), new=str(b))
     path, c, _ = generate(s)
-    assert path.parent.name == "prosediff" and path.suffix == ".html" and len(c.files) == 1
-    assert path.is_relative_to(tmp_path)  # the temporary folder is the test's own (conftest)
+    assert path == tmp_path / "a_vs_b.html" and len(c.files) == 1
     assert c.counts.moved == 0
     s.split = "sentence"
     assert generate(s)[1].counts.moved == 1
@@ -320,7 +320,7 @@ def test_a_comparison_runs_apart_and_can_be_cancelled(root, tmp_path):
     app.run()
     for _ in range(600):
         root.update()
-        seen.add(app.status.get().split(" 1 s")[0].rstrip("0123456789 s"))
+        seen.add(app.status.get().split("…")[0] + "…")  # the stage, its time aside
         if app.job is None:
             break
         root.after(100)
@@ -451,6 +451,50 @@ def test_swap(root):
     gui.swap(app.old_folder, app.new_folder)
     s = app.collect()
     assert (s.mode, s.old_folder, s.new_folder) == ("folders", "returned", "sent")
+
+
+def test_save_to_follows_the_new_side(root, tmp_path):
+    """Save to is, by default, next to the new file, or in the new folder, and
+    follows them as they change, swapped too; kept as "" so it follows next
+    time; a file chosen stays where it is."""
+    old, new = two_files(tmp_path, "a\n", "b\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    moved = elsewhere / "c.md"
+    moved.write_text("c\n", encoding="utf-8")
+    app = App(root, Settings(mode="files", old=str(old), new=str(new)))
+    assert app.output.get() == str(tmp_path / "a_vs_b.html")
+    assert app.collect().output == ""
+    app.new.set(str(moved))
+    assert app.output.get() == str(elsewhere / "a_vs_c.html")
+    gui.swap(app.old, app.new)
+    assert app.output.get() == str(tmp_path / "c_vs_a.html")
+    app.output_format.set("diff")
+    app.rename_output()
+    assert app.output.get() == str(tmp_path / "c_vs_a.diff")
+    app.mode.set("folders")
+    app.old_folder.set(str(tmp_path))
+    app.new_folder.set(str(elsewhere))
+    assert app.output.get() == str(elsewhere / "prosediff.diff")
+    chosen = str(tmp_path / "mine.diff")
+    app.output.set(chosen)
+    app.new_folder.set(str(tmp_path))
+    assert app.output.get() == chosen and app.collect().output == chosen
+
+
+def test_the_ai_card_is_greyed_out_but_for_the_html_report(root, monkeypatch):
+    """The AI assessment goes in the HTML report only: for a .diff or a
+    .wdiff its card is greyed out whole, and no AI is asked."""
+    monkeypatch.setattr(gui, "models_of", lambda ai: [])
+    app = App(root, Settings(mode="files", assess="codex/gpt-5.5"))
+    assert not app.ai_box.instate(["disabled"])
+    app.output_format.set("wdiff")
+    assert app.ai_box.instate(["disabled"]) and app.model_box.instate(["disabled"])
+    assert all(s.instate(["disabled"]) for s in app.ai_switches)
+    assert app.collect().assess == "codex/gpt-5.5"  # kept for when HTML is back
+    app.output_format.set("html")
+    assert not app.ai_box.instate(["disabled"])
+    assert all(not s.instate(["disabled"]) for s in app.ai_switches)
 
 
 def test_format_renames_the_output(root):

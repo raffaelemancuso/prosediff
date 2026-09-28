@@ -111,6 +111,10 @@ td.code .comment, td.code .ai-mark { cursor: pointer; }
 .assessment > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline;
   gap: 4px 12px; }
 .assessment > summary h2 { display: inline; margin: 0; }
+/* The text sent to the AI, at the end, when asked for: long, so it scrolls. */
+.prompt-sent { margin-top: 12px; }
+.prompt-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85em;
+  max-height: 70vh; overflow: auto; margin: 8px 0 0; }
 .verdict { font-weight: 600; padding: 0 8px; border-radius: 999px; }
 .verdict-improves { color: var(--add); background: var(--ins-line); }
 .verdict-mixed { color: var(--fmt); background: var(--fmt-bg); }
@@ -295,6 +299,9 @@ td[data-move] { cursor: help; }
   border-radius: 6px; box-shadow: 0 2px 8px #0003; pointer-events: none;
   font: 13px/1.4 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   text-align: left; white-space: normal; overflow-wrap: anywhere; }
+/* A pinned mark's tooltip, which can be dragged out of the way. */
+#tip.draggable { pointer-events: auto; cursor: move; user-select: none;
+  touch-action: none; }
 #tip b, #tip .line { display: block; }
 #tip .when, #tip .more { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 tr.current td, tr.target td { box-shadow: inset 0 2px 0 var(--current); }
@@ -609,7 +616,7 @@ thead.print, .print-note { display: none; }
 {% endif %}
 {% if c.comments %}
 {% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
-<details class="comments-panel" open>
+<details class="comments-panel">
   <summary class="comments-head">
     <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
     <span class="comments-switch" role="group" aria-label="Show comments">
@@ -628,7 +635,7 @@ thead.print, .print-note { display: none; }
 </details>
 {% endif %}
 {% if assessment and assessment.annotations and not assessment.error %}
-<details class="comments-panel ai-notes" open>
+<details class="comments-panel ai-notes">
   <summary class="comments-head">
     <h2>AI marks: {{ assessment.annotations | length | counted("problem") }}</h2>
     <span class="role">each ⚠ in the text; click one, here or there, to pin it</span>
@@ -722,10 +729,10 @@ thead.print, .print-note { display: none; }
 {% endmacro %}
 
 {% if assessment %}
-<details class="assessment" open>
+<details class="assessment">
   <summary><h2>AI assessment</h2>
     {% if assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}
-    <span class="role">by {{ assessment.title }}{% if assessment.how %}, {{ assessment.how }}{% endif %}{% if assessment.seconds %}, in {{ "{:,.0f}".format(assessment.seconds) }} s{% endif %}</span></summary>
+    <span class="role">by {{ assessment.title }}{% if assessment.how %}, {{ assessment.how }}{% endif %}{% if assessment.seconds %}, in {{ assessment.took }}{% endif %}</span></summary>
   {% if assessment.error %}
   <p class="assess-error">The assessment failed: {{ assessment.error }}</p>
   {% else %}
@@ -748,6 +755,14 @@ thead.print, .print-note { display: none; }
 </div>
 {% else %}
 {{ report_body(c, split) }}
+{% endif %}
+
+{% if assessment and assessment.save_prompt and assessment.prompt %}
+<details class="assessment prompt-sent">
+  <summary><h2>Text sent to the AI</h2>
+    <span class="role">its system prompt and its message, exactly as sent</span></summary>
+  <pre class="prompt-text">{{ assessment.prompt_text() }}</pre>
+</details>
 {% endif %}
 
 <footer>Generated {{ generated }} by <a href="{{ homepage }}">prosediff</a> {{ version }}.</footer>
@@ -1152,6 +1167,7 @@ thead.print, .print-note { display: none; }
     mark.classList.add("pinned");
     anchorX = 0;
     showTip(mark);
+    tip.classList.add("draggable");
   }
   function unpin() {
     if (!pinned) return;
@@ -1159,8 +1175,32 @@ thead.print, .print-note { display: none; }
     if (pinned.cell) pinned.cell.classList.remove("pinned");
     pinned.mark.classList.remove("pinned");
     pinned = null;
+    tip.classList.remove("draggable");
+    tipMoved = false;
     hideTip();
   }
+  // A pinned tooltip can be dragged out of the way: it stays where it is
+  // dropped, scrolling or not, until unpinned.
+  var tipMoved = false, dragFrom = null, tipBox = document.getElementById("tip");
+  tipBox.addEventListener("pointerdown", function (e) {
+    if (!pinned) return;
+    var t = tipBox.getBoundingClientRect();
+    dragFrom = { x: e.clientX - t.left, y: e.clientY - t.top };
+    tipBox.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  tipBox.addEventListener("pointermove", function (e) {
+    if (!dragFrom) return;
+    var t = tipBox.getBoundingClientRect();
+    var left = Math.min(Math.max(0, e.clientX - dragFrom.x), window.innerWidth - t.width);
+    var top = Math.min(Math.max(0, e.clientY - dragFrom.y), window.innerHeight - t.height);
+    tipBox.style.left = left + "px";
+    tipBox.style.top = top + "px";
+    tipMoved = true;
+  });
+  function endDrag() { dragFrom = null; }
+  tipBox.addEventListener("pointerup", endDrag);
+  tipBox.addEventListener("pointercancel", endDrag);
   function pinComment(row, side, cell, marker) {
     if (!marker) return;
     pin(marker, canHighlight ? anchorRanges(row, side, marker) : null, cell);
@@ -1212,7 +1252,13 @@ thead.print, .print-note { display: none; }
     if (!data) return;
     try { aiNotes = JSON.parse(data.textContent); } catch (e) { return; }
     var QUOTES = { "‘": "'", "’": "'", "“": '"', "”": '"' };
-    var SKIP = ".sr, .print-note, .comment, .comment-end, .pv-off, .sign, .ai-mark";
+    // Not text: what screen readers and paper alone get, the marks. A row
+    // holding a moved passage is written twice, its words marked as moved
+    // (.pv-on) and as removed and added (.pv-off), the "Moved passages"
+    // switch hiding one: each is searched apart, so a problem gets a badge
+    // in both and the one on screen always has it.
+    var SKIP = ".sr, .print-note, .comment, .comment-end, .sign, .ai-mark";
+    var VERSIONS = [SKIP + ", .pv-off", SKIP + ", .pv-on"];
     // Text as it is matched, each character with the text node and offset
     // it comes from (none for a space put between two cells).
     function Hay() { this.text = ""; this.at = []; }
@@ -1231,12 +1277,12 @@ thead.print, .print-note { display: none; }
       for (var i = 0; i < s.length; i++) h.put(s[i], null);
       return h.text.trim();
     }
-    function sideText(root, side) {
+    function sideText(root, side, skip) {
       var hay = new Hay();
       root.querySelectorAll("td.code." + side).forEach(function (cell) {
         var walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
         for (var node = walker.nextNode(); node; node = walker.nextNode()) {
-          if (node.parentElement.closest(SKIP)) continue;
+          if (node.parentElement.closest(skip)) continue;
           for (var i = 0; i < node.data.length; i++) hay.put(node.data[i], [node, i]);
         }
         hay.put(" ", null);
@@ -1272,10 +1318,18 @@ thead.print, .print-note { display: none; }
     // every range first, then the badges, which split the text nodes the
     // ranges were found in (a range follows; a found position would not)
     Array.prototype.forEach.call(roots, function (root) {
-      var sides = { new: sideText(root, "right"), old: sideText(root, "left") };
-      aiNotes.forEach(function (note) {
-        var range = rangeOf(sides[note.side === "old" ? "old" : "new"], note);
-        if (range) (note.ranges = note.ranges || []).push(range);
+      VERSIONS.forEach(function (skip) {
+        var sides = { new: sideText(root, "right", skip), old: sideText(root, "left", skip) };
+        aiNotes.forEach(function (note) {
+          var range = rangeOf(sides[note.side === "old" ? "old" : "new"], note);
+          if (!range) return;
+          note.ranges = note.ranges || [];
+          // where the row has but one version, both searches find the same
+          var same = note.ranges.some(function (r) {
+            return r.startContainer === range.startContainer && r.startOffset === range.startOffset;
+          });
+          if (!same) note.ranges.push(range);
+        });
       });
     });
     // Numbered in reading order: by where each passage starts in the text,
@@ -1363,9 +1417,14 @@ thead.print, .print-note { display: none; }
   // A problem's badge in the view shown; null when its words were not
   // found there.
   function shownMark(note) {
-    return note && note.marks ? note.marks.find(function (m) {
-      return !m.closest(".split[hidden]");
-    }) || null : null;
+    return note && note.marks ? note.marks.find(markShown) || null : null;
+  }
+  // Whether a badge is in what is shown: its view, and its row's version
+  // with or without moved passages, as the "Moved passages" switch says.
+  function markShown(m) {
+    if (m.closest(".split[hidden]")) return false;
+    var passages = document.body.classList.contains("passages");
+    return !(m.closest(".pv-on") && !passages) && !(m.closest(".pv-off") && passages);
   }
   // A badge brought into view, its unchanged lines unfolded if need be.
   function reveal(mark) {
@@ -1463,7 +1522,7 @@ thead.print, .print-note { display: none; }
   }
   // Below what is hovered, or above it when there is no room below.
   function placeTip() {
-    if (!shown) return;
+    if (!shown || tipMoved) return;  // dragged: where it was dropped
     var r = shown.getBoundingClientRect(), t = tip.getBoundingClientRect();
     // a switch of the View menu: beside the menu, not over its other rows
     var menu = shown.closest(".menu-panel");

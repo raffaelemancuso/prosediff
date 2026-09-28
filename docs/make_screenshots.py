@@ -6,9 +6,11 @@ The page is photographed by Playwright's Chromium (uv run playwright
 install chromium, once); the window by Pillow, which needs a desktop: the window
 shows on screen for a moment. The demo text and its authors are made up.
 With --assess (e.g. claude), the AI named really assesses the demo's changes,
-and the report's AI assessment is photographed too (screenshot_assessment.png),
-with the problems it marked in the text (screenshot_marks.png);
-without it, that screenshot is left as it is.
+once: the report photographed whole (screenshot_page.png) then holds its
+assessment and the problems it marked, one pinned; its assessment and its
+marks are photographed apart too (screenshot_assessment.png,
+screenshot_marks.png). Without it, the report has neither, a comment's
+tooltip open, and those two screenshots are left as they are.
 """
 
 import argparse
@@ -104,35 +106,57 @@ def demo_repo(root: Path) -> tuple[Path, str]:
     return root, repo.head.commit.hexsha
 
 
-def shoot_page(repo: Path, out: Path) -> None:
-    page_file = repo.parent / "page.html"
+def report(repo: Path, ai: str | None) -> Path:
+    """The demo's HTML report, with the assessment of the AI named, made now
+    (none without one); where it is written."""
     c = compare(repo, "HEAD~1", "HEAD")
     c.location = SHOWN_PATH
-    page_file.write_text(render(c, align="justify"), encoding="utf-8")
+    assessment = None
+    if ai:
+        assessment = assess_comparison(c, AssessRequest(ai))
+        if assessment.error:
+            sys.exit(f"the assessment failed: {assessment.error}")
+    page_file = repo.parent / "page.html"
+    page_file.write_text(render(c, align="justify", assessment=assessment), encoding="utf-8")
+    return page_file
+
+
+def open_panels(page) -> None:
+    """Open the report's panels, closed until opened, to show what they hold."""
+    page.evaluate(
+        "document.querySelectorAll('details.comments-panel, details.assessment')"
+        ".forEach(d => { d.open = true; })"
+    )
+
+
+def shoot_page(page_file: Path, out: Path) -> None:
+    """The report whole: its first problem the AI marked pinned, its tooltip
+    open; without any, a comment's tooltip."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 900}, device_scale_factor=1)
         page.goto(page_file.as_uri())
-        page.locator(".comment.new").first.hover()  # show a comment tooltip
+        open_panels(page)
+        # as tall as the page, so the whole of it is in view, tooltip included
+        height = page.evaluate("document.documentElement.scrollHeight")
+        page.set_viewport_size({"width": 1280, "height": height + 60})
+        if page.locator(".ai-mark").count():
+            page.locator(".ai-mark").first.click()
+        else:
+            page.locator(".comment.new").first.hover()
         page.screenshot(path=str(out))
         browser.close()
 
 
-def shoot_assessment(repo: Path, out: Path, marks: Path, ai: str) -> bool:
-    """The report's AI assessment, made now by the AI named; then, when it
-    marked problems in the text, the AI marks panel and the first problem
-    pinned in the text, its tooltip open (marks). Whether marks was made."""
-    c = compare(repo, "HEAD~1", "HEAD")
-    c.location = SHOWN_PATH
-    assessment = assess_comparison(c, AssessRequest(ai))
-    if assessment.error:
-        sys.exit(f"the assessment failed: {assessment.error}")
-    page_file = repo.parent / "assessed.html"
-    page_file.write_text(render(c, align="justify", assessment=assessment), encoding="utf-8")
+def shoot_assessment(page_file: Path, out: Path, marks: Path) -> bool:
+    """The report's AI assessment; then, when it marked problems in the
+    text, the AI marks panel and the first problem pinned in the text, its
+    tooltip open (marks). Whether marks was made."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 900}, device_scale_factor=1)
         page.goto(page_file.as_uri())
+        open_panels(page)
         box = page.locator("details.assessment").bounding_box()
         page.screenshot(
             path=str(out),
@@ -192,11 +216,12 @@ if __name__ == "__main__":
     # a helper process of the window may still hold the demo folder: left behind
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         repo, _ = demo_repo(Path(tmp) / "wonderland")
-        shoot_page(repo, written[0])
+        page_file = report(repo, args.assess)  # the AI asked once, for every shot
+        shoot_page(page_file, written[0])
         shoot_window(repo, written[1])
         if args.assess:
             shots = DOCS / "screenshot_assessment.png", DOCS / "screenshot_marks.png"
-            if shoot_assessment(repo, *shots, args.assess):
+            if shoot_assessment(page_file, *shots):
                 written += shots
             else:
                 written.append(shots[0])
