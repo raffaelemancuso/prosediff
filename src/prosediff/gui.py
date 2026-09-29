@@ -1967,6 +1967,19 @@ def hint(widget: tk.Misc, text: str) -> None:
     ttk.ToolTip(widget, text=text, wraplength=HINT_WIDTH, delay=HINT_DELAY_MS)
 
 
+def popdown_listbox(combo: ttk.Combobox, popdown: str) -> str | None:
+    """The listbox of a combobox's drop-down list, found among the widgets of
+    its popdown (at .f.l on Windows and X11, elsewhere on macOS); None when
+    it has none."""
+    widgets = [popdown]
+    while widgets:
+        w = widgets.pop()
+        if combo.tk.call("winfo", "class", w) == "Listbox":
+            return w
+        widgets += combo.tk.splitlist(combo.tk.call("winfo", "children", w))
+    return None
+
+
 def item_hints(combo: ttk.Combobox, tip: Callable[[str], str]) -> ttk.Combobox:
     """What each item of a drop-down list means, shown beside the item under
     the pointer while the list is open; tip gives an item's hint ("" for
@@ -1974,7 +1987,9 @@ def item_hints(combo: ttk.Combobox, tip: Callable[[str], str]) -> ttk.Combobox:
     behind it (ttk::combobox::PopdownWindow), so ttkbootstrap's ToolTip
     cannot take it: a small window of our own shows the hint."""
     popdown = combo.tk.eval(f"ttk::combobox::PopdownWindow {combo}")
-    listbox = f"{popdown}.f.l"
+    listbox = popdown_listbox(combo, popdown)
+    if listbox is None:
+        return combo  # a Tk that builds its list otherwise: no hints, all else works
     window: list[tk.Toplevel] = []
 
     def hide(*_) -> None:

@@ -2112,28 +2112,36 @@ thead.print, .print-note { display: none; }
     cols[1].style.width = Math.round(text * widths.share) + "px";
   }
   // The handles of a file's table, where its columns meet.
+  // Each handle kept from one layout to the next, only moved: made anew each
+  // time, one held or pointed at would be gone under the pointer.
   function placeResizers(file) {
-    file.querySelectorAll(":scope > .col-resizer").forEach(function (h) { h.remove(); });
-    var table = file.querySelector("table");
-    if (!table || !file.open || file.closest(".split[hidden]") || !table.offsetParent ||
-        document.body.classList.contains("unified")) return;
+    var table = file.querySelector("table"), at = {};
+    if (table && file.open && !file.closest(".split[hidden]") && table.offsetParent &&
+        !document.body.classList.contains("unified")) {
+      var left = shownCell(table, "td.code.left"), notes = shownCell(table, "td.notes");
+      if (left) at.split = left.getBoundingClientRect().right;
+      if (notes) at.notes = notes.getBoundingClientRect().left;
+    }
+    file.querySelectorAll(":scope > .col-resizer").forEach(function (h) {
+      if (!(h.dataset.resize in at)) h.remove();
+    });
+    if (!Object.keys(at).length) return;
     var box = file.getBoundingClientRect(), t = table.getBoundingClientRect();
-    var left = shownCell(table, "td.code.left"), notes = shownCell(table, "td.notes");
-    var at = [];
-    if (left) at.push(["split", left.getBoundingClientRect().right]);
-    if (notes) at.push(["notes", notes.getBoundingClientRect().left]);
-    at.forEach(function (a) {
-      var h = document.createElement("div");
-      h.className = "col-resizer";
-      h.dataset.resize = a[0];
-      h.setAttribute("aria-hidden", "true");
-      h.title = a[0] === "split"
-        ? "Drag to share the width between the old and the new version; double-click for the default"
-        : "Drag to widen or narrow the margin; double-click for the default";
-      h.style.left = (a[1] - box.left) + "px";
+    Object.keys(at).forEach(function (kind) {
+      var h = file.querySelector(':scope > .col-resizer[data-resize="' + kind + '"]');
+      if (!h) {
+        h = document.createElement("div");
+        h.className = "col-resizer";
+        h.dataset.resize = kind;
+        h.setAttribute("aria-hidden", "true");
+        h.title = kind === "split"
+          ? "Drag to share the width between the old and the new version; double-click for the default"
+          : "Drag to widen or narrow the margin; double-click for the default";
+        file.appendChild(h);
+      }
+      h.style.left = (at[kind] - box.left) + "px";
       h.style.top = (t.top - box.top) + "px";
       h.style.height = t.height + "px";
-      file.appendChild(h);
     });
   }
   var dragging = null;
