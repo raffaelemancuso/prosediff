@@ -882,19 +882,32 @@ class App:
         self.advanced_row.pack(fill="x", pady=(8, 0))
         self.advanced_button = ttk.Button(
             self.advanced_row,
-            text="▸ Advanced settings",
+            text="Advanced settings…",
             command=self.toggle_advanced,
             bootstyle="link",
             padding=(0, 4),
         )
         self.advanced_button.pack(side="left")
-        hint(self.advanced_button, "Show or hide the settings few need to change.")
+        hint(
+            self.advanced_button,
+            "Open the settings few need to change in a window of their own, beside this "
+            "one; they apply to the next comparison as they are when it starts.",
+        )
         ttk.Label(
             self.advanced_row,
             text="how the report shows it, moved passages, encoding…",
             bootstyle="secondary",
         ).pack(side="left", padx=(8, 0))
-        self.advanced = ttk.Frame(page)
+        # a window of its own, hidden until asked for: this one would grow past
+        # the screen
+        self.advanced_window = tk.Toplevel(self.root)
+        self.advanced_window.title("prosediff: advanced settings")
+        self.advanced_window.withdraw()
+        self.advanced_window.resizable(False, False)
+        self.advanced_window.protocol("WM_DELETE_WINDOW", self.toggle_advanced)
+        self.advanced_window.bind("<Escape>", lambda e: self.toggle_advanced())
+        self.advanced = ttk.Frame(self.advanced_window, padding=(14, 12, 14, 12))
+        self.advanced.pack(fill="both", expand=True)
         report = ttk.Labelframe(self.advanced, text="Report", padding=(10, 8))
         report.pack(fill="x")
         report.columnconfigure((0, 1), weight=1, uniform="half")
@@ -969,6 +982,9 @@ class App:
             ),
             "Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed.",
         )
+        ttk.Button(
+            self.advanced, text="Close", command=self.toggle_advanced, bootstyle="secondary"
+        ).pack(side="bottom", anchor="e", pady=(12, 0))
 
     def build_output(self, page: ttk.Frame) -> None:
         """The output: its format, where it goes, whether it opens."""
@@ -1376,7 +1392,9 @@ class App:
     def build_bottom(self, page: ttk.Frame) -> None:
         """The status line and the buttons."""
         bottom = ttk.Frame(page)
-        bottom.pack(fill="x", pady=(12, 0))
+        # laid out before the cards, so a window too short for them never
+        # hides the Compare button
+        bottom.pack(fill="x", side="bottom", pady=(12, 0), before=page.winfo_children()[0])
         self.status = tk.StringVar(value=READY)
         ttk.Label(bottom, textvariable=self.status, bootstyle="secondary").pack(side="left")
         self.compare_icon = ttk.Icon("play-fill", size=16, color="white")
@@ -1636,14 +1654,23 @@ class App:
         )
 
     def toggle_advanced(self) -> None:
-        """Show the advanced settings below their button, or hide them."""
-        # laid out or not, whether the window is shown yet or not
-        if self.advanced.winfo_manager():
-            self.advanced.pack_forget()
-            self.advanced_button.configure(text="▸ Advanced settings")
-        else:
-            self.advanced.pack(fill="x", pady=(4, 0), after=self.advanced_row)
-            self.advanced_button.configure(text="▾ Advanced settings")
+        """Open the advanced settings' window beside this one (on the side
+        with room for it), or close it."""
+        top = self.advanced_window
+        if top.state() != "withdrawn":
+            top.withdraw()
+            return
+        top.update_idletasks()
+        width = top.winfo_reqwidth()
+        # frame to frame: winfo_x and winfo_y are those of the window's frame
+        frame = self.root.winfo_rootx() - self.root.winfo_x()
+        x = self.root.winfo_rootx() + self.root.winfo_width() + frame + 8
+        if x + width > self.root.winfo_screenwidth():
+            x = max(self.root.winfo_x() - width - 2 * frame - 8, 0)
+        top.geometry(f"+{x}+{self.root.winfo_y()}")
+        top.deiconify()
+        top.lift()
+        dark_title_bar(top)
 
     def passage_choices(self) -> dict[str, float]:
         """The moved-passage settings shown that differ from prosediff's
@@ -2117,7 +2144,13 @@ def use_theme(root: tk.Tk | tk.Toplevel) -> None:
     on Windows, a title bar to match."""
     dark = system_dark()
     ttk.Style(theme=DARK_THEME if dark else LIGHT_THEME)
-    if dark and sys.platform == "win32":
+    if dark:
+        dark_title_bar(root)
+
+
+def dark_title_bar(root: tk.Tk | tk.Toplevel) -> None:
+    """On Windows, a dark title bar for a window of the dark theme."""
+    if system_dark() and sys.platform == "win32":
         try:
             root.update_idletasks()
             hwnd = ctypes.windll.user32.GetParent(root.winfo_id())

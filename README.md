@@ -404,8 +404,9 @@ others guessed; `document`; `guess`, guessed from each file; or a code such
 as `it`), which splits sentences and hyphenates lines, and a switch to
 ignore whitespace.
 
-Below it, **Advanced settings** (hidden until clicked) holds the rest. Its
-**Report** card: how prose is compared ("Compare by": paragraphs,
+Below it, **Advanced settings…** opens the rest in a window of its own,
+beside the main one (Close, or Escape, hides it again; what it holds
+applies to the next comparison). Its **Report** card: how prose is compared ("Compare by": paragraphs,
 sentences or both, the default), context lines or whole files, the
 alignment of wrapped lines, whether passages moved within or between
 paragraphs are followed too ("Moved passages"), and comments without text.

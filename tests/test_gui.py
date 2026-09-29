@@ -807,13 +807,13 @@ def test_advanced_moved_passage_settings(root, tmp_path):
     changed from prosediff's defaults are kept, and saved."""
     app = App(root, Settings(mode="files"))
     root.update()
-    assert not app.advanced.winfo_manager()
+    assert app.advanced_window.state() == "withdrawn"
     app.toggle_advanced()
     root.update()
-    assert app.advanced.winfo_manager() == "pack"
+    assert app.advanced_window.state() == "normal"
     app.toggle_advanced()
     root.update()
-    assert not app.advanced.winfo_manager()
+    assert app.advanced_window.state() == "withdrawn"
     # one field for each setting, at its default
     assert set(app.passage_vars) == {f.name for f in fields(MovedPassageSettings)}
     assert app.passage_vars["max_pairs"].get() == f"{MOVED_PASSAGE_DEFAULTS.max_pairs:,}"
