@@ -1831,7 +1831,7 @@ class App:
         self.job.start()
         self.job_settings = s
         self.show_cancel(True)
-        self.root.after(100, self.poll)
+        self.root.after(100, self.poll, self.job)
 
     def cancel(self) -> None:
         """Stop the comparison running, and all it started."""
@@ -1865,11 +1865,12 @@ class App:
         self.stage, self.stage_started = stage, time.monotonic()
         self.status.set(stage)
 
-    def poll(self) -> None:
-        """Pick up what the comparison's process says: each stage, shown
-        with the seconds it has taken so far, then its result (tkinter must
-        only be touched from its own thread)."""
-        if self.job is None:
+    def poll(self, job: multiprocessing.process.BaseProcess | None) -> None:
+        """Pick up what job, the comparison's process, says: each stage,
+        shown with the seconds it has taken so far, then its result (tkinter
+        must only be touched from its own thread). A poll of a job cancelled
+        ends there, even when another has started since."""
+        if job is None or job is not self.job:
             return  # cancelled
         try:
             kind, value = self.messages.get_nowait()
@@ -1892,7 +1893,7 @@ class App:
             seconds = time.monotonic() - self.stage_started
             if seconds >= 1:
                 self.status.set(f"{self.stage} {duration(seconds)}")
-            self.root.after(100, self.poll)
+            self.root.after(100, self.poll, self.job)
             return
         self.handle(kind, value)
 
@@ -1901,7 +1902,7 @@ class App:
         its error."""
         if kind == "stage":
             self.set_stage(value)
-            self.root.after(100, self.poll)
+            self.root.after(100, self.poll, self.job)
             return
         if kind == "preview":
             self.preview(value)
@@ -1959,7 +1960,7 @@ class App:
         if self.job is None:
             return  # cancelled while the question was open
         self.replies.put(send)
-        self.root.after(100, self.poll)
+        self.root.after(100, self.poll, self.job)
 
 
 def hint(widget: tk.Misc, text: str) -> None:
