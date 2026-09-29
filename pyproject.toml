@@ -1,21 +1,52 @@
 [project]
 name = "prosediff"
 version = "0.6.0"
-description = "Side-by-side diff for prose, not code: optimised for Word .docx documents, OpenDocument .odt and Markdown included, from two files or from git"
+description = "Side-by-side diff for prose, not code: compares versions of Word, OpenDocument and Markdown documents, restores their tracked changes, and has an AI assess the edits"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-keywords = ["diff", "docx", "word", "odt", "libreoffice", "markdown", "prose", "compare", "track changes", "git"]
+keywords = [
+    "diff",
+    "compare",
+    "document comparison",
+    "prose",
+    "docx",
+    "word",
+    "odt",
+    "libreoffice",
+    "markdown",
+    "track changes",
+    "redline",
+    "comments",
+    "academic writing",
+    "peer review",
+    "co-authoring",
+    "ai",
+    "llm",
+    "git",
+]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: End Users/Desktop",
     "Intended Audience :: Science/Research",
+    "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
-    "Topic :: Text Processing",
+    "Topic :: Office/Business :: Office Suites",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Version Control :: Git",
+    "Topic :: Text Processing :: General",
+    "Topic :: Utilities",
 ]
 authors = [
     { name = "Raffaele Mancuso", email = "raffaelemancuso532@gmail.com" }
@@ -47,6 +78,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/raffaelemancuso/prosediff"
 Issues = "https://github.com/raffaelemancuso/prosediff/issues"
+Changelog = "https://github.com/raffaelemancuso/prosediff/releases"
 
 [project.scripts]
 prosediff = "prosediff.cli:main"

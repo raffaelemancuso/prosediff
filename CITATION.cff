@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use prosediff in your work, please cite it as below."
+type: software
+title: prosediff
+abstract: >-
+  A side-by-side diff for prose, not code. prosediff compares two versions of
+  Word, OpenDocument and Markdown documents, from two files, two folders or a
+  git repository: it pairs each paragraph and sentence with the one it came
+  from, follows text that moved even when it was edited, highlights the
+  changed words and formatting, and shows the comments added and removed. It
+  writes an HTML report, unified and word diffs, or a copy of the new document
+  with every change as a tracked change, so a version edited with Track
+  Changes off gets them back. An AI (Claude, ChatGPT through Codex, a local
+  model through Ollama, or any provider any-llm reaches) can assess the
+  changes and mark the problems it finds in the text.
+authors:
+  - family-names: Mancuso
+    given-names: Raffaele
+repository-code: "https://github.com/raffaelemancuso/prosediff"
+url: "https://pypi.org/project/prosediff/"
+license: MIT
+version: 0.6.0
+date-released: "2026-09-29"
+keywords:
+  - diff
+  - document comparison
+  - prose
+  - Word
+  - OpenDocument
+  - Markdown
+  - track changes
+  - academic writing
+  - peer review
+  - large language models
