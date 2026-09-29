@@ -64,6 +64,7 @@ from prosediff.sources import (
     default_page,
     document_to_markdown,
 )
+from prosediff.tracked import TRACKED_FORMATS, check_paths
 
 PROG = "prosediff"
 
@@ -159,11 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
         "added or "
         "removed in CriticMarkup); wdiff: the same as git diff --word-diff writes it, "
         "[-removed-]{+added+} within each line. With -U lines of context (default: 3) "
-        "or --full. docx, odt: the new version as a Word document or an OpenDocument "
-        "text, each change since the old one a tracked change to accept or reject, "
-        "paragraph by paragraph; its text, formatting, headings, list items and new "
-        "comments, not its layout (default: diff when OUTPUT ends in .diff or .patch, "
-        "wdiff for .wdiff, docx for .docx, odt for .odt, else html)",
+        "or --full. docx: two Word documents compared into a copy of the new one, "
+        "everything in it kept, each change since the old one a tracked change to "
+        "accept or reject; odt: the same for two OpenDocument texts; paragraph by "
+        "paragraph (default: diff when OUTPUT ends in .diff or .patch, wdiff for "
+        ".wdiff, docx for .docx, odt for .odt, else html)",
     )
     ap.add_argument(
         "--open",
@@ -470,6 +471,11 @@ def main(argv: list[str] | None = None) -> int:
         check_split(split, fmt)
     except ValueError as e:
         ap.error(f"--split: {e}")
+    if fmt in TRACKED_FORMATS and args.files and args.base:
+        try:
+            check_paths(args.repo, args.base, fmt)
+        except ValueError as e:
+            ap.error(f"--format {fmt}: {e}")
     for name in ("move_similarity", "sentence_move_similarity"):
         try:
             check_move_similarity(getattr(args, name))
@@ -547,17 +553,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{PROG}: the assessment failed: {assessment.error}", file=sys.stderr)
 
     output = _output_path(args, fmt)
-    output = write_output(
-        comparison,
-        output,
-        fmt,
-        args.paths,
-        align=args.align,
-        context=None if args.full else (CONTEXT if args.context is None else args.context),
-        sentences=sentences,
-        split=split,
-        assessment=assessment,
-    )
+    try:
+        output = write_output(
+            comparison,
+            output,
+            fmt,
+            args.paths,
+            align=args.align,
+            context=None if args.full else (CONTEXT if args.context is None else args.context),
+            sentences=sentences,
+            split=split,
+            assessment=assessment,
+        )
+    except ValueError as e:  # a .docx or .odt of anything but two such documents
+        print(f"{PROG}: {e}", file=sys.stderr)
+        return 1
 
     c = comparison
     print(

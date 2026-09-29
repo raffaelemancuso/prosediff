@@ -197,26 +197,41 @@ Examples:
 
 ## Tracked changes
 
-`--format docx` and `--format odt` (in the window, "Word, tracked" and
-"OpenDocument, tracked") write the new version with each change since the
-old one as the word processor's own tracked change, by the target commit's
-author (else `prosediff`): what Word's *Compare* and LibreOffice's *Compare
-Document* make, from prosediff's own pairing of paragraphs and words, and
-from any two sources prosediff reads (Markdown, text, Word, OpenDocument),
-neither needing tracked changes of its own. Accepting every change gives
-the new version, rejecting every one the old: a paragraph added or removed
-whole is inserted or deleted with its paragraph mark, leaving no empty
-paragraph behind. The text keeps its bold, italic, underline,
-strikethrough, superscript and subscript, its headings and list items;
-words whose formatting alone changed are a formatting change in Word (an
-OpenDocument text shows them in their new formatting). The comments added
-since the base are comments of the document, over the words they were
-anchored to, with their paragraphs and formatting. The layout, tables
-(each row a paragraph, its cells apart by `|`), images and page setup of
-the documents are not kept. Word does not read tracked changes from an
-`.odt`: open it in LibreOffice. A document open, and so locked, in Word
-or LibreOffice is left be, the output written beside it as
-`NAME__locked_YYYYMMDD_HHMMSS.docx`, with a warning.
+`--format docx` (in the window, "Word, tracked") compares one Word
+document with another and writes a copy of the new one with each change
+since the old one marked in it as Word's own tracked change, by the target
+commit's author (else `prosediff`); `--format odt` ("OpenDocument,
+tracked") does the same for two OpenDocument texts, for LibreOffice
+Writer. It is what Word's *Compare* and LibreOffice's *Compare Document*
+make, from prosediff's own pairing of paragraphs and words; neither file
+needs tracked changes of its own.
+
+Everything the new file holds is kept as it is: its styles, page setup,
+sections, headers and footers, tables, images, fields, footnotes and
+comments. Accepting every change gives the new file, rejecting every one
+the old: words deleted come back in the formatting they had in the old
+file, a paragraph added or removed whole is inserted or deleted with its
+paragraph mark (a deleted one copied from the old file with its style),
+so no empty paragraph is left behind, and a table row added or removed
+whole is a row inserted or deleted. (ODF itself tracks no table rows,
+only their cells' text: an `.odt` marks the row as LibreOffice does since
+7.2, with its extension `loext:text-changes-only`; another program sees
+the cells' words inserted or deleted, the row in place.) Words whose formatting alone changed
+are a formatting change in Word; an OpenDocument text shows them in their
+new formatting. What a deleted paragraph pointed at in the old file (an
+image, a link, a comment, a footnote reference) does not come with it. The
+new file's own tracked changes are accepted first; a paragraph or row it
+deleted as a tracked change is left empty, not merged away (docx-plus,
+which accepts them, does not merge paragraphs yet).
+
+Only these two pairs are written so, one document at a time, paragraph by
+paragraph: two Markdown or text files, a Word document against an
+OpenDocument text, a `.docx` asked of two OpenDocument texts (or the other
+way round) or several files are refused, with a message saying why. Word
+does not read tracked changes from an `.odt`: open it in LibreOffice. A
+document open, and so locked, in Word or LibreOffice is left be, the
+output written beside it as `NAME__locked_YYYYMMDD_HHMMSS.docx`, with a
+warning.
 
 ## AI assessment
 

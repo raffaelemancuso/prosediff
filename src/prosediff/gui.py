@@ -84,6 +84,7 @@ from prosediff.render import (
     write_output,
 )
 from prosediff.sources import DOCX_CHANGES, FOLDER_FILES, SourceError, default_page
+from prosediff.tracked import TRACKED_FORMATS, check_paths
 
 MAX_COMMITS = 200
 ENCODINGS = (AUTO_ENCODING, "utf-8", "cp1252", "latin-1", "utf-16", "cp1250", "cp1251")
@@ -410,6 +411,8 @@ def generate(
     if split == "both" and fmt != "html":
         split = default_split(fmt)  # a diff holds one split
     check_split(split, fmt)
+    if fmt in TRACKED_FORMATS and s.mode == "files" and old and new:
+        check_paths(old, new, fmt)  # before comparing them
 
     def run(options: Options) -> Comparison:
         if s.mode == "files":
@@ -958,14 +961,15 @@ class App:
             (
                 "docx",
                 "Word, tracked",
-                "A .docx: the new version, each change since the old one a tracked change "
-                "to accept or reject in Word; its text, formatting, headings, list items "
-                "and new comments, not its layout. Paragraph by paragraph.",
+                "Two Word documents compared into a copy of the new one, everything in it "
+                "kept, each change since the old one a tracked change to accept or reject "
+                "in Word. Two Word documents only; paragraph by paragraph.",
             ),
             (
                 "odt",
                 "OpenDocument, tracked",
-                "An .odt: the same, for LibreOffice Writer.",
+                "Two OpenDocument texts compared into a copy of the new one, the same way, "
+                "for LibreOffice Writer. Two OpenDocument texts only.",
             ),
         ):
             button = ttk.Radiobutton(

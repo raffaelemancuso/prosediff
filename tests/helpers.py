@@ -117,6 +117,7 @@ def odt_xml(path, body, styles=""):
         'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
         'xmlns:xlink="http://www.w3.org/1999/xlink" '
         'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:loext="urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" '
         'office:version="1.3"'
     )
     mime = "application/vnd.oasis.opendocument.text"

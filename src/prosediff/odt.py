@@ -18,7 +18,10 @@ prosediff.document.Document:
   keeps both, marked as insertions and deletions. A comment anchored in
   dropped text is kept. Deleted text that spanned several paragraphs comes
   back, when rejected, as those paragraphs, each of its own kind (a heading,
-  a list item); shown with "all", as one run of text.
+  a list item); shown with "all", as one run of text. A table row
+  LibreOffice tracks whole (loext:text-changes-only "false" in its style)
+  goes when its cells are left empty: deleted and accepted, or inserted
+  and rejected.
 
 Headers, footers, frames' text and the table of contents are left out; an
 image is written [image], with its description when it has one.
@@ -428,25 +431,34 @@ class Reader(DocumentReader):
             return Block("heading", inlines, level=kind[1], language=language, source=source)
         return Block(kind[0], inlines, language=language, source=source)
 
+    def tracked_whole(self, tr: Element) -> bool:
+        """Whether a table row is tracked as a whole: its style says
+        loext:text-changes-only "false", as LibreOffice writes a row
+        inserted or deleted with its changes tracked (each cell's words a
+        change of their own)."""
+        name = tr.get_attribute_string("table:style-name")
+        style = self.document.get_style("table-row", name) if name else None
+        if style is None:
+            return False
+        props = style.get_element("style:table-row-properties")
+        return props is not None and props.attributes.get("loext:text-changes-only") == "false"
+
     def table(self, el: Element) -> Block:
-        rows = [
-            [
+        rows, row_sources = [], []
+        for tr in el.get_elements(
+            "table:table-row|table:table-header-rows/table:table-row"
+            "|table:table-rows/table:table-row"
+        ):
+            cells = [
                 self.cell(tc.get_elements(".//text:p|.//text:h"))
                 for tc in tr.get_elements("table:table-cell")
             ]
-            for tr in el.get_elements(
-                "table:table-row|table:table-header-rows/table:table-row"
-                "|table:table-rows/table:table-row"
-            )
-        ]
+            # a row deleted whole, accepted (inserted whole, rejected): gone
+            if self.tracked_whole(tr) and not any(markdown(c).strip() for c in cells):
+                continue
+            rows.append(cells)
+            row_sources.append(tuple(source_of(p) for p in tr.get_elements(".//text:p|.//text:h")))
         paragraphs = el.get_elements(".//text:p|.//text:h")
-        row_sources = [
-            tuple(source_of(p) for p in tr.get_elements(".//text:p|.//text:h"))
-            for tr in el.get_elements(
-                "table:table-row|table:table-header-rows/table:table-row"
-                "|table:table-rows/table:table-row"
-            )
-        ]
         return Block(
             "table", rows=rows, language=self.language_of(paragraphs), row_sources=row_sources
         )

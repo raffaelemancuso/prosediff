@@ -145,3 +145,33 @@ def test_paragraphs_deleted_whole_come_back_rejected(tmp_path):
     ]
     shown = markdown_of(d, "d.odt", "all").strip().split("\n\n")
     assert shown[1].startswith("[Old heading ]{.deletion") and shown[1].endswith("Next.")
+
+
+def test_rows_tracked_whole(tmp_path):
+    """A table row LibreOffice tracks whole (its style's
+    loext:text-changes-only "false", each cell's words a change of their
+    own) goes, deleted and accepted or inserted and rejected; it stays
+    otherwise."""
+    tracked = changes("d1", "deletion", "<text:p>Gone</text:p>") + changes("i1", "insertion")
+    styles = (
+        '<style:style style:name="R" style:family="table-row">'
+        '<style:table-row-properties loext:text-changes-only="false"/></style:style>'
+    )
+
+    def cell(content):
+        return f"<table:table-cell><text:p>{content}</text:p></table:table-cell>"
+
+    d = odt_xml(
+        tmp_path / "r.odt",
+        f"<text:tracked-changes>{tracked}</text:tracked-changes>"
+        "<table:table><table:table-row>" + cell("Kept") + "</table:table-row>"
+        '<table:table-row table:style-name="R">'
+        + cell('<text:change text:change-id="d1"/>')
+        + "</table:table-row>"
+        '<table:table-row table:style-name="R">'
+        + cell('<text:change-start text:change-id="i1"/>New<text:change-end text:change-id="i1"/>')
+        + "</table:table-row></table:table>",
+        styles,
+    ).read_bytes()
+    assert markdown_of(d, "r.odt", "accept").split("\n")[:3] == ["| Kept |", "|---|", "| New |"]
+    assert markdown_of(d, "r.odt", "reject").split("\n")[:3] == ["| Kept |", "|---|", "| Gone |"]

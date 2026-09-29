@@ -261,18 +261,26 @@ class Reader(DocumentReader):
             return Block("item", inlines, language=language, source=source)
         return Block("p", inlines, language=language, source=source)
 
+    def kept_row(self, tr) -> bool:
+        """Whether a table row stays: not one deleted (inserted) as a tracked
+        change whose deletion is accepted (insertion rejected)."""
+        trpr = tr.find(qn("w:trPr"))
+        if trpr is None:
+            return True
+        if trpr.find(qn("w:del")) is not None and not self.keeps("deletion"):
+            return False
+        return trpr.find(qn("w:ins")) is None or self.keeps("insertion")
+
     def table(self, el) -> Block:
-        rows = [
-            [self.cell(tc.iter(qn("w:p"))) for tc in tr.findall(qn("w:tc"))]
-            for tr in el.iter(qn("w:tr"))
-        ]
+        trs = [tr for tr in el.iter(qn("w:tr")) if self.kept_row(tr)]
+        rows = [[self.cell(tc.iter(qn("w:p"))) for tc in tr.findall(qn("w:tc"))] for tr in trs]
         return Block(
             "table",
             rows=rows,
             language=self.language_of(el.iter(qn("w:p"))),
             row_sources=[
                 tuple(self.source(p) for tc in tr.findall(qn("w:tc")) for p in tc.iter(qn("w:p")))
-                for tr in el.iter(qn("w:tr"))
+                for tr in trs
             ],
         )
 
