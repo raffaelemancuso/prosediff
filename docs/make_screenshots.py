@@ -4,9 +4,8 @@
 
 The page is photographed by Playwright's Chromium (uv run playwright
 install chromium, once); the window by Pillow, which needs a desktop: the window
-shows on screen for a moment. The demo text is part of the introduction of
-the lme4 paper (CC BY 3.0), revised with made-up changes, authors and
-comments.
+shows on screen for a moment. The demo text, a short one on free fall, was
+written for it, and so were its revision, authors and comments.
 With --assess (e.g. claude), the AI named really assesses the demo's changes,
 once, its assessment kept in screenshot_assessment.json and used again, the AI
 not asked, until the demo text changes (or with --reassess): the report
@@ -41,7 +40,7 @@ from prosediff.render import assess_comparison
 DOCS = Path(__file__).parent
 # The demo sits in a temporary folder, whose path names the user: the report
 # and the window show this one instead.
-SHOWN_PATH = r"C:\Users\me\papers\lme4"
+SHOWN_PATH = r"C:\Users\me\notes\physics"
 # The AI's assessment of the demo, kept so the screenshots can be taken again
 # without asking it: the demo it assessed named by a hash of its text.
 CACHE = DOCS / "screenshot_assessment.json"
@@ -51,81 +50,55 @@ def note(text: str, author: str, date: str, cid: int) -> str:
     return f'[{text}]{{.comment-start id="{cid}" author="{author}" date="{date}T10:15:00Z"}}'
 
 
-# From Bates, Mächler, Bolker and Walker, "Fitting Linear Mixed-Effects Models
-# Using lme4", Journal of Statistical Software 67(1), 2015,
-# doi:10.18637/jss.v067.i01, CC BY 3.0: part of Section 1, shortened. The second
-# side is a made-up revision whose changes alter the meaning and bring in
-# errors (a claim the paper contradicts, the two packages' roles swapped, the
-# sleep restriction and the unit of time changed, an overclaim, a typo), for
-# the AI to find; its authors and comments are made up too.
-OLD = f"""# Fitting Linear Mixed-Effects Models Using lme4
+# A short text on free fall, written for the demo. The second side is a
+# made-up revision whose changes alter the meaning and bring in errors (the
+# fall made to depend on mass, the unit of g, the half dropped from the law of
+# distance and the example worked from it, air resistance made to fall with
+# speed, a typo), for the AI to find; one comment removed, one added.
+OLD = f"""# Free fall
 
-## Introduction
+## Galileo's law
 
-The lme4 package (Bates, Maechler, Bolker, and Walker 2015) for R (R Core Team 2015) \
-provides functions to fit and analyze linear mixed models, generalized linear mixed \
-models and nonlinear mixed models. In each of these names, the term "mixed" or, more \
-fully, "mixed effects", denotes a model that incorporates both fixed- and random-effects \
-terms in a linear predictor expression from which the conditional mean of the response \
-can be evaluated. In this paper we describe the formulation and representation of \
-linear mixed models. The techniques used for generalized linear and nonlinear mixed \
-models will be described separately, in a future paper.\
-{note("Say which version of lme4 this describes.", "Anna Keller", "2026-09-10", 1)}
+Near the surface of the Earth, a body falling freely, with nothing but its weight \
+acting on it, moves with a constant acceleration g of about 9.81 m/s², whatever its \
+mass. A hammer and a feather dropped together in a vacuum land at the same time, as \
+the astronaut David Scott showed on the Moon in 1971.\
+{note("Say that the Moon's g is about a sixth of the Earth's.", "Anna Keller", "2026-09-10", 1)}
 
-At present, the main alternative to lme4 for mixed modeling in R is the nlme package \
-(Pinheiro, Bates, DebRoy, Sarkar, and R Core Team 2015). The main features \
-distinguishing lme4 from nlme are (1) more efficient linear algebra tools, giving \
-improved performance on large problems; (2) simpler syntax and more efficient \
-implementation for fitting models with crossed random effects; (3) the implementation \
-of profile likelihood confidence intervals on random-effects parameters; and (4) the \
-ability to fit generalized linear mixed models. The main advantage of nlme relative to \
-lme4 is a user interface for fitting models with structure in the residuals (various \
-forms of heteroscedasticity and autocorrelation) and in the random-effects covariance \
-matrices (e.g., compound symmetric models).
+Released from rest, a body falls a distance d = ½ g t² in a time t and reaches a speed \
+v = g t. After 2 seconds a stone dropped from a bridge has fallen about 19.6 m and is \
+moving at about 19.6 m/s. The distance grows with the square of the time: in twice the \
+time, the body falls four times as far.
 
-## Example
+## Air resistance
 
-Throughout our discussion of lme4, we will work with a data set on the average reaction \
-time per day for subjects in a sleep deprivation study (Belenky et al. 2003). On day 0 \
-the subjects had their normal amount of sleep. Starting that night they were restricted \
-to 3 hours of sleep per night. The response variable, Reaction, represents average \
-reaction times in milliseconds (ms) on a series of tests given each Day to each Subject.
+In air the law holds only at low speeds. Air resistance grows with speed until it \
+equals the weight of the body; from then on the body stops accelerating and falls at \
+a constant terminal velocity, about 55 m/s for a skydiver lying flat.\
+{note("Is 55 m/s right for a skydiver?", "Tom Weber", "2026-09-20", 2)}
 """
 
-NEW = f"""# Fitting Linear Mixed-Effects Models Using lme4
+NEW = f"""# Free fall
 
-## Introduction
+## Galileo's law
 
-The lme4 package (Bates, Maechler, Bolker, and Walker 2015) for R (R Core Team 2015) \
-provides functions to fit and analyze linear mixed models, generalized linear mixed \
-models and nonlinear mixed models. In each of these names, the term "mixed" or, more \
-fully, "mixed effects", denotes a model that incorporates both fixed- and random-effects \
-terms in a linear predictor expression from which the conditional mean of the respones \
-can be evaluated. In this paper we describe the formulation and representation of \
-linear, generalized linear and nonlinear mixed models.\
-{note("Say which version of lme4 this describes.", "Anna Keller", "2026-09-10", 7)}
+Near the surface of the Earth, a body falling freely, with nothing but its weight \
+acting on it, moves with a constant accleration g of about 9.81 m/s, and a heavier \
+body falls faster than a lighter one. A hammer and a feather dropped together in a \
+vacuum land at the same time, as the astronaut David Scott showed on the Moon in 1971.\
+{note("Say that the Moon's g is about a sixth of the Earth's.", "Anna Keller", "2026-09-10", 7)}
 
-At present, the main alternative to lme4 for mixed modeling in R is the nlme package \
-(Pinheiro, Bates, DebRoy, Sarkar, and R Core Team 2015). The main features \
-distinguishing lme4 from nlme are (1) less efficient linear algebra tools, giving \
-improved performance on large problems; (2) simpler syntax and more efficient \
-implementation for fitting models with crossed random effects, which lme4 is now the \
-only package able to fit; (3) the implementation of profile likelihood confidence \
-intervals on random-effects parameters; and (4) the ability to fit generalized linear \
-mixed models. The main advantage of lme4 relative to nlme is a user interface for \
-fitting models with structure in the residuals (various forms of heteroscedasticity and \
-autocorrelation) and in the random-effects covariance matrices (e.g., compound symmetric \
-models). The techniques used for generalized linear and nonlinear mixed models will be \
-described separately, in a future paper.
+Released from rest, a body falls a distance d = g t² in a time t and reaches a speed \
+v = g t. The distance grows with the square of the time: in twice the time, the body \
+falls four times as far. After 2 seconds a stone dropped from a bridge has fallen about \
+39.2 m and is moving at about 19.6 m/s.
 
-## Example
+## Air resistance
 
-Throughout our discussion of lme4, we will work with a data set on the average reaction \
-time per day for subjects in a sleep deprivation study (Belenky et al. 2003). On day 0 \
-the subjects had their normal amount of sleep. Starting that night they were restricted \
-to 8 hours of sleep per night. The response variable, Reaction, represents average \
-reaction times in seconds (ms) on a series of tests given each Day to each \
-Subject.{note("Should we cite where the data can be found?", "Tom Weber", "2026-09-24", 8)}
+In air the law holds only at low speeds. Air resistance decreases with speed until it \
+equals the weight of the body; from then on the body stops accelerating and falls at \
+a constant terminal velocity, about 55 m/s for a skydiver lying \
+flat.{note("Add a figure of the speed against time?", "Tom Weber", "2026-09-24", 8)}
 """
 
 
@@ -135,8 +108,8 @@ def demo_repo(root: Path) -> tuple[Path, str]:
         cw.set_value("user", "name", "Anna Keller")
         cw.set_value("user", "email", "anna@example.org")
     for text, message in ((OLD, "First draft"), (NEW, "Revision after Tom's review")):
-        (root / "lme4_paper.md").write_text(text, encoding="utf-8", newline="\n")
-        repo.index.add(["lme4_paper.md"])
+        (root / "free_fall.md").write_text(text, encoding="utf-8", newline="\n")
+        repo.index.add(["free_fall.md"])
         repo.index.commit(message)
     return root, repo.head.commit.hexsha
 
@@ -273,7 +246,7 @@ if __name__ == "__main__":
     written = [DOCS / "screenshot_page.png", DOCS / "screenshot_window.png"]
     # a helper process of the window may still hold the demo folder: left behind
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        repo, _ = demo_repo(Path(tmp) / "lme4")
+        repo, _ = demo_repo(Path(tmp) / "physics")
         page_file = report(repo, args.assess, args.reassess)  # one for every shot
         shoot_page(page_file, written[0])
         shoot_window(repo, written[1])

@@ -1,79 +1,58 @@
 {
-  "demo": "3c13278db5eb62697bceec02ce2f480888cc442c2a676ca0d1b12b7d83e29a7d",
+  "demo": "8e89fe4e6b2bef6c78243ff24940366c6533682b93ccd22067c95f082e554d68",
   "assessment": {
     "backend": "claude",
-    "markdown": "## Verdict\n**Worsens**: Almost every edit makes a correct sentence wrong. It adds a typo, reverses the comparison between lme4 and nlme, and misstates the study design and units. It also leaves the introduction saying the paper covers generalized linear and nonlinear models, then saying they will be covered in a future paper. Tom Weber's new comment asking where the data can be found is not answered.\n\n## What changed\n- **Introduction, paragraph 1:** \"response\" became \"respones\". The scope sentence now says the paper covers linear, generalized linear and nonlinear mixed models. The \"future paper\" sentence was moved out of this paragraph.\n- **Introduction, paragraph 2:** \"more efficient\" became \"less efficient\". A claim was added that lme4 is \"now the only package able to fit\" crossed random effects. \"nlme\" and \"lme4\" were swapped in the \"main advantage\" sentence. The moved \"future paper\" sentence now ends this paragraph.\n- **Example:** Sleep restriction changed from 3 to 8 hours, and \"milliseconds\" became \"seconds\". A reviewer comment was added asking for a citation for the data.\n\n## Improvements\n- Tom Weber's question is a fair one: saying where the data can be found would help readers reproduce the analysis. None of the text changes themselves improve the document.\n\n## Problems to fix\n1. **\"less efficient linear algebra tools, giving improved performance on large problems\"**: this contradicts itself; less efficient tools cannot give better performance. It should say \"more efficient\".\n2. **\"The main advantage of lme4 relative to nlme is a user interface for fitting models with structure in the residuals\"**: this is backwards. nlme is the package with this interface, which is what the original said.\n3. **\"In this paper we describe the formulation and representation of linear, generalized linear and nonlinear mixed models\"**: this contradicts the moved sentence, \"The techniques used for generalized linear and nonlinear mixed models will be described separately, in a future paper.\" That moved sentence also no longer fits where it sits, at the end of a paragraph comparing lme4 with nlme.\n4. **\"restricted to 8 hours of sleep per night\"**: this is wrong. Belenky et al. (2003) restricted subjects to 3 hours. Eight hours is roughly normal sleep, so it isn't a restriction at all.\n5. **\"reaction times in seconds (ms)\"**: the unit word doesn't match the abbreviation \"ms\", and the values are in milliseconds.\n6. **\"which lme4 is now the only package able to fit\"**: this claim has no support and is false. nlme and other packages can also fit crossed random effects.\n7. **\"the conditional mean of the respones\"**: typo; it should be \"response\".\n8. The comment \"Should we cite where the data can be found?\" is not answered. You could note that the data come with lme4 as the `sleepstudy` data set.",
+    "markdown": "## Verdict\n**Worsens.** Moving the sentence about distance growing with the square of the time is a small gain in flow. Every other edit to the text brings in a physics error, a wrong unit or a typo. The section now claims that heavier bodies fall faster, which the very next sentence contradicts. It also gives a wrong distance formula and says that air resistance *decreases* with speed.\n\n## What changed\n- **Galileo's law, paragraph 1:** \"acceleration\" became \"accleration\"; the unit \"m/s²\" became \"m/s\"; \"whatever its mass\" was replaced by \"and a heavier body falls faster than a lighter one\".\n- **Galileo's law, paragraph 2:** \"d = ½ g t²\" became \"d = g t²\"; the worked example's distance went from 19.6 m to 39.2 m; the sentence \"The distance grows with the square of the time…\" moved from the end of the paragraph to just after the formulas.\n- **Air resistance:** \"grows\" became \"decreases\".\n- **Comment:** Tom Weber's comment was rewritten. It used to ask \"Is 55 m/s right for a skydiver?\" and now asks \"Add a figure of the speed against time?\", with a new date. No figure was added.\n\n## Improvements\n- Putting the sentence about the square of the time right after the formulas makes the order more logical: first the rule, then the worked example.\n- The 55 m/s terminal speed was kept. That is right for a skydiver lying flat, so the old comment's question can be answered \"yes\".\n\n## Problems to fix\n1. \"and a heavier body falls faster than a lighter one\" is false: it contradicts Galileo's law, which this section is about. It also contradicts the next sentence about the hammer and the feather. Restore \"whatever its mass\".\n2. \"d = g t²\" is wrong. The distance fallen from rest is d = ½ g t².\n3. \"has fallen about 39.2 m\" follows the wrong formula. With g = 9.81 m/s² and t = 2 s, the distance is ½ × 9.81 × 4 ≈ 19.6 m.\n4. \"Air resistance decreases with speed\" is wrong, and it doesn't fit the rest of the sentence: resistance that falls as speed rises could never catch up with the weight. It should say \"grows\" (or \"increases\").\n5. \"9.81 m/s\" gives the unit of a speed, not an acceleration. It should be \"m/s²\".\n6. \"accleration\" is a spelling mistake for \"acceleration\".\n7. The comment asks for \"a figure of the speed against time\", but no figure was added and no reply was left. The old comment's question about 55 m/s was replaced rather than answered in a reply.",
     "model": "claude-opus-5-5",
-    "seconds": 27.797215399999914,
+    "seconds": 24.275874200000544,
     "error": "",
     "effort": "",
     "context": "document",
     "system": "You are an experienced editor and peer reviewer of academic and professional writing. You are given the changes between two versions of a document as a word diff: [-text-] was removed, {+text+} was added, and {>>Author (date): text<<} is a reviewer's comment; lines that begin with @@ say where a change sits. Unchanged paragraphs are mostly left out of the diff; when the whole new version is given too, check the changes against the rest of it.\n\nAssess the value of the changes as a whole: is the new version better than the old one, and why? Judge the argument, clarity, concision, accuracy and consistency, not personal taste. Check whether the changes introduce errors: claims no longer supported, results misstated, broken or unfinished sentences, placeholders, citations or cross-references left dangling, inconsistent spelling or terms. Say what the comments asked for and whether the changes answer them.\n\nAnswer in Markdown with exactly these sections:\n\n## Verdict\nThe first word, in bold, is one of **Improves**, **Mixed** or **Worsens**; then two or three sentences on why.\n\n## What changed\nA short list of the main changes, grouped by section of the document.\n\n## Improvements\nA short list of what the changes do well.\n\n## Problems to fix\nA numbered list, most serious first, each quoting the words concerned. Write \"None found.\" if there are none.\n\nBe specific and brief. Write in the language the document is written in, unless the instructions of the person asking say otherwise.\n\nThen, after the sections, mark in the text each passage the changes made or touched that has a problem, in one fenced code block of language json holding a list; each item an object with these keys:\n- \"side\": \"new\" for a passage of the new version, \"old\" for text only the old version has (a removal);\n- \"start\": the first 3 to 8 words of the passage, copied exactly from that version, punctuation included;\n- \"end\": its last 3 to 8 words, copied exactly (the same as \"start\" for a short passage);\n- \"problem\": what is wrong with it, in a sentence;\n- \"solution\": the change you propose, in a sentence or as the text to put.\nCopy the words from the text itself, never with the diff's markers ([- -], {+ +}, {>> <<}) nor the notation of a document's formatting. Write [] when nothing is to be marked.",
-    "prompt": "The whole new version of lme4, for reference:\n\n<document>\n# Fitting Linear Mixed-Effects Models Using lme4\n\n## Introduction\n\nThe lme4 package (Bates, Maechler, Bolker, and Walker 2015) for R (R Core Team 2015) provides functions to fit and analyze linear mixed models, generalized linear mixed models and nonlinear mixed models. In each of these names, the term \"mixed\" or, more fully, \"mixed effects\", denotes a model that incorporates both fixed- and random-effects terms in a linear predictor expression from which the conditional mean of the respones can be evaluated. In this paper we describe the formulation and representation of linear, generalized linear and nonlinear mixed models.\n\nAt present, the main alternative to lme4 for mixed modeling in R is the nlme package (Pinheiro, Bates, DebRoy, Sarkar, and R Core Team 2015). The main features distinguishing lme4 from nlme are (1) less efficient linear algebra tools, giving improved performance on large problems; (2) simpler syntax and more efficient implementation for fitting models with crossed random effects, which lme4 is now the only package able to fit; (3) the implementation of profile likelihood confidence intervals on random-effects parameters; and (4) the ability to fit generalized linear mixed models. The main advantage of lme4 relative to nlme is a user interface for fitting models with structure in the residuals (various forms of heteroscedasticity and autocorrelation) and in the random-effects covariance matrices (e.g., compound symmetric models). The techniques used for generalized linear and nonlinear mixed models will be described separately, in a future paper.\n\n## Example\n\nThroughout our discussion of lme4, we will work with a data set on the average reaction time per day for subjects in a sleep deprivation study (Belenky et al. 2003). On day 0 the subjects had their normal amount of sleep. Starting that night they were restricted to 8 hours of sleep per night. The response variable, Reaction, represents average reaction times in seconds (ms) on a series of tests given each Day to each Subject.{>>Tom Weber (2026-09-24 10:15): Should we cite where the data can be found?<<}\n</document>\n\nThe changes made to lme4, as a word diff:\n\n<diff>\n--- a/lme4_paper.md\n+++ b/lme4_paper.md\n@@ -3,2 +3,2 @@\nThe lme4 package (Bates, Maechler, Bolker, and Walker 2015) for R (R Core Team 2015) provides functions to fit and analyze linear mixed models, generalized linear mixed models and nonlinear mixed models. In each of these names, the term \"mixed\" or, more fully, \"mixed effects\", denotes a model that incorporates both fixed- and random-effects terms in a linear predictor expression from which the conditional mean of the [-response-]{+respones+} can be evaluated. In this paper we describe the formulation and representation of linear[- mixed models. The techniques used for-]{+,+} generalized linear and nonlinear mixed models[- will be described separately, in a future paper-].\nAt present, the main alternative to lme4 for mixed modeling in R is the nlme package (Pinheiro, Bates, DebRoy, Sarkar, and R Core Team 2015). The main features distinguishing lme4 from nlme are (1) [-more-]{+less+} efficient linear algebra tools, giving improved performance on large problems; (2) simpler syntax and more efficient implementation for fitting models with crossed random effects{+, which lme4 is now the only package able to fit+}; (3) the implementation of profile likelihood confidence intervals on random-effects parameters; and (4) the ability to fit generalized linear mixed models. The main advantage of [-nlme-]{+lme4+} relative to [-lme4-]{+nlme+} is a user interface for fitting models with structure in the residuals (various forms of heteroscedasticity and autocorrelation) and in the random-effects covariance matrices (e.g., compound symmetric models).{+ The techniques used for generalized linear and nonlinear mixed models will be described separately, in a future paper.+}\n@@ -6 +6 @@\nThroughout our discussion of lme4, we will work with a data set on the average reaction time per day for subjects in a sleep deprivation study (Belenky et al. 2003). On day 0 the subjects had their normal amount of sleep. Starting that night they were restricted to [-3-]{+8+} hours of sleep per night. The response variable, Reaction, represents average reaction times in [-milliseconds-]{+seconds+} (ms) on a series of tests given each Day to each Subject.{+{>>Tom Weber (2026-09-24 10:15): Should we cite where the data can be found?<<}+}\n\n</diff>\n\nAssess the changes as the instructions say.",
+    "prompt": "The whole new version of physics, for reference:\n\n<document>\n# Free fall\n\n## Galileo's law\n\nNear the surface of the Earth, a body falling freely, with nothing but its weight acting on it, moves with a constant accleration g of about 9.81 m/s, and a heavier body falls faster than a lighter one. A hammer and a feather dropped together in a vacuum land at the same time, as the astronaut David Scott showed on the Moon in 1971.\n\nReleased from rest, a body falls a distance d = g t² in a time t and reaches a speed v = g t. The distance grows with the square of the time: in twice the time, the body falls four times as far. After 2 seconds a stone dropped from a bridge has fallen about 39.2 m and is moving at about 19.6 m/s.\n\n## Air resistance\n\nIn air the law holds only at low speeds. Air resistance decreases with speed until it equals the weight of the body; from then on the body stops accelerating and falls at a constant terminal velocity, about 55 m/s for a skydiver lying flat.{>>Tom Weber (2026-09-24 10:15): Add a figure of the speed against time?<<}\n</document>\n\nThe changes made to physics, as a word diff:\n\n<diff>\n--- a/free_fall.md\n+++ b/free_fall.md\n@@ -3,2 +3,2 @@\nNear the surface of the Earth, a body falling freely, with nothing but its weight acting on it, moves with a constant [-acceleration-]{+accleration+} g of about 9.81 m/[-s²-]{+s+}, [-whatever its mass-]{+and a heavier body falls faster than a lighter one+}. A hammer and a feather dropped together in a vacuum land at the same time, as the astronaut David Scott showed on the Moon in 1971.\nReleased from rest, a body falls a distance d = [-½ -]g t² in a time t and reaches a speed v = g t. {+The distance grows with the square of the time: in twice the time, the body falls four times as far. +}After 2 seconds a stone dropped from a bridge has fallen about [-19-]{+39+}.[-6-]{+2+} m and is moving at about 19.6 m/s.[- The distance grows with the square of the time: in twice the time, the body falls four times as far.-]\n@@ -6 +6 @@\nIn air the law holds only at low speeds. Air resistance [-grows-]{+decreases+} with speed until it equals the weight of the body; from then on the body stops accelerating and falls at a constant terminal velocity, about 55 m/s for a skydiver lying flat.{>>Tom Weber (2026-09-[-20-]{+24+} 10:15): [-Is 55 m/s right for-]{+Add+} a [-skydiver-]{+figure of the speed against time+}?<<}\n\n</diff>\n\nAssess the changes as the instructions say.",
     "save_prompt": false,
     "annotations": [
       {
         "side": "new",
-        "start": "conditional mean of the respones",
-        "end": "conditional mean of the respones",
-        "problem": "Typo introduced: 'respones'.",
-        "solution": "conditional mean of the response"
+        "start": "constant accleration g of about 9.81 m/s,",
+        "end": "constant accleration g of about 9.81 m/s,",
+        "problem": "\"accleration\" is misspelled, and m/s is a unit of speed, not of acceleration.",
+        "solution": "constant acceleration g of about 9.81 m/s²,"
       },
       {
         "side": "new",
-        "start": "In this paper we describe the",
-        "end": "generalized linear and nonlinear mixed models.",
-        "problem": "Says the paper covers generalized linear and nonlinear models, which contradicts the later statement that they will be covered in a future paper.",
-        "solution": "In this paper we describe the formulation and representation of linear mixed models. The techniques used for generalized linear and nonlinear mixed models will be described separately, in a future paper."
+        "start": "and a heavier body falls faster",
+        "end": "faster than a lighter one.",
+        "problem": "This is false: in free fall the acceleration doesn't depend on mass, and the next sentence (hammer and feather) says the opposite.",
+        "solution": "whatever its mass."
       },
       {
         "side": "new",
-        "start": "(1) less efficient linear algebra tools,",
-        "end": "giving improved performance on large problems;",
-        "problem": "Self-contradictory: less efficient tools cannot improve performance.",
-        "solution": "(1) more efficient linear algebra tools, giving improved performance on large problems;"
+        "start": "falls a distance d = g t²",
+        "end": "falls a distance d = g t²",
+        "problem": "The formula for distance fallen from rest is missing the factor ½.",
+        "solution": "falls a distance d = ½ g t²"
       },
       {
         "side": "new",
-        "start": "which lme4 is now the only",
-        "end": "the only package able to fit;",
-        "problem": "Unsupported and false claim; other packages, including nlme, can fit crossed random effects.",
-        "solution": "Delete the added clause."
+        "start": "has fallen about 39.2 m",
+        "end": "has fallen about 39.2 m",
+        "problem": "This number follows the wrong formula: ½ × 9.81 × 2² ≈ 19.6 m.",
+        "solution": "has fallen about 19.6 m"
       },
       {
         "side": "new",
-        "start": "The main advantage of lme4",
-        "end": "(e.g., compound symmetric models).",
-        "problem": "Package names are swapped: this interface is an advantage of nlme over lme4.",
-        "solution": "The main advantage of nlme relative to lme4 is a user interface for fitting models with structure in the residuals ..."
+        "start": "Air resistance decreases with speed until",
+        "end": "Air resistance decreases with speed until",
+        "problem": "Air resistance increases with speed; if it decreased, it could never reach the weight and there would be no terminal velocity.",
+        "solution": "Air resistance grows with speed until"
       },
       {
         "side": "new",
-        "start": "The techniques used for generalized linear",
-        "end": "separately, in a future paper.",
-        "problem": "Moved into the nlme comparison paragraph, where it is out of place, and it contradicts the revised scope sentence.",
-        "solution": "Move it back to the end of the first paragraph and restore the scope as linear mixed models only."
-      },
-      {
-        "side": "new",
-        "start": "they were restricted to 8 hours",
-        "end": "they were restricted to 8 hours",
-        "problem": "Wrong: the study restricted sleep to 3 hours, and 8 hours is not a restriction.",
-        "solution": "they were restricted to 3 hours"
-      },
-      {
-        "side": "new",
-        "start": "average reaction times in seconds (ms)",
-        "end": "average reaction times in seconds (ms)",
-        "problem": "The unit word does not match the abbreviation 'ms', and the data are in milliseconds.",
-        "solution": "average reaction times in milliseconds (ms)"
-      },
-      {
-        "side": "new",
-        "start": "on a series of tests given",
-        "end": "each Day to each Subject.",
-        "problem": "The reviewer's question about where the data can be found is not answered.",
-        "solution": "Add: 'The data are available in lme4 as the sleepstudy data set.'"
+        "start": "about 55 m/s for a",
+        "end": "a skydiver lying flat.",
+        "problem": "The reviewer's request for a speed-against-time figure hasn't been dealt with.",
+        "solution": "Add a figure of speed against time that levels off at the terminal velocity, or reply to the comment explaining why there isn't one."
       }
     ],
     "kind": "value"

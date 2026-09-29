@@ -47,7 +47,7 @@ change a tracked change, to accept or reject one by one in Word or
 LibreOffice, as if Track Changes had been on all along ([Tracked
 changes](#tracked-changes)).
 
-![An HTML report made by prosediff: the AI's verdict in the top bar; below, two versions of the introduction of the lme4 paper side by side, the second a revision with errors in it, changed words highlighted, and beside them a margin of cards for the comments and the problems the AI marked, one of them pinned, its passage highlighted in the text](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
+![An HTML report made by prosediff: the AI's verdict in the top bar; below, two versions of a short text on free fall side by side, the second a revision with errors in it, changed words highlighted, and beside them a margin of cards for the comments and the problems the AI marked, one of them pinned, its passage highlighted in the text](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 ## Why prosediff
 
@@ -808,12 +808,3 @@ side-by-side HTML view of a diff it carries over from code to prose.
 
 prosediff was written with the help of [Claude Code](https://claude.com/claude-code),
 Anthropic's AI coding assistant.
-
-The screenshots show part of the introduction of Douglas Bates, Martin
-Mächler, Benjamin M. Bolker and Steven C. Walker, "Fitting Linear
-Mixed-Effects Models Using lme4", *Journal of Statistical Software* 67(1),
-2015, [doi:10.18637/jss.v067.i01](https://doi.org/10.18637/jss.v067.i01),
-licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
-The text is shortened, and its second version is a revision made up for the
-demo: its changes, the errors they bring in, and the comments and their
-authors are not the paper's, nor its authors'.
