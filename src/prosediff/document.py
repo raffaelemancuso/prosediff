@@ -553,7 +553,8 @@ def lines(doc: Document, comment: Callable[[CommentMark | CommentEnd], str]) -> 
     text, becomes in the text: a placeholder, the Markdown pandoc writes for
     it, or nothing."""
     out = []
-    for block in doc.blocks + doc.notes:
+    moved = ends_moved_back(doc.blocks)
+    for n, block in enumerate(doc.blocks + doc.notes):
         lang = block.language or ""
         if block.kind == "table":
             for n, row in enumerate(block.rows):
@@ -571,6 +572,30 @@ def lines(doc: Document, comment: Callable[[CommentMark | CommentEnd], str]) -> 
         elif block.kind == "note":
             b.add(f"[^{block.number}]: ")
         styles = frozenset({f"h{min(block.level, 6)}"}) if block.kind == "heading" else frozenset()
-        _add(b, block.inlines, styles, comment)
+        skip, ends = moved.get(n, (0, []))
+        _add(b, block.inlines[skip:], styles, comment)
+        _add(b, ends, frozenset(), comment)
         out.append(b.line(lang, block.kind, block.source))
     return out
+
+
+def ends_moved_back(blocks: list[Block]) -> dict[int, tuple[int, list]]:
+    """The comment ends a paragraph starts with, before any of its text, put
+    at the end of the paragraph before: Word ends the text of a comment on a
+    whole paragraph after its paragraph mark, where the next one starts,
+    which would make that paragraph look commented, and shown when the
+    comment is added or removed. For each block, how many inlines it drops
+    from its start and the ends it takes at its end."""
+    moved: dict[int, tuple[int, list]] = {}
+    for n in range(1, len(blocks)):
+        block, before = blocks[n], blocks[n - 1]
+        if block.kind == "table" or before.kind == "table":
+            continue
+        k = 0
+        while k < len(block.inlines) and isinstance(block.inlines[k], CommentEnd):
+            k += 1
+        if k:
+            moved[n] = (k, moved.get(n, (0, []))[1])
+            skip, ends = moved.get(n - 1, (0, []))
+            moved[n - 1] = (skip, ends + block.inlines[:k])
+    return moved

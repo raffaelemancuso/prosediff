@@ -196,3 +196,20 @@ def test_unified_diff_of_documents(tmp_path):
     text = unified(compare_paths(old, new))
     assert text.startswith("--- a/old.docx\n+++ b/new.docx\n@@")
     assert "-Old.\n+**New**.\n" in text
+
+
+def test_a_comment_ending_where_a_paragraph_starts_ends_before_it():
+    """Word ends the text of a comment on a whole paragraph after its mark,
+    where the next paragraph starts: that end is put back at the end of the
+    paragraph the text is in, so the next one does not look commented."""
+    from prosediff.document import Block, CommentEnd, CommentMark, Document, Text
+
+    doc = Document(
+        blocks=[
+            Block("p", [Text("First. "), CommentMark("1", "A", "Cut it."), Text("Second.")]),
+            Block("p", [CommentEnd("1"), Text("Third.")]),
+            Block("p", [Text("Fourth.")]),
+        ]
+    )
+    shown = lines(doc, lambda i: "<" if isinstance(i, CommentMark) else ">")
+    assert list(shown) == ["First. <Second.>", "Third.", "Fourth."]
