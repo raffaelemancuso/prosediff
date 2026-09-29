@@ -548,6 +548,25 @@ def test_format_renames_the_output(root):
         assert app.output.get() == kept
 
 
+def test_tracked_formats_greyed_for_other_files(root):
+    """Word, tracked and OpenDocument, tracked are greyed out when two files
+    are compared that are not both of their kind; a repository or folders
+    keep them, their files known only once compared."""
+    app = App(root, Settings(mode="files", old="a.md", new="b.docx"))
+
+    def enabled(fmt):
+        return not app.format_buttons[fmt].instate(["disabled"])
+
+    assert not enabled("docx") and not enabled("odt") and enabled("html")
+    app.old.set("C:/p/a.DOCX")
+    assert enabled("docx") and not enabled("odt")
+    app.old.set("a.odt")
+    app.new.set("b.odt")
+    assert enabled("odt") and not enabled("docx")
+    app.mode.set("git")
+    assert enabled("docx") and enabled("odt")
+
+
 def test_mode_switch(root):
     """The segmented button shows the fields of one source at a time, and
     what it shows is what is compared."""

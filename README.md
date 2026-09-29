@@ -206,7 +206,8 @@ commit's author (else `prosediff`); `--format odt` ("OpenDocument,
 tracked") does the same for two OpenDocument texts, for LibreOffice
 Writer. It is what Word's *Compare* and LibreOffice's *Compare Document*
 make, from prosediff's own pairing of paragraphs and words; neither file
-needs tracked changes of its own.
+needs tracked changes of its own. In the window, comparing two files, the two
+formats are greyed out unless both files are of their kind.
 
 Everything the new file holds is kept as it is: its styles, page setup,
 sections, headers and footers, tables, images, fields, footnotes and
@@ -380,7 +381,7 @@ Cygwin, Git Bash, Linux, macOS) start the same window, the installed one when
 there is one, else from the project; a batch file itself always shows a
 console for a moment.
 
-![The prosediff window: a git repository with base and target commits chosen from lists, the options in two cards, the output, and the AI assessment card with its AI, model and effort](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
+![The prosediff window: a git repository with base and target commits chosen from lists, the comparison options in one card, the output, and the AI assessment card with its AI, model and effort](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
 
 What is compared is chosen with the segmented button at the top, which
 shows the fields of one of three sources:
@@ -394,23 +395,21 @@ shows the fields of one of three sources:
 - **Folders**: two folders, of which only the files matching the patterns
   of "Only" (`--include`) are compared.
 
-The options sit in two cards, each explained by a tooltip (rest the pointer
-on it, or on its ⓘ; in a drop-down list, on an item to learn what it
-means):
+The options that change what the comparison finds sit in one card,
+**Comparison**, each explained by a tooltip (rest the pointer on it, or on
+its ⓘ; in a drop-down list, on an item to learn what it means): Word and
+OpenDocument tracked changes, the comments (markers, text or none), the
+document language (`default`: the one Word and OpenDocument files mark, the
+others guessed; `document`; `guess`, guessed from each file; or a code such
+as `it`), which splits sentences and hyphenates lines, and a switch to
+ignore whitespace.
 
-- **What is compared**: Word and OpenDocument tracked changes, how prose
-  is compared ("Compare by": paragraphs, sentences or both, the default),
-  the document language (`default`: the one Word and OpenDocument files
-  mark, the others guessed; `document`; `guess`, guessed from each file;
-  or a code such as `it`), which splits sentences and hyphenates lines, a
-  switch to ignore whitespace, and whether passages moved within or
-  between paragraphs are followed too ("Moved passages").
-- **How it is shown**: the comments (markers, text or none), comments
-  without text, context lines or whole files, and the alignment of wrapped
-  lines.
-
-Below them, **Advanced settings** (hidden until clicked) holds the settings
-few need to change: how alike a paragraph and a sentence must stay to
+Below it, **Advanced settings** (hidden until clicked) holds the rest. Its
+**Report** card: how prose is compared ("Compare by": paragraphs,
+sentences or both, the default), context lines or whole files, the
+alignment of wrapped lines, whether passages moved within or between
+paragraphs are followed too ("Moved passages"), and comments without text.
+Then the settings few need to change: how alike a paragraph and a sentence must stay to
 count as moved and how that is measured (a threshold and an algorithm for
 each, "Moved paragraphs" and "Moved sentences"); how moved passages are
 told from chance likeness, the same as the `--passage-*` options, each

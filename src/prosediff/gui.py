@@ -2,10 +2,11 @@
 
 What is compared is chosen with a segmented button: a git repository (base
 and target picked among its latest commits, the working tree and the index,
-or typed as any ref), two files, or two folders. The options, those of the
-command line that matter when reading a diff, sit in two cards (what is
-compared, how it is shown), each explained by a tooltip; the output, an HTML
-report or a unified or word diff, in a third. The comparison runs in a
+or typed as any ref), two files, or two folders. The options that change
+what the comparison finds sit in one card, each explained by a tooltip; how
+the report shows it, with the settings few change, under Advanced settings;
+the output (an HTML report, a unified or word diff, or tracked changes) in
+a card of its own. The comparison runs in a
 background thread, a progress bar running meanwhile, so the window stays
 responsive; a notification tells when it is done. The choices are
 remembered for the next time only when asked (Save options), and Reset to
@@ -642,16 +643,12 @@ class App:
         self.build_git_side(self.sides["git"])
         self.build_path_sides(self.sides["files"], self.sides["folders"])
 
-        # Options, in two cards: what is compared, and how it is shown
-        cards = ttk.Frame(page)
-        cards.pack(fill="x", pady=(10, 0))
-        cards.columnconfigure((0, 1), weight=1, uniform="card")
-        compared = ttk.Labelframe(cards, text="What is compared", padding=(10, 8))
-        compared.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        shown = ttk.Labelframe(cards, text="How it is shown", padding=(10, 8))
-        shown.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        # The options that change what the comparison finds, in one card; how
+        # the report shows it goes with the advanced settings
+        compared = ttk.Labelframe(page, text="Comparison", padding=(10, 8))
+        compared.pack(fill="x", pady=(10, 0))
+        compared.columnconfigure((0, 1), weight=1, uniform="half")
         self.build_compared_card(compared)
-        self.build_shown_card(shown)
         self.build_advanced(page)
         self.build_output(page)
         self.build_assessment(page)
@@ -736,8 +733,12 @@ class App:
             "(its path within the folder for a pattern with a /); empty: every file.",
         )
 
-    def build_compared_card(self, compared: ttk.Labelframe) -> None:
-        """The options of what is compared."""
+    def build_compared_card(self, card: ttk.Labelframe) -> None:
+        """The options that change what the comparison finds, in two columns."""
+        compared = ttk.Frame(card)
+        compared.grid(row=0, column=0, sticky="nw")
+        right = ttk.Frame(card)
+        right.grid(row=0, column=1, sticky="nw", padx=(18, 0))
         self.docx = tk.StringVar(value=DOCX_CHANGE_LABELS.get(self.s.docx_changes, "accept all"))
         field_row(
             compared,
@@ -756,6 +757,56 @@ class App:
             "Word and OpenDocument tracked changes: accept them all, reject them all, or "
             "show them, as Word does.",
         )
+        self.language = tk.StringVar(value=self.s.language)
+        # any code can be typed; the list holds the common ones
+        field_row(
+            compared,
+            1,
+            "Language",
+            item_hints(
+                ttk.Combobox(compared, textvariable=self.language, values=LANGUAGES, width=12),
+                lambda code: LANGUAGE_HINTS.get(code) or language_name(code),
+            ),
+            "Splits sentences and hyphenates lines. default: the language Word and "
+            "OpenDocument files are marked with, else guessed; or a code such as it.",
+        )
+        self.comments = tk.StringVar(
+            value=self.s.comments if self.s.comments in COMMENT_MODES else "markers"
+        )
+        field_row(
+            right,
+            0,
+            "Comments",
+            item_hints(
+                ttk.Combobox(
+                    right,
+                    textvariable=self.comments,
+                    values=COMMENT_MODES,
+                    state="readonly",
+                    width=12,
+                ),
+                COMMENT_HINTS.get,
+            ),
+            "markers: only the comments added or removed, set apart (a marker and a panel in "
+            "the HTML report, CriticMarkup in the diffs); text: compared as text; none: left "
+            "out.",
+        )
+        self.comments.trace_add("write", lambda *_: self.update_empty_comments())
+        self.ignore_ws = tk.BooleanVar(value=self.s.ignore_whitespace)
+        switch_row(
+            right,
+            1,
+            "Ignore whitespace",
+            self.ignore_ws,
+            "Lines that differ only in spacing are the same, as git diff -w.",
+        )
+
+    def build_report_card(self, card: ttk.Labelframe) -> None:
+        """The options of how the report shows the comparison, in two columns."""
+        compared = ttk.Frame(card)
+        compared.grid(row=0, column=0, sticky="nw")
+        shown = ttk.Frame(card)
+        shown.grid(row=0, column=1, sticky="nw", padx=(18, 0))
         self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "both")
         splits = ttk.Frame(compared)
         split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
@@ -770,101 +821,55 @@ class App:
             ).pack(side="left")
         field_row(
             compared,
-            1,
+            0,
             "Compare by",
             splits,
             "How prose is compared: paragraph by paragraph, sentence by sentence (a sentence "
             "moved between paragraphs is recognised), or both, in one HTML report whose "
             "toolbar switches between the two.",
         )
-        self.language = tk.StringVar(value=self.s.language)
-        # any code can be typed; the list holds the common ones
+        self.context = tk.StringVar(value=self.s.context_lines)
+        # "auto": 0 around the changes of Markdown and Word, 3 of other files
+        field_row(
+            compared,
+            1,
+            "Context lines",
+            ttk.Spinbox(compared, values=("auto", *range(51)), textvariable=self.context, width=10),
+            "Unchanged lines shown around each change. auto: none in Markdown files and Word "
+            "documents, whose lines are paragraphs; 3 in the others.",
+        )
+        self.align = tk.StringVar(value=self.s.align)
         field_row(
             compared,
             2,
-            "Language",
+            "Wrapped lines",
             item_hints(
-                ttk.Combobox(compared, textvariable=self.language, values=LANGUAGES, width=12),
-                lambda code: LANGUAGE_HINTS.get(code) or language_name(code),
+                ttk.Combobox(
+                    compared, textvariable=self.align, values=ALIGNMENTS, state="readonly", width=12
+                ),
+                ALIGNMENT_HINTS.get,
             ),
-            "Splits sentences and hyphenates lines. default: the language Word and "
-            "OpenDocument files are marked with, else guessed; or a code such as it.",
-        )
-        self.ignore_ws = tk.BooleanVar(value=self.s.ignore_whitespace)
-        switch_row(
-            compared,
-            3,
-            "Ignore whitespace",
-            self.ignore_ws,
-            "Lines that differ only in spacing are the same, as git diff -w.",
+            "How long lines that wrap are aligned in the HTML report.",
         )
         self.move_passages = tk.BooleanVar(value=self.s.move_passages)
         switch_row(
-            compared,
-            4,
+            shown,
+            0,
             "Moved passages",
             self.move_passages,
             "Also follow the passages moved within a paragraph or between two: words removed "
             "in one place and added in another, as alike as the moved paragraphs (sentences) "
             "must be, are shown as moved, not as a deletion and an unrelated insertion.",
         )
-
-    def build_shown_card(self, shown: ttk.Labelframe) -> None:
-        """The options of how it is shown."""
-        self.comments = tk.StringVar(
-            value=self.s.comments if self.s.comments in COMMENT_MODES else "markers"
-        )
-        field_row(
-            shown,
-            0,
-            "Comments",
-            item_hints(
-                ttk.Combobox(
-                    shown,
-                    textvariable=self.comments,
-                    values=COMMENT_MODES,
-                    state="readonly",
-                    width=12,
-                ),
-                COMMENT_HINTS.get,
-            ),
-            "markers: only the comments added or removed, set apart (a marker and a panel in "
-            "the HTML report, CriticMarkup in the diffs); text: compared as text; none: left "
-            "out.",
-        )
-        self.comments.trace_add("write", lambda *_: self.update_empty_comments())
+        self.full = tk.BooleanVar(value=self.s.full)
+        switch_row(shown, 1, "Whole files", self.full, "Show every line of each changed file.")
         self.empty_comments = tk.BooleanVar(value=self.s.empty_comments)
         self.empty_comments_box = switch_row(
             shown,
-            1,
+            2,
             "Comments without text",
             self.empty_comments,
             "Show the comments that have no text too (with markers only).",
-        )
-        self.context = tk.StringVar(value=self.s.context_lines)
-        # "auto": 0 around the changes of Markdown and Word, 3 of other files
-        field_row(
-            shown,
-            2,
-            "Context lines",
-            ttk.Spinbox(shown, values=("auto", *range(51)), textvariable=self.context, width=10),
-            "Unchanged lines shown around each change. auto: none in Markdown files and Word "
-            "documents, whose lines are paragraphs; 3 in the others.",
-        )
-        self.full = tk.BooleanVar(value=self.s.full)
-        switch_row(shown, 3, "Whole files", self.full, "Show every line of each changed file.")
-        self.align = tk.StringVar(value=self.s.align)
-        field_row(
-            shown,
-            4,
-            "Wrapped lines",
-            item_hints(
-                ttk.Combobox(
-                    shown, textvariable=self.align, values=ALIGNMENTS, state="readonly", width=12
-                ),
-                ALIGNMENT_HINTS.get,
-            ),
-            "How long lines that wrap are aligned in the HTML report.",
         )
 
     def build_advanced(self, page: ttk.Frame) -> None:
@@ -873,20 +878,31 @@ class App:
         # and sentences must be, how moved passages are told from chance
         # likeness (one field for each of MovedPassageSettings), and the
         # encoding of text files
+        self.advanced_row = ttk.Frame(page)
+        self.advanced_row.pack(fill="x", pady=(8, 0))
         self.advanced_button = ttk.Button(
-            page,
+            self.advanced_row,
             text="▸ Advanced settings",
             command=self.toggle_advanced,
             bootstyle="link",
             padding=(0, 4),
         )
-        self.advanced_button.pack(anchor="w", pady=(8, 0))
+        self.advanced_button.pack(side="left")
         hint(self.advanced_button, "Show or hide the settings few need to change.")
+        ttk.Label(
+            self.advanced_row,
+            text="how the report shows it, moved passages, encoding…",
+            bootstyle="secondary",
+        ).pack(side="left", padx=(8, 0))
         self.advanced = ttk.Frame(page)
+        report = ttk.Labelframe(self.advanced, text="Report", padding=(10, 8))
+        report.pack(fill="x")
+        report.columnconfigure((0, 1), weight=1, uniform="half")
+        self.build_report_card(report)
         moves = ttk.Labelframe(
             self.advanced, text="Moved paragraphs and sentences", padding=(10, 8)
         )
-        moves.pack(fill="x")
+        moves.pack(fill="x", pady=(8, 0))
         similarity, algorithm = moves_of(self.s, False).resolved(False)
         self.move_similarity = tk.DoubleVar(value=similarity)
         self.move_algorithm = tk.StringVar(value=algorithm)
@@ -961,7 +977,8 @@ class App:
         out.columnconfigure(1, weight=1)
         ttk.Label(out, text="Format").grid(row=0, column=0, sticky="w", **PAD)
         formats = ttk.Frame(out)
-        formats.grid(row=0, column=1, columnspan=2, sticky="w", **PAD)
+        formats.grid(row=0, column=1, columnspan=3, sticky="w", **PAD)
+        self.format_buttons: dict[str, ttk.Radiobutton] = {}
         self.output_format = tk.StringVar(
             value=self.s.output_format if self.s.output_format in FORMATS else "html"
         )
@@ -974,13 +991,15 @@ class App:
                 "Word, tracked",
                 "Two Word documents compared into a copy of the new one, everything in it "
                 "kept, each change since the old one a tracked change to accept or reject "
-                "in Word. Two Word documents only; paragraph by paragraph.",
+                "in Word. Two Word documents only (greyed out for other files); paragraph "
+                "by paragraph.",
             ),
             (
                 "odt",
                 "OpenDocument, tracked",
                 "Two OpenDocument texts compared into a copy of the new one, the same way, "
-                "for LibreOffice Writer. Two OpenDocument texts only.",
+                "for LibreOffice Writer. Two OpenDocument texts only (greyed out for other "
+                "files).",
             ),
         ):
             button = ttk.Radiobutton(
@@ -994,6 +1013,7 @@ class App:
             )
             button.pack(side="left")
             hint(button, tip)
+            self.format_buttons[value] = button
         ttk.Label(out, text="Save to").grid(row=1, column=0, sticky="w", **PAD)
         self.output = tk.StringVar(value=self.s.output)
         output_entry = ttk.Entry(out, textvariable=self.output)
@@ -1018,7 +1038,12 @@ class App:
         save.grid(row=1, column=2, **PAD)
         hint(save, "Choose where to save it")
         self.open_page = tk.BooleanVar(value=self.s.open_page)
-        toggle(out, "Open when done", self.open_page).grid(row=2, column=1, sticky="w", **PAD)
+        toggle(out, "Open when done", self.open_page).grid(
+            row=1, column=3, sticky="w", padx=(12, 6), pady=6
+        )
+        for var in (self.mode, self.old, self.new):
+            var.trace_add("write", lambda *_: self.update_tracked_formats())
+        self.update_tracked_formats()
 
     def build_assessment(self, page: ttk.Frame) -> None:
         """The AI assessment: the AI, its model and effort, among those it
@@ -1144,40 +1169,44 @@ class App:
         self.assess_ai_writing = tk.BooleanVar(value=self.s.assess_ai_writing)
         switches = ttk.Frame(card)
         switches.grid(row=3, column=1, columnspan=2, sticky="w", **PAD)
-        for text, var, tip in (
+        for k, (text, var, tip) in enumerate(
             (
-                "Preview before sending",
-                self.assess_preview,
-                "First write the report without the assessment and open it, then ask "
-                "whether to send the changes to the AI: to check what it will read "
-                "before it reads it. No: the report stays as it is, unassessed.",
-            ),
-            (
-                "Mark individual changes",
-                self.assess_annotate,
-                "Have the AI mark each problem in the text, from its first words to its "
-                "last, with what is wrong and the change it proposes: a numbered badge "
-                "before each in the HTML report, its passage highlighted when clicked, and "
-                "listed in an AI marks panel.",
-            ),
-            (
-                "Check for AI writing",
-                self.assess_ai_writing,
-                "Also ask the AI, apart, whether the text the changes added reads as written by "
-                "an AI: a second assessment, its verdict (likely, possibly or unlikely) in the "
-                "report's top bar. An indication, not a proof: careful writers show the same "
-                "signs, and writers in a second language are often taken for an AI wrongly.",
-            ),
-            (
-                "Save AI prompt",
-                self.assess_save_prompt,
-                "Also put the exact text the AI was sent (its system prompt and its "
-                "message) in the HTML report, in a closed panel at its end: to see what "
-                "it read.",
-            ),
+                (
+                    "Preview before sending",
+                    self.assess_preview,
+                    "First write the report without the assessment and open it, then ask "
+                    "whether to send the changes to the AI: to check what it will read "
+                    "before it reads it. No: the report stays as it is, unassessed.",
+                ),
+                (
+                    "Mark individual changes",
+                    self.assess_annotate,
+                    "Have the AI mark each problem in the text, from its first words to its "
+                    "last, with what is wrong and the change it proposes: a numbered badge "
+                    "before each in the HTML report, its passage highlighted when clicked, and "
+                    "a card in the margin beside it.",
+                ),
+                (
+                    "Check for AI writing",
+                    self.assess_ai_writing,
+                    "Also ask the AI, apart, whether the text the changes added reads as "
+                    "written by an AI: a second assessment, its verdict (likely, possibly or "
+                    "unlikely) in the report's top bar. An indication, not a proof: careful "
+                    "writers show the same signs, and writers in a second language are often "
+                    "taken for an AI wrongly.",
+                ),
+                (
+                    "Save AI prompt",
+                    self.assess_save_prompt,
+                    "Also put the exact text the AI was sent (its system prompt and its "
+                    "message) in the HTML report, in a closed panel at its end: to see what "
+                    "it read.",
+                ),
+            )
         ):
             switch = toggle(switches, text, var)
-            switch.pack(side="left", padx=(0, 18))
+            # two rows of two
+            switch.grid(row=k // 2, column=k % 2, sticky="w", padx=(0, 24), pady=3)
             hint(switch, tip)
             self.ai_switches.append(switch)
         self.assess_ai.trace_add("write", lambda *_: self.update_ai_switches())
@@ -1455,6 +1484,17 @@ class App:
         self.auto_output = self.sides_page()
         self.output.set(self.auto_output)
 
+    def update_tracked_formats(self) -> None:
+        """Word, tracked and OpenDocument, tracked greyed out when two files
+        are compared that are not both of their kind; a repository or folders
+        are only known once compared."""
+        files = self.mode.get() == "files"
+        for fmt, suffix in TRACKED_FORMATS.items():
+            fits = not files or all(
+                Path(v.get().strip()).suffix.lower() == suffix for v in (self.old, self.new)
+            )
+            self.format_buttons[fmt].state(["!disabled"] if fits else ["disabled"])
+
     def update_empty_comments(self) -> None:
         """Comments without text are a choice of markers only."""
         markers = self.comments.get() == "markers"
@@ -1602,7 +1642,7 @@ class App:
             self.advanced.pack_forget()
             self.advanced_button.configure(text="▸ Advanced settings")
         else:
-            self.advanced.pack(fill="x", pady=(4, 0), after=self.advanced_button)
+            self.advanced.pack(fill="x", pady=(4, 0), after=self.advanced_row)
             self.advanced_button.configure(text="▾ Advanced settings")
 
     def passage_choices(self) -> dict[str, float]:
