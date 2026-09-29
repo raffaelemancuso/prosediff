@@ -70,7 +70,7 @@ def test_to_markdown(tmp_path, capsysbinary):
     d = docx(tmp_path / "a.docx", [[("run", "Kept "), ("del", "gone"), ("ins", "new")]])
     assert main(["--to-markdown", str(d)]) == 0
     assert capsysbinary.readouterr().out == b"Kept new\n"
-    assert main(["--to-markdown", str(d), "--docx-changes", "reject"]) == 0
+    assert main(["--to-markdown", str(d), "--docx-changes", "reject-all"]) == 0
     assert capsysbinary.readouterr().out == b"Kept gone\n"
     # git may hand over a file without its extension: the content tells
     o = odt_xml(tmp_path / "b.odt", "<text:p>Città.</text:p>")

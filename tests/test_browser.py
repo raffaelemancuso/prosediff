@@ -14,23 +14,12 @@ sync_api = pytest.importorskip("playwright.sync_api")
 NOTE = '[Old remark.]{.comment-start id="1" author="Anna" date="2026-09-23T10:15:00Z"}'
 
 
-# The panels, closed until opened.
-PANELS = "details.comments-panel, details.assessment"
-
-
-def open_panels(page):
-    """Open the panels of the report shown in page, as a click on each would."""
-    page.evaluate(f"document.querySelectorAll('{PANELS}').forEach(d => {{ d.open = true; }})")
-
-
 def open_report(browser, tmp_path, comparison, **render_options):
-    """The HTML report of comparison, opened in a new page of browser, its
-    panels opened."""
+    """The HTML report of comparison, opened in a new page of browser."""
     out = tmp_path / "page.html"
     out.write_text(render(comparison, **render_options), encoding="utf-8")
     page = browser.new_context().new_page()
     page.goto(out.as_uri())
-    open_panels(page)
     return page
 
 
@@ -72,25 +61,33 @@ def page(browser, page_file):
     context = browser.new_context()
     p = context.new_page()
     p.goto(page_file.as_uri())
-    open_panels(p)
     yield p
     context.close()
 
 
-def test_panels_start_closed(browser, page_file):
-    """The comments panel, as the AI's, starts closed."""
-    context = browser.new_context()
-    p = context.new_page()
-    p.goto(page_file.as_uri())
-    assert p.locator("details.comments-panel").count() == 1
-    assert p.evaluate(f"[...document.querySelectorAll('{PANELS}')].every(d => !d.open)")
-    context.close()
+def test_the_margin_holds_a_card_for_each_comment(page):
+    """Beside the row it is in, a card for each comment: whether it is new,
+    who wrote it and when, and what it says; the top bar counts them."""
+    card = page.locator(".card")
+    assert card.count() == 1
+    assert card.locator(".chip").inner_text() == "new comment"
+    assert card.locator(".who").inner_text() == "Anna"
+    assert card.locator(".when").inner_text() == "2026-09-23 10:15"
+    assert "Old remark." in card.locator(".body").inner_text()
+    row = card.locator("xpath=ancestor::tr")
+    assert "Line 20" in row.inner_text() and row.is_visible()
+    # beside its row, level with it
+    assert abs(card.bounding_box()["y"] - row.bounding_box()["y"]) < 12
+    assert page.locator(".comment-counter").inner_text() == "1 comment"
+    # comments are no tooltips: the card says it all
+    page.locator("td.code .comment").first.hover()
+    assert not page.locator("#tip").is_visible()
 
 
 def test_printed_page(browser, page_file):
-    """Printed, even from a browser in dark mode: light colours, the toolbar
-    left out, the comments written out, quiet folds, the column headings of
-    each file repeated on every page."""
+    """Printed, even from a browser in dark mode: light colours, the top bar
+    left out, the cards beside their rows, quiet folds, the column headings
+    of each file repeated on every page."""
     context = browser.new_context(color_scheme="dark")
     p = context.new_page()
     p.goto(page_file.as_uri())
@@ -107,7 +104,7 @@ def test_printed_page(browser, page_file):
     assert style(".toolbar", "display") == "none"
     assert style("thead.print", "display") == "table-header-group"
     assert style(".expand .verb", "display") == "none"
-    assert "Anna" in style(".comment", "content", "'::after'")
+    assert style(".card", "display") == "block" and style(".stack", "position") == "static"
     assert style("tr.skip td", "background-color") == "rgba(0, 0, 0, 0)"
     context.close()
 
@@ -142,7 +139,7 @@ def test_unchanged_lines_and_a_file_open_and_close(page):
     page.locator(".expand").first.click()
     assert page.locator("tbody[hidden]").count() == folds - 1
     assert page.get_by_text("Line 10 of the text.").first.is_visible()
-    assert page.locator("[data-files], nav").count() == 0
+    assert page.locator('[data-files], nav[aria-label="Changed files"]').count() == 0
     page.click("details.file > summary")
     assert not page.evaluate("document.querySelector('details.file').open")
     page.keyboard.press("n")
@@ -174,20 +171,13 @@ def test_view_menu_opens_and_closes(page):
     button.click()
     assert panel.is_visible() and button.get_attribute("aria-expanded") == "true"
     names = panel.locator(".label").all_inner_texts()
-    assert names == [
-        "Formatted",
-        "Change highlights",
-        "Formatting changes",
-        "Comments expanded",
-        "Comment tooltips",
-        "Paragraph spacing",
-    ]
-    page.click('[data-toggle="cexpand"]')
-    assert panel.is_visible() and "cexpand" in page.evaluate("document.body.className")
+    assert names == ["Formatted", "Change highlights", "Formatting changes", "Paragraph spacing"]
+    page.click('[data-toggle="formats"]')
+    assert panel.is_visible() and "formats" not in page.evaluate("document.body.className")
     page.keyboard.press("Escape")
     assert not panel.is_visible() and button.get_attribute("aria-expanded") == "false"
     button.click()
-    page.mouse.click(5, 5)
+    page.mouse.click(5, 300)
     assert not panel.is_visible()
 
 
@@ -227,45 +217,34 @@ def test_change_highlights_switched_off(browser, tmp_path):
 
 
 def test_views_are_remembered(page):
-    """One column (u), raw Markdown (f) and comments expanded (c): each
-    switched on by its key, remembered across a reload, switched off by its
-    button. An edited line is never tinted as a whole: only its changed
-    words are."""
-    after = "e => getComputedStyle(e, '::after').content"
+    """One column (u) and raw Markdown (f): each switched on by its key,
+    remembered across a reload, switched off by its button. An edited line
+    is never tinted as a whole: only its changed words are."""
 
     def edited_line_colour():
         cell = page.locator("tr.replace td.right").first
         return cell.evaluate("e => getComputedStyle(e).getPropertyValue('--tint').trim()")
 
-    def comment():
-        return page.locator(".comment").first.evaluate(after)
-
-    # the defaults: two columns, formatted, comments as markers
+    # the defaults: two columns, formatted
     assert "unified" not in page.evaluate("document.body.className")
     assert not page.locator(".s-syn").first.is_visible()
     assert page.get_attribute('[data-toggle="formatted"]', "aria-pressed") == "true"
     assert page.locator(".s-strong").first.evaluate("e => getComputedStyle(e).fontWeight") == "700"
     assert edited_line_colour() == "transparent"
-    assert comment() in ("none", "normal")
-    for key in "ufct":  # t, the tint of before, does nothing
+    for key in "uft":  # t, the tint of before, does nothing
         page.keyboard.press(key)
-    # an unchanged row shows its new side only
+    # an unchanged row shows its new side only, its cards beside it
     left = page.locator("tr.equal td.left").first
     assert left.evaluate("e => getComputedStyle(e).display") == "none"
     assert page.locator(".s-syn").first.is_visible()
     assert edited_line_colour() == "transparent"
-    assert "Anna" in comment() and "Old remark." in comment()
-    for name in ("unified", "cexpand"):
-        assert page.get_attribute(f'[data-toggle="{name}"]', "aria-pressed") == "true"
+    assert page.locator(".card").is_visible()
+    assert page.get_attribute('[data-toggle="unified"]', "aria-pressed") == "true"
     page.reload()
     assert "unified" in page.evaluate("document.body.className")
     assert page.locator(".s-syn").first.is_visible()
-    assert "Anna" in comment()
     page.click('[data-toggle="unified"]')
-    page.click(".menu-button")  # the others are in the View menu
-    page.click('[data-toggle="cexpand"]')
     assert "unified" not in page.evaluate("document.body.className")
-    assert comment() in ("none", "normal")
 
 
 def test_toolbar_help_tooltips(page):
@@ -276,9 +255,13 @@ def test_toolbar_help_tooltips(page):
     assert tip.is_visible()
     assert tip.locator("b").inner_text() == "Formatted"
     assert tip.locator(".when").inner_text() == "key: f"
-    page.hover('[data-tips="comments"]')
-    assert tip.locator("b").inner_text() == "Comment tooltips"
-    page.mouse.move(0, 0)
+    page.hover('[data-toggle="highlights"]')
+    assert tip.locator("b").inner_text() == "Change highlights"
+    page.mouse.move(0, 300)
+    assert not tip.is_visible()
+    page.hover("[data-review]")
+    assert tip.locator("b").inner_text() == "Review"
+    page.click("[data-review]")  # clicked, its help goes
     assert not tip.is_visible()
 
 
@@ -313,58 +296,22 @@ def test_space_between_paragraphs(page):
     assert page.locator("tr.current").count() == 1
 
 
-def test_comment_link_goes_to_its_row(page):
-    page.locator(".comments-panel a").first.click()
-    # the HTML report reacts to the hash change, which the browser fires afterwards
-    page.wait_for_selector("tr.target", state="visible", timeout=5_000)
-    target = page.locator("tr.target")
-    assert target.count() == 1
-    assert "Line 20" in target.inner_text()
-    # its paragraph (where its text ends is not known) and marker stay marked
-    page.wait_for_selector("tr.target td.code.right.pinned", timeout=5_000)
-    assert page.locator("tr.target td.code.right .comment.pinned").count() == 1
-    page.wait_for_timeout(2_000)
-    assert page.locator("td.code.pinned").count() == 1
-    # following the same link again unmarks it
-    page.locator(".comments-panel a").first.click()
-    page.wait_for_selector("td.code.pinned", state="detached", timeout=5_000)
-    assert page.locator(".comment.pinned").count() == 0
-
-
-def test_comments_sorted_by_place_or_date(browser, tmp_path):
-    """The comments panel lists its comments in reading order, or by date,
-    oldest first; the choice is remembered."""
-    old, new = tmp_path / "a.md", tmp_path / "b.md"
-    old.write_text("First line.\n\nSecond line.\n", encoding="utf-8")
-    late = '[Late.]{.comment-start id="1" author="A" date="2026-09-25T10:00:00Z"}'
-    early = '[Early.]{.comment-start id="2" author="A" date="2026-09-20T10:00:00Z"}'
-    new.write_text(f"First line.{late}\n\nSecond line.{early}\n", encoding="utf-8")
-    page = open_report(browser, tmp_path, compare_paths(old, new))
-
-    def listed():
-        return page.locator(".comments-panel li a").all_inner_texts()
-
-    assert listed() == ["Late.", "Early."]
-    page.click('[data-sort="date"]')
-    assert listed() == ["Early.", "Late."]
-    assert page.get_attribute('[data-sort="date"]', "aria-pressed") == "true"
-    page.reload()
-    open_panels(page)
-    assert listed() == ["Early.", "Late."]
-    page.click('[data-sort="place"]')
-    assert listed() == ["Late.", "Early."]
-    # the order shown, clicked again, is reversed, and remembered
-    page.click('[data-sort="place"]')
-    assert listed() == ["Early.", "Late."]
-    assert page.inner_text('[data-sort="place"] .dir') == "↑"
-    page.click('[data-sort="date"]')
-    assert listed() == ["Early.", "Late."]
-    page.click('[data-sort="date"]')
-    assert listed() == ["Late.", "Early."]
-    assert page.get_attribute('[data-sort="date"]', "aria-label") == "date, descending"
-    page.reload()
-    open_panels(page)
-    assert listed() == ["Late.", "Early."]
+def test_a_card_pins_its_comment_and_the_top_bar_steps_through_them(page):
+    """A card clicked pins its comment: its paragraph (where its text ends is
+    not known) and its marker marked, the card ringed, until clicked again;
+    the top bar's comment arrows (c) do the same, saying which."""
+    card = page.locator(".card")
+    card.click()
+    assert page.locator("td.code.right.pinned").count() == 1
+    assert page.locator(".comment.pinned").count() == 1
+    assert "active" in card.get_attribute("class")
+    card.click()
+    assert page.locator("td.code.pinned, .comment.pinned, .card.active").count() == 0
+    page.keyboard.press("c")
+    assert page.locator(".comment-counter").inner_text() == "1 / 1 comments"
+    assert page.locator(".comment.pinned").count() == 1 and "active" in card.get_attribute("class")
+    page.keyboard.press("Escape")
+    assert page.locator(".comment.pinned, .card.active").count() == 0
 
 
 def anchored_report(browser, tmp_path, **context_options):
@@ -383,7 +330,6 @@ def anchored_report(browser, tmp_path, **context_options):
     out.write_text(render(compare_paths(old, new, Options(context=None))), encoding="utf-8")
     page = browser.new_context(**context_options).new_page()
     page.goto(out.as_uri())
-    open_panels(page)
     return page
 
 
@@ -394,50 +340,36 @@ def highlighted(page, name: str = "pin") -> str:
     )
 
 
-def test_comment_link_pins_the_words_it_is_anchored_to(browser, tmp_path):
-    """Following a comment's link highlights the words it is anchored to,
-    not its paragraph, across paragraphs too, and keeps its tooltip open,
-    until the link is followed again; another comment takes its place."""
+def test_a_comment_pins_the_words_it_is_anchored_to(browser, tmp_path):
+    """A comment's card, or its marker, clicked highlights the words it is
+    anchored to, not its paragraph, across paragraphs too, until clicked
+    again; another comment takes its place; Esc lets go."""
     page = anchored_report(browser, tmp_path)
-    here = page.locator(".comments-panel a", has_text="Here.")
+    here = page.locator(".card", has_text="Here.")
     here.click()
     page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
-    assert highlighted(page).replace("\u00ad", "") == "two three"
+    assert highlighted(page).replace("­", "") == "two three"
     assert page.locator("td.code.pinned").count() == 0
     assert page.locator(".comment.pinned").count() == 1
-    tip = page.locator("#tip")
-    assert tip.is_visible() and "Here." in tip.inner_text()
-    page.wait_for_timeout(2_000)  # it stays
-    page.mouse.move(5, 5)  # and hovering elsewhere leaves it be
-    assert highlighted(page) is not None and tip.is_visible()
-    page.locator(".comments-panel a", has_text="Across.").click()
+    assert page.locator(".card.active").all_inner_texts()[0].find("Here.") >= 0
+    page.locator(".card", has_text="Across.").click()
     page.wait_for_function(
         'CSS.highlights.get("pin") && CSS.highlights.get("pin").size == 2',
         timeout=5_000,
     )
-    first, second = highlighted(page).replace("\u00ad", "").split("|")
+    first, second = highlighted(page).replace("­", "").split("|")
     assert first == "four." and second.startswith("Five six")
     assert "seven" not in second
-    assert page.locator(".comment.pinned").count() == 1 and "Across." in tip.inner_text()
-    # pinned, its tooltip can be dragged out of the way, and stays there
-    before = tip.bounding_box()
-    page.mouse.move(before["x"] + 20, before["y"] + 10)
-    page.mouse.down()
-    page.mouse.move(before["x"] + 20 - 150, before["y"] + 10 + 80, steps=5)
-    page.mouse.up()
-    after = tip.bounding_box()
-    assert (round(after["x"] - before["x"]), round(after["y"] - before["y"])) == (-150, 80)
-    page.mouse.wheel(0, 200)
-    page.wait_for_timeout(200)
-    assert tip.bounding_box()["y"] == after["y"]
-    page.locator(".comments-panel a", has_text="Across.").click()
+    assert page.locator(".comment.pinned, .card.active").count() == 2  # one of each
+    page.locator(".card", has_text="Across.").click()
     page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
-    assert page.locator(".comment.pinned").count() == 0 and not tip.is_visible()
-    # the marker in the text pins as its link does: clicked, Enter, Esc
+    assert page.locator(".comment.pinned, .card.active").count() == 0
+    # the marker in the text pins as its card does: clicked, Enter, Esc
     marker = page.locator('td.code .comment[data-text="Here."]').first
     marker.click()
     page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
-    assert highlighted(page).replace("\u00ad", "") == "two three" and tip.is_visible()
+    assert highlighted(page).replace("­", "") == "two three"
+    assert "Here." in page.locator(".card.active").inner_text()
     marker.click()
     page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
     page.locator('td.code .comment[data-text="Across."]').first.focus()
@@ -445,12 +377,6 @@ def test_comment_link_pins_the_words_it_is_anchored_to(browser, tmp_path):
     page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
     page.keyboard.press("Escape")
     page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
-    # expanded (c): every comment written out, the words of each highlighted
-    page.keyboard.press("c")
-    assert "Here." in marker.evaluate("e => getComputedStyle(e, '::after').content")
-    assert page.evaluate('CSS.highlights.get("comments-all").size') == 3
-    page.keyboard.press("c")
-    assert not page.evaluate('CSS.highlights.has("comments-all")')
 
 
 def test_comment_whose_words_are_gone_rings_its_marker_only(browser, tmp_path):
@@ -461,7 +387,7 @@ def test_comment_whose_words_are_gone_rings_its_marker_only(browser, tmp_path):
     note = '[Gone.]{.comment-start id="1" author="A" date="2026-09-25T10:00:00Z"}'
     new.write_text(f'One two.{note}[]{{.comment-end id="1"}}\n', encoding="utf-8")
     page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
-    page.locator(".comments-panel a").first.click()
+    page.locator(".card").first.click()
     page.wait_for_selector(".comment.pinned", timeout=5_000)
     assert highlighted(page) is None
     assert page.locator("td.code.pinned").count() == 0
@@ -470,10 +396,11 @@ def test_comment_whose_words_are_gone_rings_its_marker_only(browser, tmp_path):
 def test_problems_marked_by_the_ai(browser, tmp_path):
     """The problems the AI marked are found in the text of their side,
     whatever the quotes and the hyphenation: a numbered badge before each,
-    badge telling the problem and the solution; one found nowhere is said
-    so. Each pins as a comment does, from its badge or its entry in the AI
-    marks panel; the toolbar's arrows (a, Shift+A) step through those
-    found, pinning each, the counter saying which."""
+    and a card beside its row telling the problem and the solution; one
+    found nowhere has neither, and review mode lists it as such. Each pins
+    as a comment does, from its badge or its card; the top bar's arrows (a,
+    Shift+A) step through those found, pinning each, the counter saying
+    which."""
     from prosediff.assess import Annotation, Assessment
 
     old, new = tmp_path / "a.md", tmp_path / "b.md"
@@ -492,57 +419,43 @@ def test_problems_marked_by_the_ai(browser, tmp_path):
     c = compare_paths(old, new, Options(context=None))
     page = open_report(browser, tmp_path, c, assessment=a)
     marks = page.locator(".ai-mark")
-    # numbered in reading order, the one found nowhere last, the panel too
+    # numbered in reading order, the one found nowhere last
     assert marks.all_inner_texts() == ["⚠ 1", "⚠ 2"]
-    numbers = page.locator(".ai-notes li .ai-num").all_inner_texts()
-    assert numbers == ["⚠ 1", "⚠ 2", "⚠ 3"]
-    assert "missing" in (page.locator(".ai-notes li").last.get_attribute("class") or "")
+    cards = page.locator(".card.problem")
+    assert cards.locator(".chip").all_inner_texts() == ["⚠ Problem 1", "⚠ Problem 2"]
+    assert "Wordy." in cards.first.inner_text() and "Proposed: Cut it." in cards.first.inner_text()
+    assert "AI, old version" in cards.last.inner_text() and "Lost." in cards.last.inner_text()
     # the passages highlighted only when pinned
     assert page.evaluate("CSS.highlights.size") == 0
-    assert page.locator(".ai-notes li.missing").count() == 1
-    assert page.locator(".ai-notes li.missing .ai-missing").is_visible()
-    tip = page.locator("#tip")
-    # pinned from its badge, until clicked again
+    # pinned from its badge, until clicked again, its card ringed
     marks.first.click()
     page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
-    assert highlighted(page).replace("\u00ad", "") == "extended with considerably longer words."
-    page.wait_for_timeout(1_000)
-    page.mouse.move(5, 5)
-    assert tip.is_visible() and "Wordy." in tip.inner_text()
-    assert "Proposed: Cut it." in tip.inner_text()
+    assert highlighted(page).replace("­", "") == "extended with considerably longer words."
+    assert "active" in cards.first.get_attribute("class")
     marks.first.click()
     page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
-    assert not tip.is_visible()
-    # and from the panel
-    page.locator(".ai-notes .ai-show").first.click()
+    # and from its card
+    cards.last.click()
     page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
-    page.locator(".ai-notes .ai-show").first.click()
-    page.wait_for_function('!CSS.highlights.has("pin")', timeout=5_000)
-    # the toolbar: those found, in turn, the missing one skipped
+    assert highlighted(page).replace("­", "") == "The old “quoted” claim went away."
+    page.keyboard.press("Escape")
+    # the top bar: those found, in turn, the missing one skipped
     counter = page.locator(".ai-counter")
-    assert counter.inner_text() == "⚠ 3"
+    assert counter.inner_text() == "⚠ 3 problems"
     page.click('[data-ai-nav="1"]')
     assert counter.inner_text() == "⚠ 1 / 3"
     page.keyboard.press("a")
-    assert counter.inner_text() == "⚠ 2 / 3" and "Lost." in tip.inner_text()
-    assert highlighted(page).replace("\u00ad", "") == "The old “quoted” claim went away."
+    assert counter.inner_text() == "⚠ 2 / 3"
+    assert highlighted(page).replace("­", "") == "The old “quoted” claim went away."
     page.keyboard.press("a")  # round again
     assert counter.inner_text() == "⚠ 1 / 3"
     page.keyboard.press("Shift+A")
     assert counter.inner_text() == "⚠ 2 / 3"
     page.keyboard.press("Escape")
-    # expanded (e, or its switch in the View menu): every problem written out
-    # after its badge, every passage highlighted; again, collapsed
-    inline = page.locator(".ai-inline")
-    assert not inline.first.is_visible()
-    page.keyboard.press("e")
-    assert inline.all_inner_texts() == ["Wordy. Proposed: Cut it.", "Lost. Proposed: Keep it."]
-    assert page.evaluate('CSS.highlights.get("ai-all").size') == 2
-    page.click(".menu-button")
-    assert page.get_attribute('[data-toggle="aiexpand"]', "aria-pressed") == "true"
-    page.click('[data-toggle="aiexpand"]')
-    assert not inline.first.is_visible()
-    assert not page.evaluate('CSS.highlights.has("ai-all")')
+    # review mode lists the one found nowhere, not to be chosen
+    page.keyboard.press("r")
+    missing = page.locator("#review-list button", has_text="Missing.")
+    assert missing.is_disabled() and "not found in the text" in missing.inner_text()
     page.context.close()
 
 
@@ -574,7 +487,7 @@ def test_a_comment_over_an_ai_mark_leaves_its_badge_out(browser, tmp_path):
 def test_ai_marks_in_a_moved_passage_row(browser, tmp_path):
     """A row holding a moved passage is written twice, with the passage
     shown as moved and without: a problem marked in it has a badge in the
-    one shown, whether moved passages are on or off."""
+    one shown, whether moved passages are on or off, and one card."""
     from prosediff.assess import Annotation, Assessment
 
     old, new = tmp_path / "a.md", tmp_path / "b.md"
@@ -588,96 +501,28 @@ def test_ai_marks_in_a_moved_passage_row(browser, tmp_path):
     shown = page.locator(".ai-mark:visible")
     assert page.locator("td.right .pv-on").count() > 0  # the row has two versions
     assert shown.all_inner_texts() == ["⚠ 1"]
-    assert page.locator(".ai-notes li.missing").count() == 0
+    assert page.locator(".card.problem").count() == 1
     shown.click()
     page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
-    assert highlighted(page).replace("\u00ad", "") == f"A middle one stays. {moved}"
+    assert highlighted(page).replace("­", "") == f"A middle one stays. {moved}"
     page.keyboard.press("Escape")
     page.keyboard.press("v")  # moved passages on: the other version, its own badge
     assert shown.all_inner_texts() == ["⚠ 1"]
     assert shown.evaluate("m => !!m.closest('.pv-on')")
     page.click('[data-ai-nav="1"]')
     page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
-    assert page.locator("#tip").is_visible()
+    assert page.locator(".card.active:visible").count() == 1
     page.context.close()
 
 
-def test_comments_filtered_by_status(browser, tmp_path):
-    """The comments panel shows all its comments, or only the new or the
-    removed ones, with a dashed line between those shown; remembered. It
-    folds from its header, as a file does, its Show and Sort buttons there
-    leaving it open."""
-    old, new = tmp_path / "a.md", tmp_path / "b.md"
-    gone = '[Gone.]{.comment-start id="1" author="A" date="2026-09-20T10:00:00Z"}'
-    came = '[Came.]{.comment-start id="2" author="A" date="2026-09-25T10:00:00Z"}'
-    old.write_text(f"First line.{gone}\n\nSecond line.\n", encoding="utf-8")
-    new.write_text(f"First line.\n\nSecond line.{came}\n", encoding="utf-8")
-    page = open_report(browser, tmp_path, compare_paths(old, new))
-    items = page.locator(".comments-panel li")
-
-    def shown():
-        return [li.locator("a").inner_text() for li in items.all() if li.is_visible()]
-
-    def top_borders():
-        return [
-            li.evaluate("e => getComputedStyle(e).borderTopStyle")
-            for li in items.all()
-            if li.is_visible()
-        ]
-
-    assert shown() == ["Gone.", "Came."]
-    assert top_borders() == ["none", "dashed"]
-    page.click('[data-show="new"]')
-    assert shown() == ["Came."] and top_borders() == ["none"]
-    page.click('[data-show="removed"]')
-    assert shown() == ["Gone."]
-    page.reload()
-    open_panels(page)
-    assert shown() == ["Gone."]
-    assert page.get_attribute('[data-show="removed"]', "aria-pressed") == "true"
-    page.click('[data-show="all"]')
-    assert shown() == ["Gone.", "Came."]
-    # the panel folds from its header, its buttons there leaving it open
-    panel = page.locator("details.comments-panel")
-    page.click('[data-sort="date"]')
-    assert panel.evaluate("d => d.open")
-    page.click(".comments-head h2")
-    assert not panel.evaluate("d => d.open") and not items.first.is_visible()
-    page.click(".comments-head h2")
-    assert panel.evaluate("d => d.open")
-
-
-def test_comment_tooltip(page):
-    """Hovering a comment shows it; hovering a change, or the row it is in,
-    shows nothing; the comment tooltips can be switched off, remembered."""
-    marker = page.locator(".comment").first
-    marker.hover()
+def test_changes_carry_no_tooltip(page):
+    """Hovering a change, or the row it is in, shows nothing."""
     tip = page.locator("#tip")
-    assert tip.is_visible()
-    assert tip.locator("b").inner_text() == "Anna"
-    assert tip.locator("b").evaluate("e => getComputedStyle(e).fontWeight") == "700"
-    assert "Old remark." in tip.inner_text()
-    when = tip.locator(".when")
-    assert when.inner_text() == "2026-09-23 10:15"
-    body_colour = page.evaluate("getComputedStyle(document.body).color")
-    assert when.evaluate("e => getComputedStyle(e).color") != body_colour
-    # the author, the comment and the date on separate lines
-    tops = tip.evaluate("t => [...t.children].map(c => c.getBoundingClientRect().top)")
-    assert tops == sorted(tops) and len(set(tops)) == 3
-    page.mouse.move(0, 0)
-    assert not tip.is_visible()
-    # changes carry no tooltip, neither on the word nor on the line
     assert page.locator("table [title]").count() == 0
     page.locator("ins").first.hover()
     assert not tip.is_visible()
     box = page.locator("tr.replace td.code.right").first.bounding_box()
     page.mouse.move(box["x"] + box["width"] - 3, box["y"] + box["height"] - 3)
-    assert not tip.is_visible()
-    page.click(".menu-button")  # in the View menu
-    page.uncheck('[data-tips="comments"]')
-    page.reload()
-    assert not page.is_checked('[data-tips="comments"]')
-    page.locator(".comment").first.hover()
     assert not tip.is_visible()
 
 
@@ -848,17 +693,183 @@ def test_no_moved_passages_switch_without_passages(page):
     assert page.locator('[data-toggle="passages"]').count() == 0
 
 
-def test_a_comment_tooltip_shows_its_paragraphs_and_italics(browser, tmp_path):
-    """A Word comment's tooltip has a line for each of its paragraphs, the
-    blank one too, and its italics."""
+def test_a_comment_card_shows_its_paragraphs_and_italics(browser, tmp_path):
+    """A Word comment's card has a line for each of its paragraphs, the blank
+    one too, and its italics."""
     from test_comments import commented_documents
 
     old, new = commented_documents(tmp_path, "docx")
     page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
-    page.locator("td.code .comment").first.hover()
-    tip = page.locator("#tip")
-    lines = tip.locator(".line")
+    card = page.locator(".card").first
+    lines = card.locator(".line")
     assert lines.all_inner_texts() == ["Please cite:", "", "See Research Policy, 49."]
-    assert tip.locator("i").inner_text() == "Research Policy"
+    assert card.locator("i").inner_text() == "Research Policy"
     assert lines.nth(1).evaluate("e => e.getBoundingClientRect().height") > 0
     page.context.close()
+
+
+def test_the_assessment_is_a_drawer(browser, tmp_path):
+    """The AI's assessment opens from its verdict in the top bar, over the
+    right of the page, and closes by its button or Esc; on paper it heads
+    the report."""
+    from prosediff.assess import Assessment
+
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("One line.\n", encoding="utf-8")
+    new.write_text("One changed line.\n", encoding="utf-8")
+    a = Assessment("claude", "## Verdict\n**Improves**: tighter.", "m")
+    page = open_report(browser, tmp_path, compare_paths(old, new), assessment=a)
+    drawer, verdict = page.locator("#assessment"), page.locator(".verdict-button")
+    assert not drawer.is_visible() and "Improves" in verdict.inner_text()
+    verdict.click()
+    assert drawer.is_visible() and verdict.get_attribute("aria-expanded") == "true"
+    assert "tighter." in drawer.inner_text()
+    page.keyboard.press("Escape")
+    assert not drawer.is_visible()
+    verdict.click()
+    page.click("#assessment .close")
+    assert not drawer.is_visible()
+    page.emulate_media(media="print")
+    assert drawer.is_visible()
+    page.context.close()
+
+
+def test_review_mode(page):
+    """Review mode (r, or its button) lists the changes and the comments down
+    the left, and shows the one row the chosen one is in, which a line
+    names; Next and Previous (j, k) go through them all; r again ends it."""
+    page.keyboard.press("r")
+    assert "review" in page.evaluate("document.body.className")
+    listing = page.locator("#review-list")
+    assert listing.locator("h3").all_text_contents() == ["Changes · 3", "Comments · 1"]
+    head = page.locator("#review-head")
+    assert head.locator(".which").inner_text() == "Change 1 of 3"
+    rows = page.locator("details.file tbody tr:visible")
+    assert rows.count() == 1 and "Line 1" in rows.first.inner_text()
+    page.click('[data-review-step="1"]')
+    assert head.locator(".which").inner_text() == "Change 2 of 3"
+    page.keyboard.press("j")
+    page.keyboard.press("j")  # past the changes, the comment
+    assert head.locator(".which").inner_text() == "Comment 1 of 1"
+    assert "paragraph 21" in head.locator(".where").inner_text()
+    assert page.locator(".card.active").count() == 1
+    page.keyboard.press("k")
+    assert head.locator(".which").inner_text() == "Change 3 of 3"
+    listing.locator("button", has_text="Old remark.").click()
+    assert head.locator(".which").inner_text() == "Comment 1 of 1"
+    page.keyboard.press("r")
+    assert "review" not in page.evaluate("document.body.className")
+    assert page.locator("details.file tbody tr:visible").count() > 3
+
+
+def test_a_note_on_an_unchanged_line_unfolds_that_line_alone(browser, tmp_path):
+    """A problem marked on a line among unchanged ones brings that line out,
+    its card beside it, the lines before and after it left folded."""
+    from prosediff.assess import Annotation, Assessment
+
+    lines = [f"Line {i} of the text." for i in range(30)]
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines[29] = "Line 29 changed."
+    new.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    a = Assessment("claude", "## Verdict\n**Mixed**.", "m")
+    a.annotations = [Annotation("new", "Line 12 of", "the text.", "Vague.", "")]
+    page = open_report(browser, tmp_path, compare_paths(old, new), assessment=a)
+    split = page.locator("main")
+    row = split.locator("tr", has_text="Line 12 of the text.").first
+    assert row.is_visible() and split.locator(".card.problem").is_visible()
+    folds = split.locator(".expand").all_inner_texts()
+    assert [f.replace("show ", "") for f in folds][:2] == [
+        "⋯ 12 unchanged lines",
+        "⋯ 16 unchanged lines",
+    ]
+    assert not split.get_by_text("Line 11 of the text.").first.is_visible()
+    # brought out, its passage is still highlighted when pinned
+    split.locator(".card.problem").click()
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    assert highlighted(page).replace("­", "") == "Line 12 of the text."
+    page.context.close()
+
+
+def test_cards_run_on_down_the_margin(browser, tmp_path):
+    """The cards of a row taller than it run on down the margin beside the
+    rows below that have none, the rows as tall as their text; a row that
+    has cards is moved down instead, so they start level with it, never
+    after its end; none over another, the file holding them all."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("First.\n\nMiddle.\n\nSecond.\n", encoding="utf-8")
+    notes = "".join(
+        f"[Note {k}, a comment long enough to take a few lines of the margin.]"
+        f'{{.comment-start id="{k}" author="A" date="2026-09-25T10:0{k}:00Z"}}'
+        for k in range(1, 4)
+    )
+    new.write_text(
+        f'First.{notes}\n\nMiddle.\n\nSecond.[Last.]{{.comment-start id="9" author="B"}}\n',
+        encoding="utf-8",
+    )
+    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
+    stacks = page.locator(".stack")
+    assert stacks.count() == 2
+    one, two = stacks.nth(0).bounding_box(), stacks.nth(1).bounding_box()
+    first = page.locator("tr", has_text="First.").first.bounding_box()
+    middle = page.locator("tr", has_text="Middle.").first.bounding_box()
+    second = page.locator("tr", has_text="Second.").first.bounding_box()
+    assert first["height"] < one["height"]  # the first row kept its height
+    assert one["y"] + one["height"] > middle["y"]  # its cards run on beside Middle
+    assert two["y"] >= one["y"] + one["height"]  # under the first, not over it
+    assert abs(two["y"] - second["y"]) < 8  # level with its own row
+    file = page.locator("details.file").first.bounding_box()
+    assert file["y"] + file["height"] >= two["y"] + two["height"]  # the file holds them
+    page.context.close()
+
+
+def test_columns_resized_by_dragging_their_handles(page):
+    """The line between the old and the new version, and the margin's edge,
+    are handles: dragged, they resize the columns, remembered across a
+    reload; double-clicked, the table's own widths come back."""
+    split, notes = (
+        page.locator('.col-resizer[data-resize="split"]'),
+        page.locator('.col-resizer[data-resize="notes"]'),
+    )
+    old_cell = page.locator("tr.replace td.code.left").first
+    new_cell = page.locator("tr.replace td.code.right").first
+    margin = page.locator("td.notes").first
+    before = old_cell.bounding_box()["width"], new_cell.bounding_box()["width"]
+    box = split.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 40)
+    page.mouse.down()
+    page.mouse.move(box["x"] - 150, box["y"] + 40, steps=5)
+    page.mouse.up()
+    after = old_cell.bounding_box()["width"], new_cell.bounding_box()["width"]
+    assert after[0] < before[0] - 100 and after[1] > before[1] + 100
+    width = margin.bounding_box()["width"]
+    box = notes.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 40)
+    page.mouse.down()
+    page.mouse.move(box["x"] - 100, box["y"] + 40, steps=5)
+    page.mouse.up()
+    assert margin.bounding_box()["width"] > width + 60
+    kept = old_cell.bounding_box()["width"]  # its share of what the wider margin leaves
+    page.reload()
+    assert abs(page.locator("tr.replace td.code.left").first.bounding_box()["width"] - kept) < 3
+    page.locator('.col-resizer[data-resize="split"]').dblclick()
+    # the two versions sharing their width evenly again
+    old_width = page.locator("tr.replace td.code.left").first.bounding_box()["width"]
+    new_width = page.locator("tr.replace td.code.right").first.bounding_box()["width"]
+    assert abs(old_width - new_width) < 3
+
+
+def test_the_margin_hidden_and_shown(page):
+    """Margin (g) hides the margin, the two versions taking its width, and
+    brings it back; remembered across a reload."""
+    new_cell = page.locator("tr.replace td.code.right").first
+    width = new_cell.bounding_box()["width"]
+    assert page.locator(".card").is_visible()
+    page.click('[data-toggle="margin"]')
+    assert not page.locator(".card").is_visible()
+    assert new_cell.bounding_box()["width"] > width + 100
+    assert page.get_attribute('[data-toggle="margin"]', "aria-pressed") == "false"
+    page.reload()
+    assert not page.locator(".card").is_visible()
+    page.keyboard.press("g")
+    assert page.locator(".card").is_visible()

@@ -13,7 +13,7 @@ and ends, so the common inline syntax is recognised with regular
 expressions: headings, block quotes, code spans, strong and emphasis, links,
 images, citations and pandoc bracketed spans with attributes.
 
-A Word or OpenDocument text read with its tracked changes kept ("all") has
+A Word or OpenDocument text read with its tracked changes kept ("show") has
 them as [text]{.insertion author=... date=...} and [text]{.deletion ...}
 spans: their text is styled as Word shows it, and carries the change's
 author and date for the HTML report's tooltip. A style starting with "@" is such

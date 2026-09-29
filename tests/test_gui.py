@@ -54,6 +54,8 @@ def test_every_drop_down_item_has_a_hint():
         (gui.ENCODINGS, gui.ENCODING_HINTS),
     ):
         assert set(values) == set(hints)
+    assert set(gui.DOCX_CHANGE_LABELS) == set(DOCX_CHANGES)
+    assert list(gui.DOCX_CHANGE_LABELS.values()) == ["accept all", "reject all", "show"]
     assert set(gui.LANGUAGE_HINTS) < set(gui.LANGUAGES)
     assert gui.language_name("it") == "Italian"
 

@@ -238,9 +238,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--docx-changes",
         choices=DOCX_CHANGES,
-        default="accept",
-        help="the tracked changes of Word documents: accept them, reject them, "
-        "or show them as markup (default: accept)",
+        default="accept-all",
+        help="the tracked changes of Word and OpenDocument documents: accept-all, "
+        "reject-all, or show them as markup (default: accept-all)",
     )
     ap.add_argument(
         "--move-similarity",
@@ -368,8 +368,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="have the AI mark each problem in the text, from its first words to its "
         "last, with the problem and the change it proposes: a badge before each in "
-        "the HTML report, its passage highlighted when clicked, and listed in an AI "
-        "marks panel (default: on)",
+        "the HTML report, its passage highlighted when clicked, and a card in the "
+        "margin beside it (default: on)",
+    )
+    ai_group.add_argument(
+        "--assess-ai-writing",
+        action="store_true",
+        help="also ask the AI, apart, whether the text the changes added reads as written "
+        "by an AI: a second assessment, its verdict (likely, possibly or unlikely) in the "
+        "HTML report's top bar; an indication, not a proof",
     )
     ai_group.add_argument(
         "--assess-save-prompt",
@@ -460,8 +467,16 @@ def main(argv: list[str] | None = None) -> int:
             ap.error(f"--assess: {e}")
         if args.assess_timeout <= 0:
             ap.error("--assess-timeout must be above 0")
-    elif args.assess_effort or args.assess_instructions or args.assess_save_prompt:
-        ap.error("--assess-effort, --assess-instructions and --assess-save-prompt go with --assess")
+    elif (
+        args.assess_effort
+        or args.assess_instructions
+        or args.assess_save_prompt
+        or args.assess_ai_writing
+    ):
+        ap.error(
+            "--assess-effort, --assess-instructions, --assess-save-prompt and "
+            "--assess-ai-writing go with --assess"
+        )
 
     fmt = args.format or format_of(args.output)
     if args.assess is not None and fmt != "html":
@@ -551,6 +566,15 @@ def main(argv: list[str] | None = None) -> int:
         assessment = assess_comparison(comparison, request)
         if assessment.error:
             print(f"{PROG}: the assessment failed: {assessment.error}", file=sys.stderr)
+    writing = None
+    if args.assess is not None and args.assess_ai_writing:
+        print(
+            f"{PROG}: asking {args.assess} whether the new text reads as written by an AI...",
+            file=sys.stderr,
+        )
+        writing = assess_comparison(comparison, request, kind="writing")
+        if writing.error:
+            print(f"{PROG}: the AI-writing assessment failed: {writing.error}", file=sys.stderr)
 
     output = _output_path(args, fmt)
     try:
@@ -564,6 +588,7 @@ def main(argv: list[str] | None = None) -> int:
             sentences=sentences,
             split=split,
             assessment=assessment,
+            writing=writing,
         )
     except ValueError as e:  # a .docx or .odt of anything but two such documents
         print(f"{PROG}: {e}", file=sys.stderr)
@@ -577,6 +602,9 @@ def main(argv: list[str] | None = None) -> int:
     if assessment is not None:
         verdict = f" ({assessment.verdict})" if assessment.verdict else ""
         print(f"{PROG}: assessment{verdict}, at the top of the HTML report")
+    if writing is not None and not writing.error:
+        verdict = f" ({writing.verdict})" if writing.verdict else ""
+        print(f"{PROG}: AI-writing assessment{verdict}, beside it")
     if args.open:
         open_output(output)
     return 0

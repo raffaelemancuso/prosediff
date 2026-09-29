@@ -166,7 +166,7 @@ def two_folders(tmp_path, name, old, new):
     return tmp_path / "old", tmp_path / "new"
 
 
-def markdown_of(data: bytes, name: str = "a.docx", changes: str = "accept") -> str:
+def markdown_of(data: bytes, name: str = "a.docx", changes: str = "accept-all") -> str:
     """A Word document's (or, named .odt, an OpenDocument text's) body as
     Markdown, as prosediff reads it."""
     from prosediff.document import to_markdown

@@ -14,11 +14,11 @@ prosediff.document.Document:
 - tracked changes are settled as asked. An insertion is the text between
   text:change-start and text:change-end; a deletion is a text:change point
   whose text is kept in text:tracked-changes. Accepting keeps the inserted
-  text and leaves the deleted out, rejecting does the reverse, and "all"
+  text and leaves the deleted out, rejecting does the reverse, and "show"
   keeps both, marked as insertions and deletions. A comment anchored in
   dropped text is kept. Deleted text that spanned several paragraphs comes
   back, when rejected, as those paragraphs, each of its own kind (a heading,
-  a list item); shown with "all", as one run of text. A table row
+  a list item); shown ("show"), as one run of text. A table row
   LibreOffice tracks whole (loext:text-changes-only "false" in its style)
   goes when its cells are left empty: deleted and accepted, or inserted
   and rejected.
@@ -213,7 +213,7 @@ class Reader(DocumentReader):
 
     def dropping(self) -> bool:
         """Whether the text being walked goes: a rejected insertion."""
-        return bool(self.open) and self.changes == "reject"
+        return bool(self.open) and self.changes == "reject-all"
 
     def deletion(self, cid: str | None) -> list[Tagged]:
         """What a deletion point leaves: the deleted text when rejecting, a
@@ -228,7 +228,7 @@ class Reader(DocumentReader):
             for p, kind in self.deleted_paragraphs(change)
         ]
         self.open = saved
-        if self.changes == "reject" and len(paragraphs) > 1:
+        if self.changes == "reject-all" and len(paragraphs) > 1:
             # the paragraphs back, a break between each two
             out: list[Tagged] = []
             for k, (inlines, kind) in enumerate(paragraphs):
@@ -486,9 +486,9 @@ class Reader(DocumentReader):
         return self.finish(self.blocks(body))
 
 
-def read_odt(data: bytes, changes: str = "accept") -> Prose:
+def read_odt(data: bytes, changes: str = "accept-all") -> Prose:
     """An OpenDocument text as prosediff reads it (prosediff.document), its
-    tracked changes settled ("accept", "reject") or kept as markup ("all"),
+    tracked changes settled ("accept-all", "reject-all") or kept as markup ("show"),
     its comments kept, each paragraph with the language it is marked with."""
     if changes not in CHANGES:
         raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")

@@ -42,7 +42,7 @@ a draft and the one returned whether or not the co-author tracked their
 edits. When they did, the tracked changes are accepted (or rejected, or kept
 as markup) as `--docx-changes` says.
 
-![An HTML report made by prosediff: at the top an AI's assessment of the revision, then the comments and the problems the AI marked; below, two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, a problem the AI marked pinned in the text with its tooltip](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
+![An HTML report made by prosediff: the AI's verdict in the top bar; below, two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, and beside them a margin of cards for the comments and the problems the AI marked, one of them pinned, its passage highlighted in the text](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 ## Why prosediff
 
@@ -64,8 +64,9 @@ prosediff sits between the two:
   draft_returned.docx` shows what a co-author changed, whatever they tracked
   or did not. Their tracked changes are accepted (or rejected) exactly as
   Word would, spaces included, and **their comments are kept**: each shown
-  where it sits, with its author and date, new comments marked with a green balloon holding a +, removed ones 🗑️, and all
-  listed in a panel. Only new and removed comments are shown: those already
+  where it sits, new comments marked with a green balloon holding a +,
+  removed ones 🗑️, each with a card in the margin beside its paragraph
+  (its author, date and text). Only new and removed comments are shown: those already
   in the old version are left out, even where they moved. The same works on
   OpenDocument texts (.odt) from LibreOffice, both read directly (no
   conversion to Markdown: formatting, languages and comments are kept as
@@ -139,14 +140,14 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `-w`, `--ignore-whitespace`| compare lines ignoring whitespace, as `git diff -w`           |
 | `-p`, `--path PATH`        | with `--git` or `--folders`, restrict the diff to this file or folder (repeatable) |
 | `-o`, `--output FILE`      | output file. Default: with `--open`, a new HTML report in the temporary folder; otherwise, comparing two folders, `prosediff.html` in the new one (never compared itself when the folders are compared again); comparing two files, `OLD_vs_NEW.html` next to the new one; else `diff.html` (`.diff`, `.wdiff`, `.docx` or `.odt` with `--format diff`, `wdiff`, `docx` or `odt`). The GUI does the same |
-| `--format html\|diff\|wdiff\|docx\|odt` | `html`: the HTML report (default); `diff`: a unified diff, with `-U` lines of context (default 3) or `--full`, its lines paired as the HTML report pairs them (an edited line's removal followed by its new text). A text file's diff is a patch `git apply` and `patch` can apply. For Markdown files and Word and OpenDocument documents, the lines are those the HTML report compares: one per paragraph (or sentence, with `--by-sentence`), blank lines left out, numbered as in the HTML report; a document's formatting is written in Markdown (`**bold**`), the comments added or removed in [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit) (`{>>Author (date): text<<}`; those both sides have are left out, as in the HTML report), and tracked changes kept with `--docx-changes all` as `{++inserted++}` and `{--deleted--}`: a diff to read, not to apply. `wdiff`: a word diff, as `git diff --word-diff` writes one, the same lines with the words changed within each marked `[-removed-]{+added+}` (paired as in the HTML report), a line removed or added whole marked whole. `docx`, `odt`: the new version as a Word document or an OpenDocument text, each change since the old one a tracked change to accept or reject in Word or LibreOffice (see [Tracked changes](#tracked-changes)); paragraph by paragraph only. Moved lines are marked only in the HTML report. Default: `diff` when the output file ends in `.diff` or `.patch`, `wdiff` for `.wdiff`, `docx` for `.docx`, `odt` for `.odt`. In the GUI, "Format" |
+| `--format html\|diff\|wdiff\|docx\|odt` | `html`: the HTML report (default); `diff`: a unified diff, with `-U` lines of context (default 3) or `--full`, its lines paired as the HTML report pairs them (an edited line's removal followed by its new text). A text file's diff is a patch `git apply` and `patch` can apply. For Markdown files and Word and OpenDocument documents, the lines are those the HTML report compares: one per paragraph (or sentence, with `--by-sentence`), blank lines left out, numbered as in the HTML report; a document's formatting is written in Markdown (`**bold**`), the comments added or removed in [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit) (`{>>Author (date): text<<}`; those both sides have are left out, as in the HTML report), and tracked changes kept with `--docx-changes show` as `{++inserted++}` and `{--deleted--}`: a diff to read, not to apply. `wdiff`: a word diff, as `git diff --word-diff` writes one, the same lines with the words changed within each marked `[-removed-]{+added+}` (paired as in the HTML report), a line removed or added whole marked whole. `docx`, `odt`: the new version as a Word document or an OpenDocument text, each change since the old one a tracked change to accept or reject in Word or LibreOffice (see [Tracked changes](#tracked-changes)); paragraph by paragraph only. Moved lines are marked only in the HTML report. Default: `diff` when the output file ends in `.diff` or `.patch`, `wdiff` for `.wdiff`, `docx` for `.docx`, `odt` for `.odt`. In the GUI, "Format" |
 | `-U`, `--context N`        | unchanged lines shown around each change, in every file; unset, 0 in Markdown files and Word documents (whose lines are whole paragraphs) and 3 in the others. In the GUI, the "Context lines" box: `auto` or a number |
 | `--full`                   | show every line of each changed file                          |
 | `--max-hidden N`           | unchanged lines embedded per gap for the HTML report to reveal (default 500); longer gaps are left out, to keep the HTML report light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
-| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (a green balloon holding a + when added; 🗑️ when removed), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
-| `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
-| `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or keep them all, shown as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
+| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (a green balloon holding a + when added; 🗑️ when removed), with a card in the margin beside it (the author, the date and the comment); in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
+| `--empty-comments`         | also show the comments that have no text, left out by default (a card saying "(no text)") |
+| `--docx-changes accept-all\|reject-all\|show` | the tracked changes of Word and OpenDocument documents: accept them all (`accept-all`, the default), reject them all (`reject-all`), or `show` them as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file (not Word or OpenDocument files, which are not read as Markdown) are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
 | `--split paragraph\|sentence\|both` | how the prose of Markdown files and Word and OpenDocument documents is compared: paragraph by paragraph; sentence by sentence, where a sentence moved between paragraphs is recognised and each sentence is labelled with its line and its place in it (`12.3`); or both, in one HTML report whose toolbar switches between the two (`s`), a diff holding one only. Default: both for the HTML report, paragraph by paragraph for a diff. In the GUI, "Compare by" |
 | `--language CODE`          | the language of the prose: its rules split sentences with `--split sentence` (about forty languages are known; others fall back to a simple rule), and the HTML report hyphenates wrapped lines by it. A code, e.g. `en`, `it`, `de`, `fr`, `pt-br`; `document`, the languages Word and OpenDocument files mark their text with, in the runs' and the styles' settings: each paragraph is split and hyphenated by its own, and the file's language is the one most of its letters are marked with, for the paragraphs that mark none (an error for Markdown and text files); or `guess`, guessed from each file's text (py3langid). Default: `document` for Word and OpenDocument files, `guess` for the others and for a document that marks no language. A file whose language is unknown (too short or too mixed to guess) is split by English rules and not hyphenated |
@@ -160,8 +161,9 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--assess-effort LEVEL`    | how hard the model thinks: one of the levels it reports it supports (`--list-models`; e.g. `low`, `medium`, `high`, `xhigh`, `max`). Default: the model's own |
 | `--assess-context document\|changes` | what the model reads: `document` (default), the changes and the whole new version, to check them against the rest of the document (citations, cross-references, terms); `changes`, the changes only. The old version is never sent apart: its unchanged paragraphs are in the new one, and what changed is in the changes. In the GUI, "Changes + new version" and "Changes only" |
 | `--assess-instructions TEXT` | your own instructions, added to the prompt (e.g. `"the journal is Research Policy; Laura asked to shorten the introduction"`), or a text file holding them |
-| `--assess-annotate`, `--no-assess-annotate` | have the AI mark each problem in the text (default: on): from its first words to its last, with what is wrong and the change it proposes; a numbered ⚠ badge before each in the HTML report, its passage highlighted when clicked, listed in an AI marks panel, and stepped through from the toolbar. In the GUI, "Mark problems in the text" |
-| `--assess-save-prompt`     | also put the exact text sent to the model, its system prompt and its message, in the HTML report, in a closed panel at its end (off by default): to see what it read. In the GUI, "Save the text sent to the AI" |
+| `--assess-annotate`, `--no-assess-annotate` | have the AI mark each problem in the text (default: on): from its first words to its last, with what is wrong and the change it proposes; a numbered ⚠ badge before each in the HTML report, its passage highlighted when clicked, a card in the margin beside it, and stepped through from the top bar. In the GUI, "Mark individual changes" |
+| `--assess-save-prompt`     | also put the exact text sent to the model, its system prompt and its message, in the HTML report, in a closed panel at its end (off by default): to see what it read. In the GUI, "Save AI prompt" |
+| `--assess-ai-writing`      | also ask the AI, apart, whether the text the changes added reads as written by an AI (off by default): a second assessment, its verdict (likely, possibly or unlikely) in the HTML report's top bar, opening its own drawer, with the signs for and against. An indication, not a proof: careful writers show the same signs, and writers in a second language are often taken for an AI wrongly. In the GUI, "Check for AI writing" |
 | `--assess-timeout SECONDS` | give up on the assessment after this long (default 900); the report is written all the same, saying why there is none |
 | `--list-models AI`         | list the models an AI reports it offers (`claude`, `codex`, `ollama`, or any provider any-llm reaches), its default first, and the efforts each supports |
 | `--login-codex`            | log in to ChatGPT, in the browser, for `--assess codex` (once) |
@@ -246,26 +248,28 @@ and judge them as a whole, as a co-author reading the returned draft would:
   placeholders, dangling citations, inconsistent terms or spelling, and the
   reviewers' comments left unanswered.
 
-It heads the HTML report, its verdict a coloured badge, in a panel closed
-until you open it, as are the Comments and AI marks panels; a unified or
-word diff has no room for it, so the AI assessment goes with the HTML report
-only (in the window its card is greyed out for the other formats).
+Its verdict sits in the HTML report's top bar, a coloured badge;
+clicking it opens the whole assessment in a drawer over the right of the
+page, the text scrolling under it (on paper, it heads the report). A
+unified or word diff has no room for it, so the AI assessment goes with the
+HTML report only (in the window its card is greyed out for the other
+formats).
 
-![The AI assessment at the top of a prosediff report: a verdict badge, what changed, the improvements and the problems to fix](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_assessment.png)
+![The AI assessment of a prosediff report, opened in its drawer from the verdict in the top bar: a verdict badge, what changed, the improvements and the problems to fix](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_assessment.png)
 
 With `--assess-annotate` (on by default; in the window, "Mark problems in
 the text") the AI also marks each problem in the text: the first and last
 words of the passage, copied from the text, what is wrong and the change it
 proposes. The report finds each passage (whatever the hyphenation, the
 spacing, straight or curly quotes, and the comments among its words),
-puts a numbered ⚠ badge before it, and lists them all in an **AI marks**
-panel below the comments; one it cannot find is listed as such.
-Clicking a problem, its badge or its entry in the panel, pins it: its
-passage highlighted and its tooltip open (what is wrong, the change
-proposed) until clicked again. The toolbar's ⚠ ◀ ▶ (`a`, Shift+`a`) steps
+puts a numbered ⚠ badge before it, and a card in the margin beside its
+paragraph: "Problem 3", what is wrong and the change proposed. One it cannot
+find has neither, and review mode lists it as not found. Clicking a
+problem, its badge or its card, pins it: its passage highlighted and its
+card ringed, until clicked again. The top bar's ◀ ⚠ ▶ (`a`, Shift+`a`) steps
 through them.
 
-![The AI marks panel of a prosediff report, each problem the AI marked with its passage, what is wrong and the change proposed; below it, a problem pinned in the text, its passage highlighted after its numbered badge and its tooltip open](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_marks.png)
+![A paragraph of a prosediff report with the problems the AI marked: a numbered badge before each passage in the text, and in the margin beside it a card for each, what is wrong and the change proposed; the first pinned, its passage highlighted and its card ringed](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_marks.png)
 
 The AI is one of three kinds, each an optional extra of prosediff, so the
 plain install stays small:
@@ -301,8 +305,13 @@ assessment is made is chosen with three more settings:
 
 What the AI is sent: the word diff of the changed paragraphs, comments
 included, the whole new version (unless `--assess-context changes`), and
-the instructions; no files, and no tools to run. `--assess-save-prompt`
-(in the window, "Save the text sent to the AI") puts that text, exactly as
+the instructions; no files, and no tools to run. Word and OpenDocument
+files are read directly, but text carries no styles: their formatting is
+written in prosediff's notation (`##` for a Heading 2 paragraph, `**` for
+bold), and the model is told so, and to report what changed in the word
+processor's terms (a paragraph that lost its Heading 2 style), never the
+notation itself. `--assess-save-prompt`
+(in the window, "Save AI prompt") puts that text, exactly as
 sent, at the end of the HTML report, in a panel closed until opened. With `claude`, `codex` or an API, that text goes
 to Anthropic's or OpenAI's (or the API's) servers under your account; with
 Ollama it stays on the computer. The HTML report itself still needs no
@@ -445,38 +454,53 @@ back to its default (what is compared and where the output goes stay).
   tree, and not from the base; the 50 newest are listed).
 - With `--assess`, the AI's assessment of the changes: its verdict as a
   badge, what changed, the improvements and the problems to fix (see [AI
-  assessment](#ai-assessment)); it folds away like a file.
+  assessment](#ai-assessment)), in a drawer opened from its verdict in the
+  top bar.
 - A summary line: which view it is (paragraph or sentence, with a button to
   the other when the report holds both) and how many paragraphs (or
   sentences; lines, for files other than prose) were changed, inserted,
   deleted and moved.
-- With AI marks, an **AI marks** panel: each problem the AI marked, its
-  passage, what is wrong and the change proposed; clicking one, or its ⚠
-  badge in the text, pins it as a comment is pinned (below). The toolbar's
-  ⚠ ◀ ▶ (`a`, Shift+`a`) steps through them, its counter saying which.
-- A comments panel: every comment with its author and date, marked new,
-  removed or unchanged, each linked to the line it sits in (unchanged
-  comments are in a collapsed list). It shows all of them, or only the new
-  or the removed ones, in reading order or by date, either way up (click
-  the order shown again to reverse it). Clicking a comment, its link in
-  the panel or its marker in the text, pins it: the words it is anchored
-  to stay highlighted, across paragraphs too, and its tooltip stays open
-  (drag it out of the way if it covers the text), until it is clicked again
-  (or Esc)
-  (only its marker ringed when those words were deleted with a tracked
+- The margin, beside the two versions: a card for each comment and each
+  problem the AI marked, next to the paragraph it is in, in the order they
+  come in its text. A comment's card says whether it is new or removed, who
+  wrote it and when, and what it says, with the paragraphs and the
+  formatting it has in Word or LibreOffice (a long one shows its first
+  lines, the rest on "Show all"); a problem's card, "Problem 3", what is
+  wrong and the change proposed. The cards of a paragraph taller than it run
+  on down the margin, pushing the next ones down, so the paragraphs keep the
+  height of their text; a paragraph with a card is never folded away with
+  the unchanged ones. In the text, a comment is a 💬 marker, a green balloon
+  holding a + when it was added since the base, or 🗑️ when it was removed;
+  a problem, a numbered ⚠ badge. Clicking a card, or its mark in the text,
+  pins it: the words it is anchored to stay highlighted, across paragraphs
+  too (only its marker ringed when those words were deleted with a tracked
   change; its whole paragraph when a Markdown file does not say where its
-  text ends). In the text, a comment is a 💬 marker, a green balloon
-  holding a + when it was added since the base, or 🗑️ when it was
-  removed; hovering or focusing it shows the author in bold, the comment
-  below, with the paragraphs and the formatting it has in Word or
-  LibreOffice, and its date in grey. A pinned comment highlights its
-  words only, not a mark among them (another comment's, an AI badge).
+  text ends), and its card ringed, until it is clicked again (or Esc). A
+  pinned comment highlights its words only, not a mark among them (another
+  comment's, an AI badge). The top bar steps through the comments (◀ ▶, `c`
+  and Shift+`c`) and the problems (◀ ⚠ ▶, `a` and Shift+`a`), each counter
+  saying which. On a narrow window, and in one column, the cards sit under
+  their paragraph. **Margin** in the top bar (`g`) hides the margin, the two
+  versions taking its width, and brings it back.
+- The columns resize with the mouse: drag the line between the old and the
+  new version to share their width otherwise, or the margin's edge to widen
+  or narrow it; double-click either for the default. The browser remembers
+  the widths.
+- Review mode (`r`, or **Review** in the top bar), to go through a revision
+  item by item: down the left, what there is to review, the AI assessment,
+  the changes (each with its first words removed and added), the comments
+  and the problems (one the AI marked but that the report could not find
+  listed as such); beside it, only the paragraph the chosen one is in, with
+  its cards, a line saying which it is ("Problem 4 of 17 · paragraph 33"),
+  and **Previous** and **Next** (`k`, `j`) through them all. `r` again, or
+  the button, ends it.
 - With more than one file, the changed files with their counts of lines
   and words added and removed (and moved lines), linked to their tables;
   buttons expand or collapse every file at once. A single file needs
   neither: its own header gives its counts.
-- Each file as a collapsible four-column table, its header sticking to the
-  top while it scrolls. Long lines wrap instead of scrolling sideways, so
+- Each file as a collapsible table, the old version beside the new (and
+  the margin, when there are comments or problems), its header sticking
+  under the top bar while it scrolls. Long lines wrap instead of scrolling sideways, so
   prose stays readable. Unchanged lines beyond the context are folded into a
   "show N unchanged lines" link that reveals them.
 - Changed words highlighted within changed lines; a word changed into a
@@ -508,21 +532,22 @@ back to its default (what is compared and where the output goes stay).
   (`s`) switching between them.
 - Changed images (PNG, JPEG, GIF, WebP, BMP, up to 5 MB) old and new side by
   side; other binary files are listed but not shown.
-- A toolbar: the number of changes, with `n` and `p` (or its arrows) to jump
-  to the next and previous change; the view switch (`s`, with both views);
-  `l` for the lines between moves and `v` for the moved passages (both off
-  by default), and `u` for one column; and a **View** menu for the switches few use, each named with
-  its key (hovering any toolbar item shows its name, what it does and its
-  key). `u` shows one column instead of two (each changed line shows its
+- A top bar, staying at the top as the page scrolls: what is compared; the
+  AI's verdict, opening its assessment; the number of changes, with `n` and
+  `p` (or its arrows) to jump to the next and previous change; the comments'
+  and the problems' arrows; **Review**; the view switch (`s`, with both
+  views); `l` for the lines between moves and `v` for the moved passages
+  (both off by default), and `u` for one column; and a **View** menu for
+  the switches few use, each named with its key (hovering any item of the
+  bar shows its name, what it does and its key). `u` shows one column instead of two (each changed line shows its
   old version above its new one). In the View menu: `h` for the change
   highlights, on by default (off: the background colour of changed words
   and lines gone, the text plain, the gutters of line numbers still tinted
   and signed where it changed); `f` for
   the text formatted, on by default, or plain (formatted: Markdown's syntax
   hidden, emphasis, headings, links and citations styled, a document's bold,
-  italic, underline and the like shown, prose in a proportional font); `c` for the comments expanded, each written out after its marker (its
-  author and text), as on paper, and the words each is anchored to highlighted,
-  all at once; `e` for the AI marks expanded, likewise (with AI marks); `m` for the formatting changes, on by default: text
+  italic, underline and the like shown, prose in a proportional font); `m`
+  for the formatting changes, on by default: text
   of a Word or OpenDocument file whose words are the same but whose
   formatting changed (made bold or italic, underlined, struck through, made
   superscript, subscript, a link or a heading) is marked in amber, what
@@ -531,8 +556,7 @@ back to its default (what is compared and where the output goes stay).
   stepper, − and + either side of the value
   (or `[` and `]`, or the arrow keys on the value, an ARIA spinbutton), for
   less or more space between the paragraphs of Markdown and
-  Word documents; and a checkbox for the comment tooltips (on by default).
-  The browser remembers the views, the spacing and the checkbox.
+  Word documents. The browser remembers the views and the spacing.
 - The prose of Markdown files and Word documents is hyphenated by the rules
   of its language (`--language`: by default the one a Word or OpenDocument
   file marks each paragraph with, otherwise guessed from the file's text):
@@ -551,9 +575,9 @@ back to its default (what is compared and where the output goes stay).
   even from a browser in dark mode), lets a long paragraph continue on the
   next page (never leaving a lone line either side) rather than leave the
   rest of a page blank, and narrows the line-number gutters so the text
-  columns fit a portrait page. What the screen shows on hover is written
-  out: each comment's author and text after its marker, and where a moved
-  line went. A file running over
+  columns fit a portrait page. The AI assessment heads the report, every
+  card is printed whole beside its paragraph, and where a moved line went
+  is written out. A file running over
   several pages repeats its column headings (its name, old and new) at the
   top of each, and folded unchanged lines print as a quiet "⋯ N unchanged
   lines".

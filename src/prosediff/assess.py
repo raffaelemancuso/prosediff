@@ -51,6 +51,9 @@ SUBSCRIPTIONS = {"claude": "claude", "codex": "codex"}
 # claude asks for it by giving no model.
 CLAUDE_DEFAULT = "default"
 VERDICTS = ("improves", "mixed", "worsens")
+# The verdicts of the second assessment, whether the new text reads as written
+# by an AI (AssessRequest.ai_writing): likely, possibly or unlikely.
+WRITING_VERDICTS = ("likely", "possibly", "unlikely")
 # What the model reads: the whole new version and the changes, or the
 # changes alone.
 CONTEXTS = ("document", "changes")
@@ -90,6 +93,63 @@ Write "None found." if there are none.
 Be specific and brief. Write in the language the document is written in, \
 unless the instructions of the person asking say otherwise."""
 
+# The second assessment, asked apart when AssessRequest.ai_writing: whether
+# the text the changes added reads as written by an AI. Such a judgement is
+# circumstantial, and the model is told so.
+SYSTEM_WRITING = """\
+You are an experienced editor. You are given the changes between two \
+versions of a document as a word diff: [-text-] was removed, {+text+} was \
+added, and {>>Author (date): text<<} is a reviewer's comment; lines that \
+begin with @@ say where a change sits. When the whole new version is given \
+too, it shows how its authors write elsewhere.
+
+Assess whether the text the changes added or rewrote (what {+ +} added, and \
+new paragraphs) reads as written by a generative AI, a large language model, \
+rather than by the document's authors. Look for the signs of such text: \
+generic or inflated wording ("delve", "pivotal", "underscore", "intricate", \
+"landscape", "tapestry"), stock transitions and summaries, a uniform rhythm \
+of sentences, lists of three, balanced hedging without specifics, claims or \
+citations that look invented or do not fit what they support, and a \
+register or vocabulary unlike the rest of the document. Weigh them against \
+how the authors write in the unchanged text. These signs are \
+circumstantial: careful human writers show them too, and writers in a \
+second language are often taken for an AI wrongly. Say how sure you can be, \
+never claim certainty, and judge the text, not the people.
+
+Answer in Markdown with exactly these sections:
+
+## Verdict
+The first word, in bold, is one of **Likely**, **Possibly** or **Unlikely** \
+(that the new text was written by an AI); then two or three sentences on why, \
+and how sure you can be.
+
+## Signs of AI writing
+A short list, each quoting the words concerned and naming the sign. Write \
+"None found." if there are none.
+
+## Signs against
+A short list of what reads as the authors' own. Write "None found." if there \
+are none.
+
+Be specific and brief. Write in the language the document is written in, \
+unless the instructions of the person asking say otherwise."""
+
+# Added to SYSTEM when the files are Word documents or OpenDocument texts:
+# their styles reach the model in prosediff's notation (diff.line_markdown),
+# which it must not take for the text, nor report as changed.
+DOCUMENTS = """
+
+The documents are Word documents or OpenDocument texts, not Markdown. They \
+are given one paragraph per line, their formatting written in a notation of \
+the tool that compares them, which is not in the documents: # to ###### \
+before a paragraph for a Heading 1 to Heading 6 style, • for a list item, | \
+between the cells of a table row, **bold**, *italic*, [text]{.underline}, \
+~~struck through~~, ^superscript^, ~subscript~, [^1] for a footnote \
+reference and [^1]: before the footnote's text. Never report these marks \
+themselves as added, removed or misplaced: say what changed in the word \
+processor's terms (a paragraph that lost its Heading 2 style, words no longer \
+bold, a list item become a paragraph), and quote the words without them."""
+
 # Added to SYSTEM when the problems are to be marked in the text (annotate).
 ANNOTATE = """
 
@@ -105,7 +165,8 @@ short passage);
 - "problem": what is wrong with it, in a sentence;
 - "solution": the change you propose, in a sentence or as the text to put.
 Copy the words from the text itself, never with the diff's markers ([- -], \
-{+ +}, {>> <<}). Write [] when nothing is to be marked."""
+{+ +}, {>> <<}) nor the notation of a document's formatting. Write [] when \
+nothing is to be marked."""
 
 
 @dataclass(frozen=True)
@@ -180,8 +241,10 @@ class AssessRequest:
     for its default), what it reads (context: one of CONTEXTS), the
     instructions of the person asking (added to the prompt), how long it
     may take, whether the text sent is put in the HTML report
-    (save_prompt: Assessment.prompt_text), and whether the model marks the
-    problems in the text (annotate: Assessment.annotations)."""
+    (save_prompt: Assessment.prompt_text), whether the model marks the
+    problems in the text (annotate: Assessment.annotations), and whether it
+    is asked apart, a second time, if the new text reads as written by an
+    AI (ai_writing: an assessment of kind "writing")."""
 
     spec: str
     effort: str = ""
@@ -190,11 +253,13 @@ class AssessRequest:
     timeout: float = ASSESS_TIMEOUT
     save_prompt: bool = False
     annotate: bool = True
+    ai_writing: bool = False
 
 
 @dataclass
 class Assessment:
-    """What a model made of the changes."""
+    """What a model made of the changes: their value (kind "value"), or
+    whether their new text reads as written by an AI ("writing")."""
 
     backend: str  # as asked: "claude", "codex/gpt-5.5", "ollama/qwen3"
     markdown: str = ""
@@ -210,6 +275,7 @@ class Assessment:
     save_prompt: bool = False
     # the problems the model marked in the text, when asked (annotate)
     annotations: list[Annotation] = field(default_factory=list)
+    kind: str = "value"
 
     @property
     def notes_json(self) -> list[dict]:
@@ -218,11 +284,13 @@ class Assessment:
 
     @property
     def verdict(self) -> str:
-        """ "improves", "mixed" or "worsens", from the Verdict section; "" when
-        the model gave none of them."""
+        """ "improves", "mixed" or "worsens" (for a "writing" assessment,
+        "likely", "possibly" or "unlikely"), from the Verdict section; ""
+        when the model gave none of them."""
         section = re.search(r"#+\s*Verdict\s*\n(.*?)(?=\n#+\s|\Z)", self.markdown, re.S | re.I)
         words = re.findall(r"[A-Za-z]+", section[1] if section else self.markdown[:200])
-        return next((w.lower() for w in words if w.lower() in VERDICTS), "")
+        verdicts = WRITING_VERDICTS if self.kind == "writing" else VERDICTS
+        return next((w.lower() for w in words if w.lower() in verdicts), "")
 
     @property
     def html(self) -> Markup:
@@ -480,26 +548,37 @@ def assess(
     request: AssessRequest,
     document: str = "",
     runner: Runner | None = None,
+    documents: bool = False,
+    kind: str = "value",
 ) -> Assessment:
     """An assessment of the changes of a word diff by the AI request names;
     subject names what changed ("paper.docx"), document is the whole new
-    version, sent when request.context is "document"; runner answers in
-    place of the models (run_backend), for the tests. It never raises: a
-    failure is its error."""
+    version, sent when request.context is "document"; documents: the files
+    are Word documents or OpenDocument texts, their formatting written in
+    prosediff's notation (DOCUMENTS); runner answers in place of the models
+    (run_backend), for the tests. kind "writing" asks instead whether the
+    new text reads as written by an AI (SYSTEM_WRITING), no problem marked
+    in the text. It never raises: a failure is its error."""
     runner = runner or run_backend
     started = time.monotonic()
     context = request.context if request.context in CONTEXTS else "document"
     if context == "changes":
         document = ""
     made = Assessment(
-        request.spec, effort=request.effort, context=context, save_prompt=request.save_prompt
+        request.spec,
+        effort=request.effort,
+        context=context,
+        save_prompt=request.save_prompt,
+        kind=kind,
     )
+    annotate = request.annotate and kind == "value"
     try:
         backend, model = parse_backend(request.spec)
         if not diff.strip():
             raise AssessError("there are no changes to assess")
         prompt = prompt_for(diff, subject, document, instructions_from(request.instructions))
-        system = SYSTEM + ANNOTATE if request.annotate else SYSTEM
+        first = SYSTEM_WRITING if kind == "writing" else SYSTEM
+        system = first + (DOCUMENTS if documents else "") + (ANNOTATE if annotate else "")
         made.system, made.prompt = system, prompt  # kept even if the model then fails
         text, answered = runner(backend, system, prompt, model, request.effort, request.timeout)
         if not text.strip():
@@ -507,7 +586,7 @@ def assess(
     except (AssessError, OSError) as e:
         made.error, made.seconds = str(e), time.monotonic() - started
         return made
-    if request.annotate:
+    if annotate:
         text, made.annotations = split_annotations(text)
     made.markdown, made.model = text.strip(), answered
     made.seconds = time.monotonic() - started

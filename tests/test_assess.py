@@ -212,24 +212,26 @@ def test_a_long_text_is_cut_and_the_model_told():
 
 
 def test_the_report_holds_the_assessment(tmp_path):
-    """The assessment heads the HTML report, its Markdown rendered and its
-    HTML escaped, its verdict a badge, how it was asked said; the problems
-    it marked in an AI marks panel, held for the script to find in the text,
-    the toolbar stepping through them; the panels closed; the text sent to
-    the AI at the end, when asked for; a failed one says why."""
+    """The assessment is a drawer of the HTML report, opened from its verdict
+    in the top bar, its Markdown rendered and its HTML escaped, its verdict a
+    badge, how it was asked said; the problems it marked held for the
+    script to find in the text (and card in the margin), the top bar
+    stepping through them; the text sent to the AI at the end, when asked
+    for; a failed one says why."""
     old, new = two_files(tmp_path, "One line.\n", "One changed line.\n")
     c = compare_paths(old, new)
     a = Assessment("ollama/qwen3", ANSWER + "\n<script>x</script>\n", "qwen3", 42.4)
     html = render(c, assessment=a)
-    assert '<details class="assessment">' in html
+    assert '<aside class="drawer" id="assessment"' in html
+    assert 'data-drawer="assessment"' in html
     assert "Text sent to the AI" not in html
     assert '<span class="verdict verdict-improves">Improves</span>' in html
     assert "by ollama/qwen3 (qwen3), in 42 seconds" in html
     assert "<h2>Problems to fix</h2>" in html and "<ol>" in html
     assert "<script>x</script>" not in html and "&lt;script&gt;" in html
-    # no marks: no panel, no data, no arrows
-    assert 'id="ai-notes-data"' not in html and "<h2>AI marks:" not in html
-    assert 'data-ai-nav="1"' not in html
+    # no marks: no data, no arrows, no margin
+    assert 'id="ai-notes-data"' not in html and 'data-ai-nav="1"' not in html
+    assert 'class="notes"' not in html
     a.effort, a.context = "max", "document"
     a.annotations = split_annotations(MARKED)[1]
     html = render(c, assessment=a)
@@ -237,20 +239,19 @@ def test_the_report_holds_the_assessment(tmp_path):
         "by ollama/qwen3 (qwen3), effort max, from the changes and the new version, in 42 seconds"
         in (html)
     )
-    assert "<h2>AI marks: 2 problems</h2>" in html
-    assert '<details class="comments-panel ai-notes">' in html
+    assert "⚠ 2 problems" in html and '<td class="notes"></td>' in html
     assert "It marked 2 problems in the text" in html
     assert '<script type="application/json" id="ai-notes-data">' in html
     assert 'data-ai-nav="1"' in html
-    assert "Say what changed." in html and "(old version)" in html
+    assert "Say what changed." in html
     a.system, a.prompt, a.save_prompt = "Be a reviewer.", "The <changes>.", True
     html = render(c, assessment=a)
-    assert '<details class="assessment prompt-sent">' in html
+    assert '<details class="prompt-sent">' in html
     assert "===== system prompt =====\nBe a reviewer.\n" in html
     assert "The &lt;changes&gt;." in html
     failed = render(c, assessment=Assessment("codex", error="no login"))
     assert "The assessment failed: no login" in failed
-    assert 'class="assessment"' not in render(c)
+    assert 'id="assessment"' not in render(c)
 
 
 def test_cli_assess_writes_the_report(tmp_path, monkeypatch, capsys):
@@ -352,3 +353,58 @@ def test_a_real_local_model_assesses(tmp_path):
     assert a.error == "", a.error
     assert a.markdown.strip() and a.model
     assert a.seconds > 0
+
+
+def test_word_files_come_with_the_notation_explained(tmp_path, monkeypatch):
+    """Comparing Word documents, the model is told that # and ** are the
+    tool's notation for their styles, not text of theirs to report as
+    changed; comparing text files, it is not."""
+    import docx
+
+    from prosediff.assess import DOCUMENTS
+
+    runner = fake()
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    for name, title in (("old", "Results"), ("new", "Main results")):
+        d = docx.Document()
+        d.add_heading(title, level=2)
+        d.save(tmp_path / f"{name}.docx")
+    c = compare_paths(tmp_path / "old.docx", tmp_path / "new.docx")
+    assess_comparison(c, AssessRequest("claude", annotate=False))
+    old, new = two_files(tmp_path, "One.\n", "Two.\n")
+    assess_comparison(compare_paths(old, new), AssessRequest("claude", annotate=False))
+    (word_system, text_system) = [asked[1] for asked in runner.asked]
+    assert word_system == SYSTEM + DOCUMENTS and "Heading 2 style" in DOCUMENTS
+    assert text_system == SYSTEM
+
+
+def test_the_ai_is_asked_apart_whether_the_new_text_reads_as_ai_written(tmp_path, monkeypatch):
+    """With ai_writing, a second assessment: its own instructions, which say
+    such a judgement is circumstantial, no problem marked in the text, its
+    verdict likely, possibly or unlikely; in the report, a chip of its own
+    in the top bar, opening its drawer, which says it is no proof."""
+    from prosediff.assess import SYSTEM_WRITING
+
+    answer = "## Verdict\n**Possibly**: stock phrases.\n\n## Signs of AI writing\n- x"
+    runner = fake(answer)
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    old, new = two_files(tmp_path, "One line.\n", "One pivotal line.\n")
+    c = compare_paths(old, new)
+    request = AssessRequest("claude", ai_writing=True)
+    writing = assess_comparison(c, request, kind="writing")
+    ((_, system, prompt, *_),) = runner.asked
+    assert system.startswith(SYSTEM_WRITING) and "circumstantial" in SYSTEM_WRITING
+    assert "One {+pivotal +}line." in prompt
+    assert writing.kind == "writing" and writing.verdict == "possibly"
+    assert writing.annotations == []
+    html = render(c, assessment=Assessment("claude", ANSWER), writing=writing)
+    assert 'data-drawer="writing"' in html and '<aside class="drawer" id="writing"' in html
+    assert '<span class="verdict verdict-possibly">Possibly</span>' in html
+    assert "an indication, not a proof" in html
+
+
+def test_cli_ai_writing_goes_with_assess(tmp_path, capsys):
+    old, new = two_files(tmp_path, "One line.\n", "Two lines.\n")
+    with pytest.raises(SystemExit):
+        main(["--files", str(old), str(new), "--assess-ai-writing"])
+    assert "go with --assess" in capsys.readouterr().err

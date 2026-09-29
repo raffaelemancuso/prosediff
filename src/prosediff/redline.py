@@ -50,7 +50,17 @@ from docx_plus.revisions import (
 from lxml import etree
 
 from prosediff.diff import FileDiff, word_ops
-from prosediff.document import BULLET, EM, FORMATTING, STRIKE, STRONG, SUB, SUP, UNDERLINE
+from prosediff.document import (
+    BULLET,
+    EM,
+    FORMATTING,
+    STRIKE,
+    STRONG,
+    SUB,
+    SUP,
+    UNDERLINE,
+    heading_level,
+)
 
 STYLES = frozenset(FORMATTING)
 HEADING = re.compile(r"h([1-6])")
@@ -61,9 +71,7 @@ def kind_of(line: str) -> tuple[str, int]:
     "item"), and a heading's level."""
     kind = getattr(line, "kind", "p")
     if kind == "heading":
-        styles = getattr(line, "styles", None) or [frozenset()]
-        level = next((int(m[1]) for s in styles[0] if (m := HEADING.fullmatch(s))), 1)
-        return "heading", level
+        return "heading", heading_level(line) or 1
     return ("item", 0) if kind == "item" and line.startswith(BULLET) else ("p", 0)
 
 
@@ -145,7 +153,7 @@ class WordFile:
     def settle(self) -> None:
         """The document's own tracked changes accepted (or rejected, as the
         file was read), once its paragraphs are found."""
-        if self.changes == "reject":
+        if self.changes == "reject-all":
             reject_all_revisions(self.doc)
         else:
             accept_all_revisions(self.doc)

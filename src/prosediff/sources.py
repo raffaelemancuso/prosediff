@@ -51,14 +51,14 @@ def is_document(path: str | None) -> bool:
     return bool(path) and Path(path).suffix.lower() in DOCUMENT_SUFFIXES
 
 
-def document_to_markdown(data: bytes, name: str, changes: str = "accept") -> bytes:
+def document_to_markdown(data: bytes, name: str, changes: str = "accept-all") -> bytes:
     """A Word document or an OpenDocument text as Markdown, by its name's
-    extension, comments kept. changes is "accept" or "reject" (the tracked
-    changes), or "all" to keep them as insertion and deletion spans."""
+    extension, comments kept. changes is "accept-all" or "reject-all" (the tracked
+    changes), or "show" to keep them as insertion and deletion spans."""
     return to_markdown(read_document(data, name, changes)).encode("utf-8")
 
 
-def read_document(data: bytes, name: str, changes: str = "accept") -> Document:
+def read_document(data: bytes, name: str, changes: str = "accept-all") -> Document:
     """A Word document or an OpenDocument text as prosediff reads it
     (prosediff.document), by its name's extension; changes as in
     document_to_markdown."""

@@ -343,7 +343,7 @@ class FileDiff:
     # mark the changes in a copy of the new one, all else kept.
     old_data: bytes = field(default=b"", repr=False)
     new_data: bytes = field(default=b"", repr=False)
-    document_changes: str = "accept"
+    document_changes: str = "accept-all"
     # The comments folded out of those lines, behind their placeholders.
     comments: Comments | None = None
     # Set apart the ids of its rows, when a report holds two comparisons.
@@ -431,19 +431,6 @@ class Comparison:
     def without_passages(self) -> Counts:
         """Its counts with moved passages hidden (FileDiff.without_passages)."""
         return sum((f.without_passages for f in self.files), Counts())
-
-    def comments_with(self, status: str) -> list[CommentEntry]:
-        return [c for c in self.comments if c.status == status]
-
-    def comments_in_reading_order(self, statuses: tuple[str, ...]) -> list[CommentEntry]:
-        """The comments of those statuses in the order the report shows them:
-        file by file, then row by row; one no row shows at the end of its
-        file."""
-        file_no = {f.path: i for i, f in enumerate(self.files)}
-        return sorted(
-            (c for c in self.comments if c.status in statuses),
-            key=lambda c: (file_no.get(c.path, len(file_no)), c.order is None, c.order or 0),
-        )
 
 
 CHANGE_NAMES = {
@@ -2425,8 +2412,8 @@ class Options:
     and lists the comments in a panel; "text" compares the comment markup
     as text; "none" leaves every comment out, in every format. Comments
     without text are left out, unless empty_comments. docx_changes settles
-    the tracked changes of Word and OpenDocument documents: "accept",
-    "reject" or "all" (kept as markup).
+    the tracked changes of Word and OpenDocument documents: "accept-all",
+    "reject-all" or "show" (kept as markup).
 
     by_sentence compares the prose of Markdown files (and Word documents)
     sentence by sentence instead of line by line; each sentence is labelled
@@ -2456,7 +2443,7 @@ class Options:
     ignore_whitespace: bool = False
     comments: str = "markers"
     empty_comments: bool = False
-    docx_changes: str = "accept"
+    docx_changes: str = "accept-all"
     by_sentence: bool = False
     paragraph_moves: MoveSettings = MoveSettings()
     sentence_moves: MoveSettings = MoveSettings()
@@ -2628,7 +2615,7 @@ def build_files(
             }
             fd.note = (
                 f"read from {' and '.join(sorted(kinds))}, tracked changes "
-                + {"accept": "accepted", "reject": "rejected", "all": "shown as markup"}[
+                + {"accept-all": "accepted", "reject-all": "rejected", "show": "shown as markup"}[
                     options.docx_changes
                 ]
             )
@@ -2742,7 +2729,7 @@ def line_markdown(line: str) -> str:
         out.append(text)
         k += n
     text = "".join(out)
-    level = next((int(st[1]) for st in (line.styles[:1] or [()])[0] if HEADING.fullmatch(st)), 0)
+    level = document.heading_level(line)
     return f"{'#' * level} {text}" if line.kind == "heading" and level else text
 
 
@@ -2792,20 +2779,15 @@ def comment_entries(
             else "removed"
         )
         row = located.get(("old" if status == "removed" else "new", ph))
-        anchor, line, label, order = fd.anchor, None, "", None
+        anchor, line, label = fd.anchor, None, ""
         if row is not None:
-            order = rows.index(row)
             if not row.anchor:
-                row.anchor = f"{fd.anchor}-row{order + 1}"
+                row.anchor = f"{fd.anchor}-row{rows.index(row) + 1}"
             anchor = row.anchor
             line = row.left_no if status == "removed" else row.right_no
             label = row.left_label if status == "removed" else row.right_label
         c = comments.get(ph)
-        entries.append(
-            CommentEntry(
-                c.author, c.text, status, fd.path, anchor, line, c.date, label, order, c.rich
-            )
-        )
+        entries.append(CommentEntry(c.author, c.text, status, fd.path, anchor, line, c.date, label))
     entries.sort(key=lambda e: (e.line is None, e.line or 0))
     return entries
 

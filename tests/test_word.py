@@ -66,9 +66,9 @@ def test_tracked_changes_three_ways(tmp_path):
         '<w:r><w:t xml:space="preserve"> grow.</w:t></w:r></w:p>',
     ).read_bytes()
     # the space of " entry" goes with it: not "start-up s" (jgm/pandoc#4427)
-    assert markdown_of(d, "a.docx", "accept").strip() == "start-ups grow."
-    assert markdown_of(d, "a.docx", "reject").strip() == "start-up entry grow."
-    assert markdown_of(d, "a.docx", "all").strip() == (
+    assert markdown_of(d, "a.docx", "accept-all").strip() == "start-ups grow."
+    assert markdown_of(d, "a.docx", "reject-all").strip() == "start-up entry grow."
+    assert markdown_of(d, "a.docx", "show").strip() == (
         'start-up[ entry]{.deletion author="A" date="D"}[s]{.insertion author="A" date="D"} grow.'
     )
     with pytest.raises(ValueError):

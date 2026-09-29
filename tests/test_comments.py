@@ -59,11 +59,11 @@ def test_empty_comments_switch(tmp_path):
     assert compare_paths(a, b).comments == []
     c = compare_paths(a, b, Options(empty_comments=True))
     assert [(e.author, e.text, e.status) for e in c.comments] == [("Anna", "", "new")]
-    assert ">(no text)</a>" in render(c)
+    assert 'aria-label="new comment by Anna, 2026-09-23 10:00: (no text)"' in render(c)
     # the command line passes the switch on
     out = tmp_path / "r.html"
     assert main(["--folders", str(a), str(b), "--empty-comments", "-o", str(out)]) == 0
-    assert ">(no text)</a>" in out.read_text(encoding="utf-8")
+    assert "(no text)" in out.read_text(encoding="utf-8")
 
 
 def test_other_spans_and_links_untouched():
@@ -174,7 +174,7 @@ def test_compare_fold_comments(builder, tmp_path):
     c = compare(builder.path, base, target, Options(comments="text"))
     html = render(c)
     assert "comment-start" in html
-    assert c.comments == [] and '<section class="comments-panel"' not in html
+    assert c.comments == [] and 'class="notes"' not in html
 
 
 def test_comments_panel_statuses_and_links(tmp_path):
@@ -197,15 +197,13 @@ def test_comments_panel_statuses_and_links(tmp_path):
     assert by_text["New remark."].line == 22
     assert by_text["Old remark."].line == 21
     html = render(c)
-    assert "Comments: 1 new, 1 removed</h2>" in html and "Too long." not in html
+    assert "Too long." not in html
     for e in c.comments:
         assert f'id="{e.anchor}"' in html
-    # the new and the removed comment have their own icons, in the text and
-    # in the panel
+    # the new and the removed comment have their own icons, and the margin
+    # where their cards go
     assert html.count('class="comment new"') == 1
     assert html.count('class="comment removed"') == 1
-    assert by_text["New remark."].icon == NEW_COMMENT_MARK
-    assert by_text["Old remark."].icon == REMOVED_COMMENT_MARK
     assert not PLACEHOLDER.search(html)  # every comment became a marker
 
 
@@ -271,20 +269,42 @@ def commented_documents(tmp_path, ext):
 @pytest.mark.parametrize("ext", ["docx", "odt"])
 def test_a_comment_keeps_its_paragraphs_and_formatting(tmp_path, ext):
     """A comment of a Word or OpenDocument document keeps its paragraphs,
-    the blank line between them and its italics, for the tooltip
-    (data-rich) and the panel; its text stays one line, for the other
-    formats and to be told apart."""
+    the blank line between them and its italics, for its card (data-rich);
+    its text stays one line, for the other formats and to be told apart."""
+    import html as html_lib
+    import json
+    import re
+
     old, new = commented_documents(tmp_path, ext)
     c = compare_paths(old, new, Options())
     (entry,) = c.comments
     assert entry.text == "Please cite: See Research Policy, 49."
-    assert entry.rich == (
-        (("Please cite:", ()),),
-        (),
-        (("See ", ()), ("Research Policy", ("em",)), (", 49.", ())),
-    )
-    assert str(entry.html) == "Please cite:<br><br>See <i>Research Policy</i>, 49."
     html = render(c)
-    rich = "[[[&#34;Please cite:&#34;, &#34;&#34;]], [], [[&#34;See &#34;, &#34;&#34;]"
-    assert f'data-rich="{rich}' in html
-    assert "<i>Research Policy</i>" in html  # in the panel
+    rich = json.loads(html_lib.unescape(re.search(r'data-rich="([^"]*)"', html)[1]))
+    assert rich == [
+        [["Please cite:", ""]],
+        [],
+        [["See ", ""], ["Research Policy", "em"], [", 49.", ""]],
+    ]
+    assert '<td class="notes"></td>' in html  # the margin for its card
+
+
+def test_a_comment_at_the_start_of_a_heading_keeps_it_a_heading(tmp_path):
+    """A comment anchored where a heading starts puts its placeholder first:
+    the heading is still one, its ## kept in the diffs (and in what the AI
+    reads), only the comment added."""
+    import docx
+
+    from prosediff.unified import unified
+
+    for name, comment in (("old", False), ("new", True)):
+        d = docx.Document()
+        h = d.add_heading("Aggregate firm entry", level=2)
+        d.add_paragraph("Body.")
+        if comment:
+            d.add_comment(h.runs[0], text="Add references.", author="Anna")
+        d.save(tmp_path / f"{name}.docx")
+    c = compare_paths(tmp_path / "old.docx", tmp_path / "new.docx", Options(context=None))
+    (line,) = [x for x in unified(c, 0, "wdiff").splitlines() if "Aggregate" in x]
+    assert line.startswith("## {+{>>Anna")
+    assert "[-" not in line

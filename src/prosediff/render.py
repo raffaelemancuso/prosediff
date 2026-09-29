@@ -144,13 +144,15 @@ def render(
     sentences: Comparison | None = None,
     split: str = "paragraph",
     assessment: Assessment | None = None,
+    writing: Assessment | None = None,
 ) -> str:
     """The HTML report; align ("left" or "justify") sets how wrapped lines are
     aligned. split says how the comparison compared prose, "paragraph" or
     "sentence"; given sentences, the same comparison sentence by sentence,
     the report holds both (comparison then paragraph by paragraph), and a
     switch of its toolbar shows one or the other. An AI's assessment of the
-    changes, given, heads the report."""
+    changes, given, heads the report; writing, its assessment of whether
+    their new text reads as written by an AI, beside it."""
     if align not in ALIGNMENTS:
         raise ValueError(f"align must be one of {ALIGNMENTS}, not {align!r}")
     template = _env.get_template("report.html.j2")
@@ -163,6 +165,7 @@ def render(
         paths=paths or [],
         align=align,
         assessment=assessment,
+        writing=writing,
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         version=package_version(),
         homepage=HOMEPAGE,
@@ -182,6 +185,7 @@ def write_output(
     sentences: Comparison | None = None,
     split: str = "paragraph",
     assessment: Assessment | None = None,
+    writing: Assessment | None = None,
 ) -> Path:
     """Write the HTML report (fmt "html"), the unified diff ("diff"), the word
     diff ("wdiff"), LF line ends on every system, or the Word document
@@ -201,7 +205,13 @@ def write_output(
         text = unified(comparison, CONTEXT if context == "auto" else context, fmt)
     else:
         text = render(
-            comparison, paths, align=align, sentences=sentences, split=split, assessment=assessment
+            comparison,
+            paths,
+            align=align,
+            sentences=sentences,
+            split=split,
+            assessment=assessment,
+            writing=writing,
         )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
@@ -220,16 +230,21 @@ def open_output(path: Path) -> None:
         subprocess.Popen([opener, str(path)])
 
 
-def assess_comparison(comparison: Comparison, request: AssessRequest) -> Assessment:
+def assess_comparison(
+    comparison: Comparison, request: AssessRequest, kind: str = "value"
+) -> Assessment:
     """The assessment of a comparison's changes by the AI request names
     (prosediff.assess): its word diff, the changed lines alone, comments
     included, and the whole new version (new_version) when the request's
-    context says so, sent to the model."""
+    context says so, sent to the model; kind "writing" asks instead whether
+    their new text reads as written by an AI."""
     return assess(
         unified(comparison, 0, "wdiff"),
         comparison.repo_name,
         request,
         document=new_version(comparison) if request.context == "document" else "",
+        documents=any(f.old_data or f.new_data for f in comparison.files),
+        kind=kind,
     )
 
 

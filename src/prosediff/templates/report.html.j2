@@ -36,9 +36,13 @@
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+/* The page takes the whole width: the two versions side by side, and the
+   margin of comments and problems beside them. --bar-h: the top bar's
+   height, set by the script, for what sticks under it. */
+:root { --bar-h: 49px; --notes-w: 340px; --review-w: 320px; }
+body { margin: 0; padding: 0 16px 24px; background: var(--bg); color: var(--fg);
   font: 14px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
-main { max-width: 1600px; margin: 0 auto; }
+main { margin: 0; padding-top: 16px; }
 h1 { font-size: 20px; margin: 0 0 6px; }
 h1 .full-path { font-size: 12px; font-weight: 400; margin-left: 8px; }
 h2 { font-size: 15px; margin: 0 0 6px; }
@@ -57,45 +61,74 @@ h2 { font-size: 15px; margin: 0 0 6px; }
   .revisions { grid-template-columns: auto auto 1fr; }
   .revisions .full-path { grid-column: 2 / 4; }
 }
-.commits, .comments-panel { margin-bottom: 12px; }
-.commits summary, .comments-panel summary { cursor: pointer; color: var(--muted); }
+.commits { margin-bottom: 12px; }
+.commits summary { cursor: pointer; color: var(--muted); }
 .commits ol { margin: 6px 0 0; padding-left: 0; list-style: none; }
 .commits li { display: grid; grid-template-columns: 5.5em 9em 1fr; gap: 8px; }
 .commits li code { color: var(--muted); }
-.comments-panel { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
-.comments-panel ul { list-style: none; margin: 4px 0 8px; padding: 0; }
-.comments-panel li { display: grid; grid-template-columns: 6em 10em 1fr; gap: 8px;
-  padding: 4px 0; }
-.comments-panel li[hidden] { display: none; }
-.comments-panel li:not([hidden]) ~ li:not([hidden]) { border-top: 1px dashed var(--border); }
-.comments-panel .status-new { color: var(--add); font-weight: 600; }
-.comments-panel .status-removed { color: var(--rem); font-weight: 600; }
-.comments-panel .status-unchanged { color: var(--muted); }
-.comments-panel a { color: inherit; text-decoration: none; }
-.comments-panel a:hover { text-decoration: underline; }
-/* A mark clicked (a comment's marker, a problem's badge, or either's entry
-   in its list) pinned: its text highlighted (a highlight of the script's
-   ranges), or its paragraph when where that text ends is not known, and
-   the mark ringed, until clicked again. */
+/* A mark clicked (a comment's marker, a problem's badge, or its card in the
+   margin) pinned: its text highlighted (a highlight of the script's
+   ranges), or its paragraph when where that text ends is not known, the
+   mark ringed and its card too, until clicked again. */
 ::highlight(pin) { background-color: var(--flash); }
 td.code.pinned { background-color: var(--flash) !important; }
 .comment.pinned, .ai-mark.pinned { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
 td.code .comment, td.code .ai-mark { cursor: pointer; }
-.comments-switch .dir { margin-left: 2px; }
-/* The panel folds from its header, as the files and the AI assessment do;
-   its buttons there do not fold it. */
-.comments-panel > summary.comments-head { display: flex; flex-wrap: wrap; align-items: baseline;
-  gap: 4px 16px; color: var(--fg); }
-.comments-head h2 { margin: 0; }
-.comments-head h2::before, .assessment > summary h2::before { content: "▾"; display: inline-block; width: 1em;
-  color: var(--muted); font-weight: 400; }
-.comments-panel:not([open]) .comments-head h2::before,
-.assessment:not([open]) > summary h2::before { content: "▸"; }
-.comments-panel:not([open]) .comments-switch { display: none; }
-.comments-panel > summary::-webkit-details-marker, .assessment > summary::-webkit-details-marker { display: none; }
-.comments-panel > summary, .assessment > summary { list-style: none; }
-.comments-switch { display: inline-flex; gap: 4px; align-items: baseline; }
-.comments-switch .role { margin-right: 2px; }
+/* The margin: a card for each comment and each problem the AI marked,
+   beside the row it is in, in the order they come in its text. */
+col.notes { width: var(--notes-w); }
+td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
+  font: 13px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  white-space: normal; text-align: left; }
+/* A row's cards start beside it and run on down the margin, over the rows
+   below, when they are taller than it: the rows keep the height of their
+   text. The script places them, a stack pushed down when the one above
+   reaches it. Under their row instead where there is no margin (a narrow
+   window, one column, paper). */
+.stack { position: absolute; left: 8px; right: 8px; top: 4px; z-index: 1; }
+.card { display: block; margin: 0 0 8px; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.card:last-child { margin-bottom: 0; }
+.card.problem { border-color: color-mix(in srgb, var(--current) 45%, var(--border)); }
+.card.active { border-color: var(--current); box-shadow: 0 0 0 2px var(--current); }
+.card .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.card .go { font: inherit; color: inherit; background: none; border: 0; padding: 0;
+  cursor: pointer; text-align: left; display: inline-flex; flex-wrap: wrap; gap: 2px 8px;
+  align-items: baseline; }
+.card .chip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+  color: var(--muted); background: var(--panel); white-space: nowrap; }
+.card.comment-new .chip { color: var(--add); background: var(--ins-line); }
+.card.comment-removed .chip { color: var(--rem); background: var(--del-line); }
+.card.problem .chip { color: var(--fmt); background: var(--fmt-bg); }
+.card .who { font-weight: 600; }
+.card .when { color: var(--muted); font-size: 12px; }
+.card .body { margin-top: 3px; overflow-wrap: anywhere; }
+.card .body.clamped { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+  overflow: hidden; }
+.card .line { display: block; }
+.card .line:empty { height: 0.7em; }
+.card .solution b { font-weight: 600; }
+.card .more { font: inherit; font-size: 12px; color: var(--link); background: none; border: 0;
+  padding: 2px 0 0; cursor: pointer; }
+/* The handles that resize the columns: on the line between the old and the
+   new version, and on the margin's edge; a line in the link colour on
+   hover and while dragged. Not where there are no columns side by side. */
+.col-resizer { position: absolute; width: 11px; margin-left: -5px; z-index: 2;
+  cursor: col-resize; touch-action: none; }
+.col-resizer:hover, .col-resizer.dragging {
+  background: linear-gradient(var(--link), var(--link)) center / 2px 100% no-repeat; }
+body.col-dragging { cursor: col-resize; user-select: none; }
+body.unified .col-resizer, body.review .col-resizer { display: none; }
+@media screen and (max-width: 1100px) { .col-resizer { display: none; } }
+@media print { .col-resizer { display: none; } }
+/* No comment and no problem anywhere, or the margin hidden by its switch
+   (g): no margin, the two versions taking its width. */
+body.no-notes col.notes, body:not(.margin) col.notes { width: 0 !important; }
+body.no-notes td.notes, body:not(.margin) td.notes,
+body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
+.toolbar .margin-button { padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); }
+.toolbar .margin-button[aria-pressed="false"] { color: var(--muted); }
 /* The one style of the buttons in the page: link-coloured text, a tint on
    hover, and, pressed, a tinted box ringed in the link colour, as the
    toolbar's switches. */
@@ -104,49 +137,45 @@ td.code .comment, td.code .ai-mark { cursor: pointer; }
 .btn:hover { background: var(--skip); }
 .btn[aria-pressed="true"] { background: var(--skip); color: var(--fg);
   box-shadow: inset 0 0 0 1px var(--link); }
-/* The AI's assessment: a box under the header, folding like a file, its
-   verdict a coloured badge. */
-.assessment { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;
-  margin-bottom: 12px; }
-.assessment > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline;
-  gap: 4px 12px; }
-.assessment > summary h2 { display: inline; margin: 0; }
+/* The AI's assessment: a drawer over the right of the page, opened from
+   its verdict in the top bar, the text going on scrolling under it; on
+   paper, a box at the top. Its verdict is a coloured badge. */
+.drawer { position: fixed; top: var(--bar-h); right: 0; bottom: 0; z-index: 3;
+  width: min(600px, 92vw); overflow: auto; padding: 12px 20px 24px; background: var(--bg);
+  border-left: 1px solid var(--border); box-shadow: -4px 0 16px #0002; }
+.drawer[hidden] { display: none; }
+.drawer-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+  margin-bottom: 4px; }
+.drawer-head h2 { margin: 0; }
+.drawer-head .close { margin-left: auto; }
 /* The text sent to the AI, at the end, when asked for: long, so it scrolls. */
-.prompt-sent { margin-top: 12px; }
+.prompt-sent { margin-top: 12px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 12px; }
+.prompt-sent > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px 12px; }
+.prompt-sent > summary h2 { display: inline; margin: 0; }
 .prompt-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85em;
   max-height: 70vh; overflow: auto; margin: 8px 0 0; }
 .verdict { font-weight: 600; padding: 0 8px; border-radius: 999px; }
 .verdict-improves { color: var(--add); background: var(--ins-line); }
 .verdict-mixed { color: var(--fmt); background: var(--fmt-bg); }
 .verdict-worsens { color: var(--rem); background: var(--del-line); }
+/* whether the new text reads as written by an AI */
+.verdict-likely { color: var(--rem); background: var(--del-line); }
+.verdict-possibly { color: var(--fmt); background: var(--fmt-bg); }
+.verdict-unlikely { color: var(--add); background: var(--ins-line); }
 .assess-body { max-width: 80em; }
 .assess-body h1, .assess-body h2, .assess-body h3 { font-size: 14px; margin: 14px 0 4px; }
 .assess-body p, .assess-body ul, .assess-body ol { margin: 4px 0; }
 .assess-body li { margin: 2px 0; }
 .assess-body code { font-size: 0.9em; background: var(--panel); padding: 0 3px; border-radius: 3px; }
 .assess-note { font-size: 12px; margin: 10px 0 2px; }
-/* The problems the AI marked: listed in its box, each a button to the
-   passage; in the text, a numbered
-   badge, which tells the problem and the solution on hover. */
+/* The problems the AI marked: in the text, a numbered badge before each
+   passage; its card in the margin. */
 .ai-pointer { margin: 10px 0 2px; }
-.ai-notes ol { list-style: none; margin: 4px 0 8px; padding: 0; }
-.ai-notes li { display: grid; grid-template-columns: 3.2em 1fr; gap: 8px; padding: 4px 0; }
-.ai-notes li + li { border-top: 1px dashed var(--border); }
-.ai-notes .ai-num { color: var(--current); font-weight: 600; }
-.ai-notes .ai-show { font-style: italic; text-align: left; padding-left: 0; }
-.ai-notes li.missing .ai-show { color: var(--muted); cursor: default; }
-.ai-solution b { font-weight: 600; }
-/* The "AI marks expanded" view: each problem written out after its badge,
-   every passage highlighted. */
-.ai-inline { display: none; }
-body.aiexpand .ai-inline { display: inline; margin-right: 4px; padding: 0 4px;
-  font: italic 0.85em/1.4 -apple-system, "Segoe UI", sans-serif; color: var(--fg);
-  background: var(--fmt-bg); border: 1px solid var(--current); border-radius: 3px; }
-::highlight(ai-all) { background-color: var(--flash); }
 .ai-mark { display: inline-block; font: 600 11px/1.4 -apple-system, "Segoe UI", sans-serif;
   color: var(--bg); background: var(--current); border-radius: 8px; padding: 0 5px;
-  margin-right: 3px; cursor: help; vertical-align: 1px; }
-@media print { .ai-notes .ai-show { color: inherit; } }
+  margin-right: 3px; vertical-align: 1px; }
 .assess-error { color: var(--rem); margin: 6px 0 2px; }
 .summary { color: var(--muted); margin-bottom: 12px; }
 .summary p { margin: 0 0 4px; display: flex; flex-wrap: wrap; align-items: baseline;
@@ -162,11 +191,13 @@ nav li { padding: 4px 12px; border-top: 1px solid var(--border);
 nav li:first-child { border-top: 0; }
 nav a { color: inherit; flex: 1; overflow-wrap: anywhere; }
 nav .change { color: var(--muted); min-width: 7em; }
+/* Clipped to its rounded corners without being a scroll box of its own
+   (overflow: hidden would be one): its header sticks under the top bar. */
 details.file { position: relative; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 24px;
-  overflow: hidden; }
+  overflow: clip; }
 details.file > summary { background: var(--panel); padding: 8px 12px; cursor: pointer;
   display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline;
-  position: sticky; top: 0; z-index: 1; }
+  position: sticky; top: var(--bar-h); z-index: 2; }
 details.file[open] > summary { border-bottom: 1px solid var(--border); }
 .path { font-family: ui-monospace, Consolas, monospace; font-weight: 600;
   overflow-wrap: anywhere; }
@@ -193,7 +224,10 @@ td { vertical-align: top; padding: 0 8px; }
 /* Prose: some space between paragraphs (their blank lines are not shown),
    set with the spacing stepper. */
 :root { --para-gap: 0.75em; }
-table.prose td.code, table.prose td.no { padding-bottom: var(--para-gap); }
+table.prose td.code, table.prose td.no { padding-bottom: calc(var(--para-gap) + var(--push, 0px)); }
+/* --push: room made after a row (by the script), so the next row's cards
+   start beside it when the cards above run on down to it. */
+td.code, td.no { padding-bottom: var(--push, 0px); }
 .spacing { display: inline-flex; align-items: center; gap: 6px; }
 td.no { color: var(--muted); text-align: right; user-select: none;
   border-right: 1px solid var(--border); white-space: nowrap; }
@@ -219,7 +253,8 @@ td.code.left { border-right: 1px solid var(--border); }
 td { --tint: transparent; --tint-gap: 0px;
   background: linear-gradient(var(--tint), var(--tint)) no-repeat top left /
     100% calc(100% - var(--tint-gap)); }
-table.prose td.code, table.prose td.no { --tint-gap: var(--para-gap); }
+table.prose td.code, table.prose td.no { --tint-gap: calc(var(--para-gap) + var(--push, 0px)); }
+td.code, td.no { --tint-gap: var(--push, 0px); }
 tr.delete td.left { --tint: var(--del-line); }
 tr.insert td.right { --tint: var(--ins-line); }
 tr.delete td.no.l, tr.replace td.no.l { --tint: var(--del-line); }
@@ -291,23 +326,23 @@ td[data-move] { cursor: help; }
 svg.new-comment { width: 1.35em; height: 1.35em; vertical-align: -0.3em; }
 svg.new-comment path { fill: var(--add); }
 svg.new-comment .plus { fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; }
-/* The one tooltip of the HTML report, for comments (the author in bold, the
-   comment below, its date in grey) and the toolbar's help. The script
-   places it next to what is hovered or focused, so no file box clips it. */
+/* The one tooltip of the HTML report, for the toolbar's help, where a moved
+   line went, formatting and tracked changes. The script places it next to
+   what is hovered or focused, so no file box clips it. */
 #tip { position: fixed; z-index: 3; max-width: 32em; padding: 6px 10px;
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   border-radius: 6px; box-shadow: 0 2px 8px #0003; pointer-events: none;
   font: 13px/1.4 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   text-align: left; white-space: normal; overflow-wrap: anywhere; }
-/* A pinned mark's tooltip, which can be dragged out of the way. */
-#tip.draggable { pointer-events: auto; cursor: move; user-select: none;
-  touch-action: none; }
 #tip b, #tip .line { display: block; }
-#tip .line:empty { height: 0.7em; }  /* a comment's blank line */
-#tip .when, #tip .more { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+#tip .when { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 tr.current td, tr.target td { box-shadow: inset 0 2px 0 var(--current); }
 tr.skip td { background: var(--skip); padding: 2px 8px;
   font-family: -apple-system, "Segoe UI", sans-serif; }
+/* room made after a fold, as after a row (--push): blank, under its band */
+tr.skip td { padding-bottom: calc(2px + var(--push, 0px));
+  background: linear-gradient(var(--skip), var(--skip)) no-repeat top left /
+    100% calc(100% - var(--push, 0px)); }
 tr.skip .omitted { color: var(--muted); }
 /* Formatted view: Markdown syntax hidden, what it marks styled, and prose
    in a proportional font. */
@@ -346,12 +381,30 @@ body.formatted .s-h1 { font-size: 1.4em; } body.formatted .s-h2 { font-size: 1.2
 body.formatted .s-h3 { font-size: 1.1em; }
 footer { color: var(--muted); font-size: 12px; margin-bottom: 48px; }
 footer a { color: inherit; }
-.toolbar { position: fixed; right: 16px; bottom: 16px; z-index: 2; display: flex;
-  gap: 8px; align-items: center; background: var(--panel); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
-  box-shadow: 0 2px 8px #0003; font-size: 13px; flex-wrap: wrap; }
+/* The top bar: what is compared, the AI's verdict (opening its assessment),
+   the way through the changes, the comments and the problems, review mode
+   and the views; it stays at the top as the page scrolls. */
+.toolbar { position: sticky; top: 0; z-index: 4; margin: 0 -16px; display: flex;
+  gap: 6px 14px; align-items: center; flex-wrap: wrap; padding: 7px 16px;
+  background: var(--panel); color: var(--fg); border-bottom: 1px solid var(--border);
+  font-size: 13px; }
 .toolbar button { font: inherit; color: var(--link); background: none; border: 0;
   padding: 0 4px; cursor: pointer; }
+.toolbar .bar-title { font-weight: 600; min-width: 0; max-width: 34em; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.toolbar .spacer { flex: 1; }
+.toolbar .group { display: inline-flex; align-items: center; gap: 2px; }
+.toolbar .verdict-button { display: inline-flex; align-items: center; gap: 8px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.toolbar .verdict-button:hover, .toolbar .verdict-button[aria-expanded="true"] {
+  border-color: var(--link); }
+.toolbar .verdict-button .role { font-size: 12px; }
+.toolbar .review-button { padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); }
+.toolbar .review-button[aria-pressed="true"] { background: var(--skip); color: var(--fg);
+  border-color: var(--link); font-weight: 600; }
+.toolbar .comment-counter { color: var(--add); font-weight: 600; min-width: 4em;
+  text-align: center; font-variant-numeric: tabular-nums; }
 .toolbar button[aria-pressed="true"] { font-weight: 700; }
 /* Icon buttons: the view switches, drawn in the text colour; a pressed one
    sits on a tinted square. */
@@ -370,12 +423,12 @@ footer a { color: inherit; }
 .toolbar button.icon[aria-pressed="true"] { background: var(--skip);
   box-shadow: inset 0 0 0 1px var(--link); }
 .toolbar button:disabled { color: var(--muted); cursor: default; }
-/* The View menu: the switches few use, each named, above the toolbar. */
+/* The View menu: the switches few use, each named, under the top bar. */
 .toolbar .menu { position: relative; display: inline-flex; }
 .toolbar .menu-button { display: inline-flex; align-items: center; gap: 2px;
   padding: 3px 6px; border-radius: 5px; }
 .toolbar .menu-button:hover, .toolbar .menu-button[aria-expanded="true"] { background: var(--skip); }
-.menu-panel { position: absolute; right: 0; bottom: calc(100% + 10px); display: flex;
+.menu-panel { position: absolute; right: 0; top: calc(100% + 10px); z-index: 5; display: flex;
   flex-direction: column; gap: 2px; min-width: 16em; padding: 6px; background: var(--panel);
   border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px #0003; }
 .menu-panel[hidden] { display: none; }
@@ -388,9 +441,9 @@ footer a { color: inherit; }
   border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
   font-variant-numeric: tabular-nums; }
-/* The AI marks' own ◀ ⚠ ▶, apart from the changes'. */
-.toolbar .ai-nav { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px;
-  border-left: 1px solid var(--border); }
+/* The comments' and the problems' own ◀ ▶, apart from the changes'. */
+.toolbar .ai-nav, .toolbar .comment-nav { display: inline-flex; align-items: center; gap: 2px;
+  padding-left: 8px; border-left: 1px solid var(--border); }
 .toolbar .ai-counter { color: var(--current); font-weight: 600; min-width: 4em;
   text-align: center; font-variant-numeric: tabular-nums; }
 .toolbar label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
@@ -407,24 +460,54 @@ footer a { color: inherit; }
 .stepper .gap-value { min-width: 2.6em; text-align: center; padding: 3px 4px;
   font-size: 12px; font-variant-numeric: tabular-nums;
   border-inline: 1px solid var(--border); }
-/* The "Comments expanded" view: each comment written out after its
-   marker, its author and text, as on paper, and the words it is anchored
-   to highlighted (a highlight of the script's). */
-body.cexpand .comment::after { content: " " attr(data-author) ": " attr(data-text);
-  font-family: -apple-system, "Segoe UI", sans-serif; font-style: italic;
-  color: var(--muted); }
-body.cexpand .comment, body.cexpand .comment.new, body.cexpand .comment.removed {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 3px;
-  padding: 0 3px; }
-::highlight(comments-all) { background-color: var(--flash); }
-/* No help cursor where the tooltip is switched off. */
-body.no-comments-tips .comment { cursor: auto; }
+/* Review mode: the list of what there is to review down the left (the
+   assessment, the changes, the comments, the problems), and, beside it,
+   the one row it is in, with its cards, under a line saying which it is
+   and the buttons to the previous and the next. */
+#review-list, #review-head { display: none; }
+body.review #review-list { display: block; position: fixed; left: 0; top: var(--bar-h);
+  bottom: 0; width: var(--review-w); z-index: 2; overflow: auto; padding: 8px 0 24px;
+  background: var(--bg); border-right: 1px solid var(--border); font-size: 13px; }
+body.review main { margin-left: calc(var(--review-w) - 16px + 24px); }
+#review-list h3 { margin: 14px 16px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); }
+#review-list button { display: flex; gap: 8px; width: 100%; padding: 6px 16px; border: 0;
+  background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+#review-list button:hover { background: var(--skip); }
+#review-list button[aria-current="true"] { background: var(--fmt-bg);
+  box-shadow: inset 3px 0 0 var(--current); font-weight: 600; }
+#review-list button:disabled { color: var(--muted); cursor: default; background: none; }
+#review-list .ref { flex-shrink: 0; min-width: 2.6em; color: var(--muted);
+  font: 12px/1.6 ui-monospace, Consolas, monospace; }
+#review-list .ref.warn { color: var(--current); font-family: inherit; font-weight: 600; }
+#review-list .what { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+#review-list ins, #review-list del { padding: 0 2px; }
+body.review #review-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  margin: 0 0 12px; }
+#review-head .which { font-weight: 600; padding: 2px 10px; border-radius: 999px;
+  background: var(--fmt-bg); color: var(--fmt); }
+#review-head .where { color: var(--muted); }
+#review-head .spacer { flex: 1; }
+#review-head button { font: inherit; padding: 5px 14px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+#review-head button.next { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+body.review header, body.review .commits, body.review .summary,
+body.review nav[aria-label="Changed files"], body.review footer, body.review .prompt-sent,
+body.review details.file:not(.review-file) { display: none; }
+body.review details.file tbody tr:not(.review-row) { display: none; }
 /* Single column: each row shows the old line above the new one; unchanged
-   and added lines show their new side only, removed lines their old side. */
+   and added lines show their new side only, removed lines their old side;
+   the cards beside them. */
 body.unified colgroup { display: none; }
 body.unified table, body.unified tbody { display: block; }
 body.unified tbody[hidden] { display: none; }
 body.unified tr { display: grid; grid-template-columns: 5.5em 1fr; }
+body.unified table.notes-on tr { grid-template-columns: 5.5em 1fr var(--notes-w); }
+body.unified td.no { grid-column: 1; }
+body.unified td.code { grid-column: 2; }
+body.unified td.notes { grid-column: 3; grid-row: 1 / span 2; }
+body.unified .stack { position: static; margin: 4px 8px; }
 body.unified td.code.left { border-right: 0; }
 body.unified tr.equal td.l, body.unified tr.equal td.left,
 body.unified tr.insert td.l, body.unified tr.insert td.left,
@@ -432,6 +515,20 @@ body.unified tr.moved-in td.l, body.unified tr.moved-in td.left,
 body.unified tr.delete td.r, body.unified tr.delete td.right,
 body.unified tr.moved-out td.r, body.unified tr.moved-out td.right { display: none; }
 body.unified tr.skip td { grid-column: 1 / -1; }
+/* A narrow window: the cards under their row, across both versions. */
+@media screen and (max-width: 1100px) {
+  table.notes-on colgroup { display: none; }
+  table.notes-on, table.notes-on tbody { display: block; }
+  table.notes-on tbody[hidden] { display: none; }
+  table.notes-on tr { display: grid; grid-template-columns: 4em 1fr 4em 1fr; }
+  table.notes-on td.notes { grid-column: 1 / -1; grid-row: auto; border-left: 0; }
+  .stack { position: static; margin: 4px 8px 8px; }
+  table.notes-on td.notes:empty { display: none; }
+  table.notes-on tr.skip td { grid-column: 1 / -1; }
+  body.unified table.notes-on tr { grid-template-columns: 4em 1fr; }
+  body.unified table.notes-on td.notes { grid-column: 1 / -1; grid-row: auto; }
+  :root { --review-w: 240px; }
+}
 /* Shown only on paper: the column headings repeated on every page of a
    file, and where a moved line went. */
 thead.print, .print-note { display: none; }
@@ -439,13 +536,23 @@ thead.print, .print-note { display: none; }
 @media print {
   body { padding: 0; font-size: 11px; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .toolbar, .btn, .comments-switch { display: none; }
+  .toolbar, .btn, #review-list, #review-head, .drawer .close, .card .more { display: none !important; }
+  body.review main { margin-left: 0; }
+  /* The assessment at the top, whether opened or not. */
+  .drawer, .drawer[hidden] { display: block; position: static; width: auto; box-shadow: none;
+    border: 1px solid var(--border); border-radius: 6px; margin-bottom: 12px; overflow: visible; }
+  /* Every card whole, beside its row. */
+  .card .body.clamped { display: block; overflow: visible; }
+  col.notes { width: 26%; }
+  .card { break-inside: avoid; }
+  .stack { position: static; margin: 2px 4px; }
+  details.file { padding-bottom: 0 !important; }
   .view-label { border: 0; background: none; padding: 0; }
   /* No disclosure triangles: nothing to click on paper. */
   summary { list-style: none; }
   summary::-webkit-details-marker { display: none; }
   details.file > summary { break-after: avoid; }
-  h1, h2, .comments-panel h2 { break-after: avoid; }
+  h1, h2 { break-after: avoid; }
   /* The repeated headings: which file, which side. */
   thead.print { display: table-header-group; }
   thead.print th { text-align: left; font-weight: 600; font-size: 10px; color: var(--muted);
@@ -457,12 +564,6 @@ thead.print, .print-note { display: none; }
     border-bottom: 1px dashed var(--border); padding: 1px 8px; }
   tr.skip .expand { color: var(--muted); padding: 0; }
   tr.skip .expand .verb { display: none; }
-  /* A comment's author and text, written out after its marker. */
-  .comment::after { content: " " attr(data-author) ": " attr(data-text);
-    font-family: -apple-system, "Segoe UI", sans-serif; font-style: italic;
-    color: var(--muted); }
-  .comment, .comment.new, .comment.removed { background: var(--panel); border: 1px solid var(--border);
-    border-radius: 3px; padding: 0 3px; }
   .print-note { display: block; font-family: -apple-system, "Segoe UI", sans-serif;
     font-size: 0.85em; color: var(--move); }
   /* where a moved passage went, right after it */
@@ -480,6 +581,7 @@ thead.print, .print-note { display: none; }
      allows. */
   col.no { width: 3.6em; }
   body.unified tr { grid-template-columns: 3.6em 1fr; }
+  body.unified table.notes-on tr { grid-template-columns: 3.6em 1fr 30%; }
   td.no { padding: 0 4px; }
   /* A long paragraph continues on the next page rather than leaving the
      rest of this one blank, never with a lone line either side. */
@@ -492,6 +594,48 @@ thead.print, .print-note { display: none; }
 </style>
 </head>
 <body>
+{% set marks = assessment and assessment.annotations and not assessment.error %}
+<div class="toolbar" role="toolbar" aria-label="Changes and views">
+  <span class="bar-title" title="{{ c.base.short }} → {{ c.target.short }}">{{ c.base.short }} → {{ c.target.short }}</span>
+  {% if assessment %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="AI assessment: what the AI made of the changes as a whole">{% if assessment.error %}<span class="verdict verdict-worsens">failed</span>{% elif assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}<span class="role">AI assessment</span></button>{% endif %}
+  {% if writing %}<button type="button" class="verdict-button" data-drawer="writing" aria-expanded="false" aria-controls="writing" title="AI writing: whether the new text reads as written by an AI, an indication, not a proof">{% if writing.error %}<span class="verdict verdict-likely">failed</span>{% elif writing.verdict %}<span class="verdict verdict-{{ writing.verdict }}">{{ writing.verdict | capitalize }}</span>{% endif %}<span class="role">AI writing</span></button>{% endif %}
+  <span class="spacer"></span>
+  <span class="group" role="group" aria-label="Changes">
+  <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
+  <span class="counter" aria-live="polite" title="{{ c.change_count | counted("change") }}">{{ c.change_count | comma }}</span>
+  <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button></span>
+  <span class="comment-nav" role="group" aria-label="Comments" hidden>
+    <button type="button" data-comment-nav="-1" title="Previous comment (Shift+C)" aria-label="Previous comment">◀</button>
+    <span class="comment-counter" aria-live="polite" title="Comments: those added or removed since the base, in the margin">0 comments</span>
+    <button type="button" data-comment-nav="1" title="Next comment (c)" aria-label="Next comment">▶</button></span>
+  {% if marks %}<span class="ai-nav" role="group" aria-label="Problems">
+    <button type="button" data-ai-nav="-1" title="Previous problem (Shift+A)" aria-label="Previous problem">◀</button>
+    <span class="ai-counter" aria-live="polite" title="Problems: those the AI marked in the text, ⚠ in the text and in the margin">⚠ {{ assessment.annotations | length | counted("problem") }}</span>
+    <button type="button" data-ai-nav="1" title="Next problem (a)" aria-label="Next problem">▶</button></span>{% endif %}
+  {% if marks or c.comments or (alt and alt.comments) %}<button type="button" class="margin-button" data-toggle="margin" aria-pressed="true" title="Margin: the cards of the comments and the problems beside the text; off, the two versions take its width (g)">Margin</button>{% endif %}
+  <button type="button" class="review-button" data-review aria-pressed="false" title="Review: the changes, the comments and the problems listed, to go through one by one (r)">Review</button>
+  {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
+  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="false" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
+  {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="false" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
+  <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
+  <span class="menu">
+    <button type="button" class="menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="view-menu">View<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <div class="menu-panel" id="view-menu" role="group" aria-label="More views" hidden>
+      <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg><span class="label">Formatted</span><kbd aria-hidden="true">f</kbd></button>
+      <button type="button" class="icon" data-toggle="highlights" aria-pressed="true" aria-label="Change highlights" title="Change highlights: the background colour of changed words and lines; off, the text plain, the gutters still marking the changes (h)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="5" width="13" height="6" rx="1" class="fill soft"/><path d="M4 8h8"/></svg><span class="label">Change highlights</span><kbd aria-hidden="true">h</kbd></button>
+      <button type="button" class="icon" data-toggle="formats" aria-pressed="false" aria-label="Formatting changes" title="Formatting changes: text of a document made bold, italic, underlined, ..., its words unchanged (m)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h4.2a2.6 2.6 0 0 1 0 5.2H4zM4 7.7h4.8a2.9 2.9 0 0 1 0 5.8H4z"/><path d="M11.5 11.5l1.5 1.5 2.5-3" /></svg><span class="label">Formatting changes</span><kbd aria-hidden="true">m</kbd></button>
+      <span class="spacing item"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span><span class="label">Paragraph spacing</span>
+    <span class="stepper">
+      <button type="button" tabindex="-1" aria-hidden="true" data-gap="-1" title="Less space between paragraphs ([)">−</button>
+      <span class="gap-value" role="spinbutton" tabindex="0" aria-label="Space between paragraphs"
+        aria-valuemin="0" aria-valuemax="3" aria-valuenow="0.75" aria-valuetext="0.75 lines"
+        title="Space between paragraphs, in lines: arrow keys to change, Home for none, End for the most">0.75</span>
+      <button type="button" tabindex="-1" aria-hidden="true" data-gap="1" title="More space between paragraphs (])">+</button>
+    </span></span>
+    </div>
+  </span>
+</div>
+<nav id="review-list" aria-label="Review"></nav>
 <main>
 <header>
 <h1>{{ c.repo_name }}{% if c.location %}<span class="full-path">{{ c.location }}</span>{% endif %}</h1>
@@ -500,13 +644,6 @@ thead.print, .print-note { display: none; }
 {% macro gutter_flag(f, no, lang) -%}
 {% if f.mixed_languages and no is not none %}{{ flag(lang or f.language, paragraph_language_note(lang, f.language, f.language_source)) }}{% endif %}
 {%- endmacro %}
-{% macro comment_list(items) %}
-  <ul>
-  {% for e in items %}
-    <li data-place="{{ loop.index }}" data-date="{{ e.date }}" data-status="{{ e.status }}"><span class="status-{{ e.status }}"><span class="comment-icon {{ e.status }}" aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}" data-comment="{{ e.text }}" data-side="{{ "left" if e.status == "removed" else "right" }}">{{ e.html if e.text else "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
-  {% endfor %}
-  </ul>
-{% endmacro %}
 {% macro side(r) -%}
 {{ r.subject }}{% if r.author or r.date %} <span class="role">— {{ r.author }}{% if r.author and r.date %}, {% endif %}{{ r.date }}</span>{% endif %}
 {%- endmacro %}
@@ -587,47 +724,13 @@ thead.print, .print-note { display: none; }
 <span class="view-label" title="The prose compared {{ split }} by {{ split }}"><b>{{ split | capitalize }} view</b>{% if other %}<button type="button" class="btn" data-split-to="{{ other }}" title="Show the prose compared {{ other }} by {{ other }} (s)">⇄ {{ other }}s</button>{% endif %}</span>
 {%- endmacro %}
 
-{# The body of the report for one comparison: the AI's marks, its comments,
-   its summary, its files. prefix sets its ids apart when the report holds
-   two, one per split; other is the other split then. #}
+{# The body of the report for one comparison: its summary, its files.
+   prefix sets its ids apart when the report holds two, one per split;
+   other is the other split then. notes: a margin beside each file's rows,
+   for the cards of its comments and of the problems the AI marked. #}
 {% macro report_body(c, split, prefix="", other=none) %}
-{% if assessment and assessment.annotations and not assessment.error %}
-<details class="comments-panel ai-notes">
-  <summary class="comments-head">
-    <h2>AI marks: {{ assessment.annotations | length | counted("problem") }}</h2>
-    <span class="role">each ⚠ in the text; click one, here or there, to pin it</span>
-  </summary>
-  <ol>
-  {% for a in assessment.annotations %}
-    <li data-note="{{ loop.index0 }}"><span class="ai-num" aria-hidden="true">⚠ {{ loop.index }}</span>
-      <span><button type="button" class="btn ai-show" data-note="{{ loop.index0 }}" title="Show it in the text">“{{ a.start }}”{% if a.end != a.start %} … “{{ a.end }}”{% endif %}</button>
-      <span class="role">({{ "new version" if a.side == "new" else "old version" }})</span>
-      <span class="role ai-missing" hidden>not found in the text</span><br>
-      <span class="ai-problem">{{ a.problem }}</span>{% if a.solution %} <span class="ai-solution"><b>Proposed:</b> {{ a.solution }}</span>{% endif %}</span></li>
-  {% endfor %}
-  </ol>
-</details>
-{% endif %}
-{% if c.comments %}
-{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
-<details class="comments-panel">
-  <summary class="comments-head">
-    <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
-    <span class="comments-switch" role="group" aria-label="Show comments">
-      <span class="role">Show</span>
-      <button type="button" class="btn" data-show="all" aria-pressed="true">all</button>
-      <button type="button" class="btn" data-show="new" aria-pressed="false">new</button>
-      <button type="button" class="btn" data-show="removed" aria-pressed="false">removed</button>
-    </span>
-    <span class="comments-switch" role="group" aria-label="Sort comments">
-      <span class="role">Sort by</span>
-      <button type="button" class="btn" data-sort="place" aria-pressed="true" title="In the order they appear in the report; again to reverse">reading order<span class="dir" aria-hidden="true">↓</span></button>
-      <button type="button" class="btn" data-sort="date" aria-pressed="false" title="By when they were written; again to reverse">date<span class="dir" aria-hidden="true"></span></button>
-    </span>
-  </summary>
-  {{ comment_list(c.comments_in_reading_order(("new", "removed"))) }}
-</details>
-{% endif %}
+{% set notes = (assessment and assessment.annotations and not assessment.error) or c.comments %}
+{% set width = 5 if notes else 4 %}
 {% if not c.files %}
 <p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
 {% else %}
@@ -688,24 +791,25 @@ thead.print, .print-note { display: none; }
   {% elif not f.rows %}
   <div class="note">Content unchanged{% if f.change == "renamed" %} (renamed only){% endif %}.</div>
   {% else %}
-  <table{% if f.markdown %} class="prose"{% endif %}{% if f.language %} lang="{{ f.language }}"{% endif %}>
-    <caption class="sr" lang="en">Changes in {{ f.path }}: old version on the left, new version on the right</caption>
-    <colgroup><col class="no"><col><col class="no"><col></colgroup>
+  <table class="{% if f.markdown %}prose{% endif %}{% if notes %} notes-on{% endif %}"{% if f.language %} lang="{{ f.language }}"{% endif %}>
+    <caption class="sr" lang="en">Changes in {{ f.path }}: old version on the left, new version on the right{% if notes %}, comments and problems beside them{% endif %}</caption>
+    <colgroup><col class="no"><col><col class="no"><col>{% if notes %}<col class="notes">{% endif %}</colgroup>
     <thead class="print" aria-hidden="true" lang="en"><tr>
       <th colspan="2"><span class="path">{{ f.old_path or f.path }}</span>{% if c.base.short != (f.old_path or f.path) %} · {{ c.base.short }}{% endif %}</th>
       <th colspan="2"><span class="path">{{ f.path }}</span>{% if c.target.short != f.path %} · {{ c.target.short }}{% endif %}</th>
+      {% if notes %}<th>Comments and problems</th>{% endif %}
     </tr></thead>
     <tbody>
     {% for r in f.rows %}
     {% if r.kind == "skip" %}
     </tbody>
     {% if r.omitted %}
-    <tbody><tr class="skip"><td colspan="4"><span class="omitted">⋯ {{ r.omitted | comma }} unchanged lines, left out of the HTML report (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
+    <tbody><tr class="skip"><td colspan="{{ width }}"><span class="omitted">⋯ {{ r.omitted | comma }} unchanged lines, left out of the HTML report (rerun with a larger --max-hidden, or --full)</span></td></tr></tbody>
     {% else %}
-    <tbody class="fold"><tr class="skip"><td colspan="4"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ r.skipped | counted("unchanged line") }}</button></td></tr></tbody>
+    <tbody class="fold"><tr class="skip"><td colspan="{{ width }}"><button type="button" class="expand">⋯ <span class="verb">show </span>{{ r.skipped | counted("unchanged line") }}</button></td></tr></tbody>
     <tbody hidden>
     {% for h in r.hidden %}
-    <tr class="equal{% if h.format_changes %} fmt-row{% endif %}"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}>{{ cells(f, h, "left") }}{{ cells(f, h, "right") }}</tr>
+    <tr class="equal{% if h.format_changes %} fmt-row{% endif %}"{% if h.anchor %} id="{{ h.anchor }}"{% endif %}>{{ cells(f, h, "left") }}{{ cells(f, h, "right") }}{% if notes %}<td class="notes"></td>{% endif %}</tr>
     {% endfor %}
     </tbody>
     {% endif %}
@@ -717,6 +821,7 @@ thead.print, .print-note { display: none; }
     <tr class="{{ r.kind }}{% if r.only_moved %} only-moved{% endif %}{% if r.first_of_change %} first-change{% endif %}{% if r.format_changes %} fmt-row{% endif %}"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}{% if r.move_pair %} data-pair="{{ r.move_pair }}"{% endif %}>
       {{ cells(f, r, "left", spoken, sign[0], plain) }}
       {{ cells(f, r, "right", spoken, sign[1], plain) }}
+      {%- if notes %}<td class="notes"></td>{% endif %}
     </tr>
     {% endif %}
     {% endfor %}
@@ -729,23 +834,31 @@ thead.print, .print-note { display: none; }
 
 {% endmacro %}
 
-{% if assessment %}
-<details class="assessment">
-  <summary><h2>AI assessment</h2>
-    {% if assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}
-    <span class="role">by {{ assessment.title }}{% if assessment.how %}, {{ assessment.how }}{% endif %}{% if assessment.seconds %}, in {{ assessment.took }}{% endif %}</span></summary>
-  {% if assessment.error %}
-  <p class="assess-error">The assessment failed: {{ assessment.error }}</p>
+{# An AI's assessment in its drawer: id, its title, and what to keep in
+   mind reading it. #}
+{% macro drawer(a, id, title, note) %}
+<aside class="drawer" id="{{ id }}" aria-labelledby="{{ id }}-title" hidden>
+  <div class="drawer-head"><h2 id="{{ id }}-title">{{ title }}</h2>
+    {% if a.verdict %}<span class="verdict verdict-{{ a.verdict }}">{{ a.verdict | capitalize }}</span>{% endif %}
+    <span class="role">by {{ a.title }}{% if a.how %}, {{ a.how }}{% endif %}{% if a.seconds %}, in {{ a.took }}{% endif %}</span>
+    <button type="button" class="btn close" data-drawer="{{ id }}" aria-label="Close the {{ title }}">Close</button></div>
+  {% if a.error %}
+  <p class="assess-error">The assessment failed: {{ a.error }}</p>
   {% else %}
-  <div class="assess-body">{{ assessment.html }}</div>
-  {% if assessment.annotations %}
-  <p class="ai-pointer">It marked {{ assessment.annotations | length | counted("problem") }} in the text: under <b>AI marks</b>, below, and ⚠ in the text.</p>
-  <script type="application/json" id="ai-notes-data">{{ assessment.notes_json | tojson }}</script>
+  <div class="assess-body">{{ a.html }}</div>
+  {% if a.annotations %}
+  <p class="ai-pointer">It marked {{ a.annotations | length | counted("problem") }} in the text: ⚠ in the text, and in the margin beside it.</p>
+  <script type="application/json" id="ai-notes-data">{{ a.notes_json | tojson }}</script>
   {% endif %}
-  <p class="role assess-note">Written by an AI: check it against the text.</p>
+  <p class="role assess-note">{{ note }}</p>
   {% endif %}
-</details>
-{% endif %}
+</aside>
+{% endmacro %}
+{% if assessment %}{{ drawer(assessment, "assessment", "AI assessment", "Written by an AI: check it against the text.") }}{% endif %}
+{% if writing %}{{ drawer(writing, "writing", "AI writing", "Written by an AI, and an indication, not a proof: careful writers show these signs too, and writers in a second language are often taken for an AI wrongly.") }}{% endif %}
+<div id="review-head" aria-live="polite"><span class="which"></span><span class="where"></span><span class="spacer"></span>
+  <button type="button" data-review-step="-1" title="Previous (k)">‹ Previous</button>
+  <button type="button" class="next" data-review-step="1" title="Next (j)">Next ›</button></div>
 
 {% if alt %}
 <div class="split" data-split="paragraph" aria-label="Compared paragraph by paragraph">
@@ -759,48 +872,18 @@ thead.print, .print-note { display: none; }
 {% endif %}
 
 {% if assessment and assessment.save_prompt and assessment.prompt %}
-<details class="assessment prompt-sent">
+<details class="prompt-sent">
   <summary><h2>Text sent to the AI</h2>
     <span class="role">its system prompt and its message, exactly as sent</span></summary>
   <pre class="prompt-text">{{ assessment.prompt_text() }}</pre>
+  {% if writing and writing.prompt %}<h3>For the AI writing</h3>
+  <pre class="prompt-text">{{ writing.prompt_text() }}</pre>{% endif %}
 </details>
 {% endif %}
 
 <footer>Generated {{ generated }} by <a href="{{ homepage }}">prosediff</a> {{ version }}.</footer>
 </main>
 <div id="tip" role="tooltip" hidden></div>
-<div class="toolbar" role="toolbar" aria-label="Changes and views">
-  <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
-  <span class="counter" aria-live="polite" title="{{ c.change_count | counted("change") }}">{{ c.change_count | comma }}</span>
-  <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button>
-  {% if assessment and assessment.annotations and not assessment.error %}<span class="ai-nav" role="group" aria-label="AI marks">
-    <button type="button" data-ai-nav="-1" title="Previous AI mark (Shift+A)" aria-label="Previous AI mark">◀</button>
-    <span class="ai-counter" aria-live="polite" title="AI marks: the problems the AI marked in the text">⚠ {{ assessment.annotations | length | comma }}</span>
-    <button type="button" data-ai-nav="1" title="Next AI mark (a)" aria-label="Next AI mark">▶</button></span>{% endif %}
-  {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
-  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="false" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
-  {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="false" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
-  <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
-  <span class="menu">
-    <button type="button" class="menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="view-menu">View<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
-    <div class="menu-panel" id="view-menu" role="group" aria-label="More views" hidden>
-      <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg><span class="label">Formatted</span><kbd aria-hidden="true">f</kbd></button>
-      <button type="button" class="icon" data-toggle="highlights" aria-pressed="true" aria-label="Change highlights" title="Change highlights: the background colour of changed words and lines; off, the text plain, the gutters still marking the changes (h)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="5" width="13" height="6" rx="1" class="fill soft"/><path d="M4 8h8"/></svg><span class="label">Change highlights</span><kbd aria-hidden="true">h</kbd></button>
-      <button type="button" class="icon" data-toggle="formats" aria-pressed="false" aria-label="Formatting changes" title="Formatting changes: text of a document made bold, italic, underlined, ..., its words unchanged (m)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h4.2a2.6 2.6 0 0 1 0 5.2H4zM4 7.7h4.8a2.9 2.9 0 0 1 0 5.8H4z"/><path d="M11.5 11.5l1.5 1.5 2.5-3" /></svg><span class="label">Formatting changes</span><kbd aria-hidden="true">m</kbd></button>
-      <button type="button" class="icon" data-toggle="cexpand" aria-pressed="false" aria-label="Comments expanded" title="Comments expanded: each comment written out after its marker, the words it is anchored to highlighted, all at once (c)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 1.5h7a1 1 0 0 1 1 1v3.5a1 1 0 0 1-1 1H5L3 8.5V7H1.5a1 1 0 0 1-1-1V2.5a1 1 0 0 1 1-1Z"/><path d="M11.5 4h3.5M1 11h14M1 14h10"/></svg><span class="label">Comments expanded</span><kbd aria-hidden="true">c</kbd></button>
-      {% if assessment and assessment.annotations and not assessment.error %}<button type="button" class="icon" data-toggle="aiexpand" aria-pressed="false" aria-label="AI marks expanded" title="AI marks expanded: each problem the AI marked written out after its badge, its passage highlighted, all at once (e)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 14.5 13.5h-13z"/><path d="M8 6v3.5M8 11.4v.1"/></svg><span class="label">AI marks expanded</span><kbd aria-hidden="true">e</kbd></button>{% endif %}
-      <button type="button" class="icon" role="checkbox" aria-checked="true" data-tips="comments" aria-label="Comment tooltips" title="Comment tooltips: the author, text and date of a comment, on hovering its marker"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7l-3.5 2.5v-2.5h-1a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z"/><path d="M4.5 5.5h7M4.5 8.5h5"/></svg><span class="label">Comment tooltips</span></button>
-      <span class="spacing item"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span><span class="label">Paragraph spacing</span>
-    <span class="stepper">
-      <button type="button" tabindex="-1" aria-hidden="true" data-gap="-1" title="Less space between paragraphs ([)">−</button>
-      <span class="gap-value" role="spinbutton" tabindex="0" aria-label="Space between paragraphs"
-        aria-valuemin="0" aria-valuemax="3" aria-valuenow="0.75" aria-valuetext="0.75 lines"
-        title="Space between paragraphs, in lines: arrow keys to change, Home for none, End for the most">0.75</span>
-      <button type="button" tabindex="-1" aria-hidden="true" data-gap="1" title="More space between paragraphs (])">+</button>
-    </span></span>
-    </div>
-  </span>
-</div>
 <script>
 (function () {
   var changes = [];
@@ -836,6 +919,7 @@ thead.print, .print-note { display: none; }
     }
     refreshChanges();
     document.dispatchEvent(new Event("prosediff-layout"));
+    if (reviewing) setReview(true);  // the queue of the split shown
   }
   refreshChanges();
   if (splitSwitch) {
@@ -859,13 +943,11 @@ thead.print, .print-note { display: none; }
     if (shown === counter) showTip(counter);
   }
 
-  // The views (one column, formatted, comments expanded, ...)
-  // are classes of the body, remembered where the browser allows.
+  // The views (one column, formatted, change highlights, ...) are classes
+  // of the body, remembered where the browser allows.
   function setView(name, on) {
     document.body.classList.toggle(name, on);
     if (name === "formats" && on) unfoldFormats();
-    if (name === "aiexpand") expandAiMarks(on);
-    if (name === "cexpand") expandComments(on);
     var b = document.querySelector('[data-toggle="' + name + '"]');
     if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
     try { localStorage.setItem("prosediff-" + name, on ? "1" : "0"); } catch (e) {}
@@ -894,8 +976,8 @@ thead.print, .print-note { display: none; }
   // Formatted text and formatting changes are on by default, the other
   // views off; a choice the
   // browser remembers wins.
-  var VIEW_DEFAULT = { unified: false, formatted: true, cexpand: false, formats: true,
-                       movelinks: false, passages: false, highlights: true, aiexpand: false };
+  var VIEW_DEFAULT = { unified: false, formatted: true, formats: true,
+                       movelinks: false, passages: false, highlights: true, margin: true };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var on = VIEW_DEFAULT[name];
     try {
@@ -908,68 +990,41 @@ thead.print, .print-note { display: none; }
   });
   if (document.body.classList.contains("formats")) unfoldFormats();
 
-  // The comments panel lists its comments in reading order ("place") or by
-  // date, in either direction (descending: from the end of the report, or
-  // the newest first), those without a date last; clicking the order shown
-  // reverses it. Remembered like the views.
-  var commentSort = { by: "place", descending: false };
-  function sortComments(by, descending, remember) {
-    commentSort = { by: by, descending: descending };
-    var sign = descending ? -1 : 1;
-    document.querySelectorAll(".comments-panel").forEach(function (panel) {
-      var list = panel.querySelector("ul");
-      if (!list) return;
-      var items = Array.prototype.slice.call(list.children);
-      items.sort(function (a, b) {
-        var x = a.dataset.date, y = b.dataset.date;
-        if (by === "date" && x !== y) return !x ? 1 : !y ? -1 : sign * (x < y ? -1 : 1);
-        return sign * (a.dataset.place - b.dataset.place);
-      });
-      items.forEach(function (li) { list.appendChild(li); });
-      panel.querySelectorAll("[data-sort]").forEach(function (b) {
-        var on = b.dataset.sort === by;
-        b.setAttribute("aria-pressed", on ? "true" : "false");
-        b.querySelector(".dir").textContent = on ? (descending ? "↑" : "↓") : "";
-        b.setAttribute("aria-label", b.firstChild.textContent +
-          (on ? (descending ? ", descending" : ", ascending") : ""));
-      });
-    });
-    if (remember) {
-      try {
-        localStorage.setItem("prosediff-comments-sort", by);
-        localStorage.setItem("prosediff-comments-descending", descending ? "1" : "0");
-      } catch (e) {}
-    }
-  }
-  // The comments panel shows all its comments, or only the new or the
-  // removed ones; remembered like the views.
-  function showComments(which, remember) {
-    document.querySelectorAll(".comments-panel").forEach(function (panel) {
-      panel.querySelectorAll("li[data-status]").forEach(function (li) {
-        li.hidden = which !== "all" && li.dataset.status !== which;
-      });
-      panel.querySelectorAll("[data-show]").forEach(function (b) {
-        b.setAttribute("aria-pressed", b.dataset.show === which ? "true" : "false");
-      });
-    });
-    if (remember) {
-      try { localStorage.setItem("prosediff-comments-show", which); } catch (e) {}
-    }
-  }
-  try {
-    var savedSort = localStorage.getItem("prosediff-comments-sort");
-    var savedDescending = localStorage.getItem("prosediff-comments-descending") === "1";
-    if (savedSort === "date" || savedDescending) {
-      sortComments(savedSort === "date" ? "date" : "place", savedDescending, false);
-    }
-    var shownComments = localStorage.getItem("prosediff-comments-show");
-    if (shownComments === "new" || shownComments === "removed") showComments(shownComments, false);
-  } catch (e) {}
-
   // Reveal the run of unchanged lines a fold row stands for.
   function unfold(fold) {
     fold.nextElementSibling.hidden = false;
     fold.remove();
+  }
+  // Reveal one row of a run of unchanged lines, the rest of the run left
+  // folded, before it and after it, each with its own fold.
+  function foldText(fold, n) {
+    var button = fold.querySelector(".expand");
+    button.textContent = "⋯ ";
+    var verb = document.createElement("span");
+    verb.className = "verb";
+    verb.textContent = "show ";
+    button.appendChild(verb);
+    button.appendChild(document.createTextNode(
+      n.toLocaleString("en-US") + " unchanged line" + (n === 1 ? "" : "s")));
+  }
+  function unfoldRow(row) {
+    var body = row.closest("tbody[hidden]"), fold = body && body.previousElementSibling;
+    if (!fold || !fold.classList.contains("fold")) return;
+    var rows = Array.prototype.slice.call(body.rows), k = rows.indexOf(row);
+    var shown = document.createElement("tbody");
+    body.after(shown);
+    shown.appendChild(row);
+    var after = rows.slice(k + 1);
+    if (after.length) {
+      var fold2 = fold.cloneNode(true), rest = document.createElement("tbody");
+      rest.hidden = true;
+      after.forEach(function (r) { rest.appendChild(r); });
+      shown.after(fold2);
+      fold2.after(rest);
+      foldText(fold2, after.length);
+    }
+    if (k) foldText(fold, k);
+    else { fold.remove(); body.remove(); }
   }
   // Showing the formatting changes reveals the unchanged lines that have
   // them.
@@ -999,17 +1054,6 @@ thead.print, .print-note { display: none; }
     }
     var nav = e.target.closest("[data-nav]");
     if (nav) { go(current + Number(nav.dataset.nav)); return; }
-    // a button in the comments panel's header: not a click on the header,
-    // which would fold the panel
-    if (e.target.closest(".comments-head .btn")) e.preventDefault();
-    var sort = e.target.closest("[data-sort]");
-    if (sort) {
-      var by = sort.dataset.sort;
-      sortComments(by, by === commentSort.by ? !commentSort.descending : false, true);
-      return;
-    }
-    var show = e.target.closest("[data-show]");
-    if (show) { showComments(show.dataset.show, true); return; }
     var view = e.target.closest("[data-toggle]");
     if (view) { toggle(view.dataset.toggle); return; }
     var gap = e.target.closest("[data-gap]");
@@ -1056,17 +1100,21 @@ thead.print, .print-note { display: none; }
     if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
     var keys = { n: function () { go(current + 1); }, p: function () { go(current - 1); },
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
-                 c: function () { toggle("cexpand"); }, e: function () { toggle("aiexpand"); },
                  m: function () { toggle("formats"); }, l: function () { toggle("movelinks"); },
                  v: function () { toggle("passages"); }, h: function () { toggle("highlights"); },
                  a: function () { goAiMark(1); }, A: function () { goAiMark(-1); },
+                 c: function () { goComment(1); }, C: function () { goComment(-1); },
+                 r: function () { setReview(!reviewing); },
+                 g: function () { toggle("margin"); },
+                 j: function () { if (reviewing) stepReview(1); },
+                 k: function () { if (reviewing) stepReview(-1); },
                  s: function () { if (splitSwitch) setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true); },
                  "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
   });
 
-  // Following a link (a file, or a row from the comments panel) opens the
-  // file and reveals the row if it sits among hidden unchanged lines.
+  // Following a link to a file or a row opens the file and reveals the row
+  // if it sits among hidden unchanged lines.
   function openTarget() {
     var t = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
     if (!t) return;
@@ -1080,17 +1128,8 @@ thead.print, .print-note { display: none; }
       document.querySelectorAll("tr.target").forEach(function (r) { r.classList.remove("target"); });
       t.classList.add("target");
       t.scrollIntoView({ block: "center" });
-      if (flashing) flashComment(t, flashing);
     }
-    flashing = null;
   }
-  // A comment's link, followed, pins the text the comment is anchored to
-  // (pinComment), on the side it is on (the old one for a removed comment),
-  // from its marker to the end of its text (a .comment-end of the same
-  // data-c), in one paragraph or across several; or, when where that text
-  // ends is not known, the whole paragraph; nothing when its words are gone
-  // (with a tracked change). flashing: the link followed, for openTarget.
-  var flashing = null;
   // Whether el shows: none of its ancestors in the cell is hidden (the
   // row's other version, with or without moved passages).
   function shows(el, cell) {
@@ -1099,9 +1138,15 @@ thead.print, .print-note { display: none; }
     }
     return true;
   }
-  // The ranges of text from the marker to the end of the comment's text,
-  // one for each cell on the marker's side; none when that text is empty,
-  // null when no end follows.
+  // Whether a mark is in the version of its row the "Moved passages" switch
+  // shows (a row holding a moved passage is written with and without it).
+  function isShown(m) {
+    var passages = document.body.classList.contains("passages");
+    return !(m.closest(".pv-on") && !passages) && !(m.closest(".pv-off") && passages);
+  }
+  // The ranges of text from a comment's marker to the end of its text, one
+  // for each cell on the marker's side; none when that text is empty, null
+  // when no end follows (the whole paragraph is highlighted then).
   function anchorRanges(row, side, marker) {
     var rows = Array.prototype.slice.call(row.closest("table").rows);
     var first = rows.indexOf(row), ranges = [];
@@ -1128,35 +1173,16 @@ thead.print, .print-note { display: none; }
     }
     return null;
   }
-  function flashComment(row, link) {
-    var side = link.dataset.side;
-    var cell = row.querySelector("td.code." + side) || row.querySelector("td.code");
-    if (!cell) return;
-    var marker = Array.prototype.find.call(cell.querySelectorAll(".comment"), function (m) {
-      return m.dataset.text === link.dataset.comment && shows(m, cell);
-    });
-    pinComment(row, side, cell, marker);
-  }
-  // A comment's marker, clicked in the text (or Enter or Space on it),
-  // pins it the same way.
-  function flashMarker(marker) {
-    var cell = marker.closest("td.code");
-    if (!cell) return;
-    pinComment(cell.closest("tr"), cell.classList.contains("left") ? "left" : "right", cell, marker);
-  }
-  // A mark clicked (a comment's marker, a problem's badge, or either's
-  // entry in its list) is pinned: its text stays highlighted, its mark
-  // ringed and its tooltip open, until it is clicked again (or Esc);
-  // another clicked takes its place. While one is pinned, hovering
-  // elsewhere leaves its tooltip be.
+  // A mark clicked (a comment's marker, a problem's badge, or its card in the
+  // margin) is pinned: its text stays highlighted, its mark ringed and its
+  // card too, until it is clicked again (or Esc); another clicked takes
+  // its place.
   var pinned = null;
   var canHighlight = window.CSS && CSS.highlights && typeof Highlight === "function";
-  // ranges: the text to highlight; null when it is not known, the cell
-  // (the paragraph) highlighted instead; none: nothing but the mark.
   // Not the document's text: what screen readers and paper alone get, and
   // the marks put in it (a comment's marker and the end of its words, a
-  // problem's badge and what it says, written out when expanded).
-  var NOT_TEXT = ".sr, .print-note, .comment, .comment-end, .sign, .ai-mark, .ai-inline";
+  // problem's badge).
+  var NOT_TEXT = ".sr, .print-note, .comment, .comment-end, .sign, .ai-mark";
   // The ranges, their start and end kept, without what is not text between
   // them (NOT_TEXT): a comment anchored to words a problem was also marked
   // on highlights those words, not the problem's badge before them.
@@ -1183,6 +1209,8 @@ thead.print, .print-note { display: none; }
     });
     return out;
   }
+  // ranges: the text to highlight; null when it is not known, the cell
+  // (the paragraph) highlighted instead; none: nothing but the mark.
   function pin(mark, ranges, cell) {
     var again = pinned && pinned.mark === mark;
     unpin();
@@ -1196,45 +1224,22 @@ thead.print, .print-note { display: none; }
     }
     pinned = { mark: mark, cell: cell };
     mark.classList.add("pinned");
-    anchorX = 0;
-    showTip(mark);
-    tip.classList.add("draggable");
+    var card = cardOf(mark);
+    if (card) card.classList.add("active");
   }
   function unpin() {
     if (!pinned) return;
     if (canHighlight) CSS.highlights.delete("pin");
     if (pinned.cell) pinned.cell.classList.remove("pinned");
     pinned.mark.classList.remove("pinned");
+    document.querySelectorAll(".card.active").forEach(function (c) { c.classList.remove("active"); });
     pinned = null;
-    tip.classList.remove("draggable");
-    tipMoved = false;
-    hideTip();
   }
-  // A pinned tooltip can be dragged out of the way: it stays where it is
-  // dropped, scrolling or not, until unpinned.
-  var tipMoved = false, dragFrom = null, tipBox = document.getElementById("tip");
-  tipBox.addEventListener("pointerdown", function (e) {
-    if (!pinned) return;
-    var t = tipBox.getBoundingClientRect();
-    dragFrom = { x: e.clientX - t.left, y: e.clientY - t.top };
-    tipBox.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  tipBox.addEventListener("pointermove", function (e) {
-    if (!dragFrom) return;
-    var t = tipBox.getBoundingClientRect();
-    var left = Math.min(Math.max(0, e.clientX - dragFrom.x), window.innerWidth - t.width);
-    var top = Math.min(Math.max(0, e.clientY - dragFrom.y), window.innerHeight - t.height);
-    tipBox.style.left = left + "px";
-    tipBox.style.top = top + "px";
-    tipMoved = true;
-  });
-  function endDrag() { dragFrom = null; }
-  tipBox.addEventListener("pointerup", endDrag);
-  tipBox.addEventListener("pointercancel", endDrag);
-  function pinComment(row, side, cell, marker) {
-    if (!marker) return;
-    pin(marker, canHighlight ? anchorRanges(row, side, marker) : null, cell);
+  function pinComment(marker) {
+    var cell = marker.closest("td.code");
+    if (!cell) return;
+    var side = cell.classList.contains("left") ? "left" : "right";
+    pin(marker, canHighlight ? anchorRanges(cell.closest("tr"), side, marker) : null, cell);
   }
   // A problem the AI marked: its badge's passage.
   function pinNote(mark) {
@@ -1243,12 +1248,10 @@ thead.print, .print-note { display: none; }
     pin(mark, range ? [range] : [], null);
   }
   function pinMark(mark) {
+    if (!mark) return;
     if (mark.classList.contains("ai-mark")) pinNote(mark);
-    else flashMarker(mark);
+    else pinComment(mark);
   }
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") unpin();
-  });
   document.addEventListener("click", function (e) {
     var mark = e.target.closest("td.code .comment, td.code .ai-mark");
     if (mark) pinMark(mark);
@@ -1260,24 +1263,16 @@ thead.print, .print-note { display: none; }
     e.preventDefault();
     pinMark(mark);
   });
-  document.addEventListener("click", function (e) {
-    var link = e.target.closest(".comments-panel a[data-comment]");
-    if (!link) return;
-    flashing = link;
-    // the same link again changes no hash: flash all the same
-    if (location.hash === link.getAttribute("href")) { e.preventDefault(); openTarget(); }
-  });
   window.addEventListener("hashchange", openTarget);
   openTarget();
 
   // The problems the AI marked (ai-notes-data): each passage looked for in
   // the text of its side, from its start words to its end words, in each
-  // view; a numbered badge before it, telling the problem and the
-  // solution on hover. The words match whatever the hyphenation, the
-  // spacing, straight or curly quotes, and the comment markers among them.
-  // aiOrder: the notes' indices in reading order; each note's num, its
-  // number in that order
-  var aiNotes = [], aiOrder = [];
+  // view; a numbered badge before it, its card in the margin. The words
+  // match whatever the hyphenation, the spacing, straight or curly quotes,
+  // and the comment markers among them. aiOrder: the notes' indices in
+  // reading order; each note's num, its number in that order.
+  var aiNotes = [], aiOrder = [], findAgain = function () {};
   (function () {
     var data = document.getElementById("ai-notes-data");
     if (!data) return;
@@ -1342,28 +1337,45 @@ thead.print, .print-note { display: none; }
       range.setEnd(b[0], b[1] + 1);
       return range;
     }
-    var roots = document.querySelectorAll(".split");
-    if (!roots.length) roots = [document];
-    // every range first, then the badges, which split the text nodes the
-    // ranges were found in (a range follows; a found position would not)
-    Array.prototype.forEach.call(roots, function (root) {
-      VERSIONS.forEach(function (skip) {
-        var sides = { new: sideText(root, "right", skip), old: sideText(root, "left", skip) };
-        aiNotes.forEach(function (note) {
-          var range = rangeOf(sides[note.side === "old" ? "old" : "new"], note);
-          if (!range) return;
-          note.ranges = note.ranges || [];
-          // where the row has but one version, both searches find the same
-          var same = note.ranges.some(function (r) {
-            return r.startContainer === range.startContainer && r.startOffset === range.startOffset;
+    // Each note's passages, one in each view and version of its row that has
+    // its words.
+    function search() {
+      var found = aiNotes.map(function () { return []; });
+      var roots = document.querySelectorAll(".split");
+      if (!roots.length) roots = [document];
+      Array.prototype.forEach.call(roots, function (root) {
+        VERSIONS.forEach(function (skip) {
+          var sides = { new: sideText(root, "right", skip), old: sideText(root, "left", skip) };
+          aiNotes.forEach(function (note, k) {
+            var range = rangeOf(sides[note.side === "old" ? "old" : "new"], note);
+            if (!range) return;
+            // where the row has but one version, both searches find the same
+            var same = found[k].some(function (r) {
+              return r.startContainer === range.startContainer && r.startOffset === range.startOffset;
+            });
+            if (!same) found[k].push(range);
           });
-          if (!same) note.ranges.push(range);
         });
       });
+      return found;
+    }
+    // every range first, then the badges, which split the text nodes the
+    // ranges were found in (a range follows; a found position would not)
+    search().forEach(function (ranges, k) {
+      if (ranges.length) aiNotes[k].ranges = ranges;
     });
+    // A row brought out of its fold (unfoldRow) is moved, and a range in it
+    // collapses: the passages found again where they now are, the badges
+    // not being text (NOT_TEXT).
+    findAgain = function () {
+      search().forEach(function (ranges, k) {
+        var note = aiNotes[k];
+        if (note.marks && ranges.length === note.marks.length) note.ranges = ranges;
+      });
+    };
     // Numbered in reading order: by where each passage starts in the text,
     // row by row, the old side of a row before its new; those found
-    // nowhere last, as the AI listed them. The panel follows.
+    // nowhere last, as the AI listed them.
     aiOrder = aiNotes.map(function (note, k) { return k; });
     aiOrder.sort(function (a, b) {
       var ra = aiNotes[a].ranges, rb = aiNotes[b].ranges;
@@ -1371,14 +1383,6 @@ thead.print, .print-note { display: none; }
       return ra[0].compareBoundaryPoints(Range.START_TO_START, rb[0]) || a - b;
     });
     aiOrder.forEach(function (k, at) { aiNotes[k].num = at + 1; });
-    document.querySelectorAll(".ai-notes ol").forEach(function (list) {
-      aiOrder.forEach(function (k) {
-        var item = list.querySelector('li[data-note="' + k + '"]');
-        if (!item) return;
-        item.querySelector(".ai-num").textContent = "⚠ " + aiNotes[k].num;
-        list.appendChild(item);
-      });
-    });
     // the passages are highlighted only when pinned (pinNote): the badges
     // alone say where they are
     aiNotes.forEach(function (note, k) {
@@ -1392,57 +1396,11 @@ thead.print, .print-note { display: none; }
           (note.solution ? " Proposed: " + note.solution : ""));
         mark.textContent = "⚠ " + note.num;
         range.insertNode(mark);
-        // what it says, written out after it when the marks are expanded
-        var inline = document.createElement("span");
-        inline.className = "ai-inline";
-        inline.setAttribute("aria-hidden", "true");
-        inline.textContent = note.problem + (note.solution ? " Proposed: " + note.solution : "");
-        mark.after(inline);
-        range.setStartAfter(inline);
+        range.setStartAfter(mark);
         return mark;
       });
-      if (!note.marks.length) {
-        document.querySelectorAll('.ai-notes li[data-note="' + k + '"]').forEach(function (item) {
-          item.classList.add("missing");
-          item.querySelector(".ai-missing").hidden = false;
-        });
-      }
     });
-    expandAiMarks(document.body.classList.contains("aiexpand"));  // as remembered
   })();
-  // The "AI marks expanded" view (e): every problem written out after its
-  // badge (the class of the body) and every passage highlighted at once;
-  // collapsed, the badges alone, a passage highlighted only when pinned.
-  function expandAiMarks(on) {
-    if (!window.CSS || !CSS.highlights || typeof Highlight !== "function") return;
-    var ranges = [];
-    aiNotes.forEach(function (note) { ranges = ranges.concat(note.ranges || []); });
-    if (on && ranges.length) {
-      var all = new Highlight();
-      ranges.forEach(function (r) { all.add(r); });
-      CSS.highlights.set("ai-all", all);
-    } else {
-      CSS.highlights.delete("ai-all");
-    }
-  }
-  // The "Comments expanded" view (c): every comment written out after its
-  // marker (the class of the body) and the words each is anchored to
-  // highlighted at once, those of the markers shown; collapsed, a comment's
-  // words highlighted only when pinned.
-  function expandComments(on) {
-    if (!canHighlight) return;
-    CSS.highlights.delete("comments-all");
-    if (!on) return;
-    var all = new Highlight();
-    document.querySelectorAll("td.code .comment").forEach(function (marker) {
-      var cell = marker.closest("td.code");
-      if (!shows(marker, cell)) return;
-      var side = cell.classList.contains("left") ? "left" : "right";
-      (anchorRanges(cell.closest("tr"), side, marker) || []).forEach(function (r) { all.add(r); });
-    });
-    if (all.size) CSS.highlights.set("comments-all", all);
-  }
-  expandComments(document.body.classList.contains("cexpand"));  // as remembered
   // A problem's badge in the view shown; null when its words were not
   // found there.
   function shownMark(note) {
@@ -1451,32 +1409,182 @@ thead.print, .print-note { display: none; }
   // Whether a badge is in what is shown: its view, and its row's version
   // with or without moved passages, as the "Moved passages" switch says.
   function markShown(m) {
-    if (m.closest(".split[hidden]")) return false;
-    var passages = document.body.classList.contains("passages");
-    return !(m.closest(".pv-on") && !passages) && !(m.closest(".pv-off") && passages);
+    return !m.closest(".split[hidden]") && isShown(m);
   }
-  // A badge brought into view, its unchanged lines unfolded if need be.
-  function reveal(mark) {
-    var body = mark.closest("tbody[hidden]");
+  // Something of a row brought into view, its unchanged lines unfolded and
+  // its file opened if need be.
+  function reveal(el) {
+    var body = el.closest("tbody[hidden]");
     if (body && body.previousElementSibling && body.previousElementSibling.classList.contains("fold")) {
       unfold(body.previousElementSibling);
     }
-    var file = mark.closest("details.file");
+    var file = el.closest("details.file");
     if (file) file.open = true;
-    mark.scrollIntoView({ block: "center" });
+    el.scrollIntoView({ block: "center" });
   }
-  // A problem of the list, clicked: its passage in the view shown, brought
-  // into view and pinned, as its badge clicked would be; clicked again,
-  // unpinned.
+
+  // The margin: a card for each comment and each problem, in the row it is
+  // in, in the order they come in its text, the old side before the new.
+  // A comment says who wrote it and when, and its paragraphs as written; a
+  // problem, what is wrong and the change the AI proposes. Clicking a card
+  // pins its mark, as clicking the mark does. Built as elements: no HTML
+  // parsed.
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+  // A comment's paragraphs as written (data-rich): a line each, each run in
+  // the elements of its styles.
+  var RICH_TAGS = { strong: "b", em: "i", u: "u", strike: "s", sup: "sup", sub: "sub" };
+  function richLines(json) {
+    var paragraphs;
+    try { paragraphs = JSON.parse(json || "[]"); } catch (e) { return []; }
+    return paragraphs.map(function (runs) {
+      var line = el("span", "line");
+      runs.forEach(function (run) {
+        var node = document.createTextNode(run[0]);
+        run[1].split(" ").forEach(function (s) {
+          if (!RICH_TAGS[s]) return;
+          var wrap = document.createElement(RICH_TAGS[s]);
+          wrap.appendChild(node);
+          node = wrap;
+        });
+        line.appendChild(node);
+      });
+      return line;
+    });
+  }
+  function sideOf(m) { return m.closest("td.left") ? "left" : "right"; }
+  function card(m) {
+    var c = el("article", "card"), head = el("div", "head"), button = el("button", "go");
+    var body = el("div", "body");
+    button.type = "button";
+    if (m.classList.contains("ai-mark")) {
+      var note = aiNotes[Number(m.dataset.note)];
+      c.classList.add("problem");
+      c.dataset.note = m.dataset.note;
+      button.appendChild(el("span", "chip", "⚠ Problem " + note.num));
+      button.appendChild(el("span", "when", note.side === "old" ? "AI, old version" : "AI"));
+      body.appendChild(el("span", "line", note.problem));
+      if (note.solution) {
+        var s = el("span", "line solution");
+        s.appendChild(el("b", null, "Proposed: "));
+        s.appendChild(document.createTextNode(note.solution));
+        body.appendChild(s);
+      }
+    } else {
+      var status = m.classList.contains("new") ? "new" : m.classList.contains("removed") ? "removed" : "";
+      c.classList.add("comment-card");
+      if (status) c.classList.add("comment-" + status);
+      c.dataset.c = m.dataset.c;
+      c.dataset.side = sideOf(m);
+      button.appendChild(el("span", "chip", status ? status + " comment" : "comment"));
+      button.appendChild(el("span", "who", m.dataset.author || "Comment"));
+      if (m.dataset.date) button.appendChild(el("span", "when", m.dataset.date));
+      var lines = richLines(m.dataset.rich);
+      if (!lines.length) lines = [el("span", "line", m.dataset.text || "(no text)")];
+      lines.forEach(function (l) { body.appendChild(l); });
+    }
+    button.setAttribute("aria-label", m.getAttribute("aria-label") || button.textContent);
+    head.appendChild(button);
+    c.appendChild(head);
+    c.appendChild(body);
+    // a long one shows its first lines, the rest on asking
+    if (body.textContent.length > 280 || body.children.length > 4) {
+      body.classList.add("clamped");
+      var more = el("button", "more", "Show all");
+      more.type = "button";
+      more.setAttribute("aria-expanded", "false");
+      c.appendChild(more);
+    }
+    return c;
+  }
+  // The mark of a card, in the version of its row shown.
+  function markOf(c) {
+    var row = c.closest("tr");
+    var sel = c.dataset.note !== undefined ? '.ai-mark[data-note="' + c.dataset.note + '"]'
+      : "td.code." + c.dataset.side + ' .comment[data-c="' + c.dataset.c + '"]';
+    return Array.prototype.find.call(row.querySelectorAll(sel), isShown) || row.querySelector(sel);
+  }
+  // The card of a mark.
+  function cardOf(mark) {
+    var row = mark.closest("tr");
+    if (!row) return null;
+    var sel = mark.classList.contains("ai-mark") ? '.card[data-note="' + mark.dataset.note + '"]'
+      : '.card[data-c="' + mark.dataset.c + '"][data-side="' + sideOf(mark) + '"]';
+    return row.querySelector(":scope > td.notes " + sel);
+  }
+  (function buildCards() {
+    var any = false;
+    document.querySelectorAll("table.notes-on tr").forEach(function (row) {
+      var cell = row.querySelector(":scope > td.notes");
+      if (!cell) return;
+      var seen = {}, stack = null;
+      row.querySelectorAll("td.code.left .comment, td.code.left .ai-mark, " +
+                           "td.code.right .comment, td.code.right .ai-mark").forEach(function (m) {
+        var key = m.classList.contains("ai-mark") ? "n" + m.dataset.note : "c" + m.dataset.c + sideOf(m);
+        if (seen[key]) return;
+        seen[key] = true;
+        if (!stack) stack = cell.appendChild(el("div", "stack"));
+        stack.appendChild(card(m));
+        any = true;
+      });
+      // a row with a card is never left folded away
+      if (stack) unfoldRow(row);
+    });
+    document.body.classList.toggle("no-notes", !any);
+    findAgain();  // the passages of the rows just brought out
+  })();
   document.addEventListener("click", function (e) {
-    var button = e.target.closest(".ai-show");
-    if (!button) return;
-    var mark = shownMark(aiNotes[Number(button.dataset.note)]);
-    if (!mark) return;
-    if (!(pinned && pinned.mark === mark)) reveal(mark);
-    pinNote(mark);
+    var more = e.target.closest(".card .more");
+    if (more) {
+      var body = more.parentElement.querySelector(".body");
+      var open = body.classList.toggle("clamped");
+      more.textContent = open ? "Show all" : "Show less";
+      more.setAttribute("aria-expanded", open ? "false" : "true");
+      return;
+    }
+    var c = e.target.closest(".card");
+    if (c) pinMark(markOf(c));
   });
-  // The toolbar's AI marks: the next or the previous problem found in the
+
+  // The top bar's comments: the next or the previous card of a comment in
+  // the view shown (c, Shift+C, or its arrows), brought into view and its
+  // comment pinned; the counter says which, and how many there are.
+  var commentNav = document.querySelector(".comment-nav");
+  var commentCounter = document.querySelector(".comment-counter");
+  var commentCurrent = null;
+  function shownCards(kind) {
+    var root = document.querySelector(".split:not([hidden])") || document;
+    return Array.prototype.slice.call(root.querySelectorAll(".card." + kind));
+  }
+  function countComments() {
+    var n = shownCards("comment-card").length;
+    commentCurrent = null;
+    if (!commentNav) return;
+    commentNav.hidden = !n;
+    commentCounter.textContent = fmt(n) + (n === 1 ? " comment" : " comments");
+  }
+  countComments();
+  document.addEventListener("prosediff-layout", countComments);
+  function goComment(step) {
+    var list = shownCards("comment-card");
+    if (!list.length) return;
+    var at = list.indexOf(commentCurrent);
+    at = at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length;
+    commentCurrent = list[at];
+    var mark = markOf(commentCurrent);
+    reveal(commentCurrent);
+    if (mark && !(pinned && pinned.mark === mark)) pinMark(mark);
+    commentCounter.textContent = fmt(at + 1) + " / " + fmt(list.length) + " comments";
+  }
+  document.addEventListener("click", function (e) {
+    var nav = e.target.closest("[data-comment-nav]");
+    if (nav) goComment(Number(nav.dataset.commentNav));
+  });
+  // The top bar's problems: the next or the previous problem found in the
   // view shown (a, Shift+A, or its arrows), brought into view and pinned;
   // its counter says which.
   var aiCurrent = -1;
@@ -1499,82 +1607,257 @@ thead.print, .print-note { display: none; }
     if (nav) goAiMark(Number(nav.dataset.aiNav));
   });
 
-  // The tooltips: a comment's author, text and date on hovering its
-  // marker, who made a tracked change and when (formatted view), where a
-  // moved line went or came from (on its number) and a moved passage (on
-  // it), and the toolbar's help. One element shows them, placed by the
-  // script so no file box clips it, one at a time. A comment also lives in
-  // its marker's aria-label, for screen readers.
-  var tip = document.getElementById("tip");
-  var shown = null;
-  // The toolbar's help, always on: its name, what it does, and its key.
-  document.querySelectorAll(".toolbar [title]").forEach(function (el) {
-    el.dataset.help = el.title;
-    el.removeAttribute("title");
-  });
-  function add(cls, text) {
-    var el = document.createElement(cls === "b" ? "b" : "span");
-    if (cls !== "b") el.className = cls;
-    el.textContent = text;
-    tip.appendChild(el);
-  }
-  // A comment's paragraphs as written (data-rich): a line each, each run
-  // in the elements of its styles, built as elements (no HTML parsed).
-  var RICH_TAGS = { strong: "b", em: "i", u: "u", strike: "s", sup: "sup", sub: "sub" };
-  function richLines(json) {
-    var paragraphs;
-    try { paragraphs = JSON.parse(json || "[]"); } catch (e) { return []; }
-    return paragraphs.map(function (runs) {
-      var line = document.createElement("span");
-      line.className = "line";
-      runs.forEach(function (run) {
-        var node = document.createTextNode(run[0]);
-        run[1].split(" ").forEach(function (s) {
-          if (!RICH_TAGS[s]) return;
-          var el = document.createElement(RICH_TAGS[s]);
-          el.appendChild(node);
-          node = el;
-        });
-        line.appendChild(node);
-      });
-      return line;
+  // The AI's assessments (of the changes, and of whether their new text
+  // reads as written by an AI): drawers, each opened and closed by its
+  // verdict in the top bar (or Esc), one at a time, the page scrolling
+  // under them.
+  var drawer = document.getElementById("assessment");
+  function setDrawer(open, id) {
+    document.querySelectorAll(".drawer").forEach(function (d) {
+      d.hidden = !(open && d.id === (id || "assessment"));
+    });
+    document.querySelectorAll(".verdict-button").forEach(function (b) {
+      var shown = document.getElementById(b.dataset.drawer);
+      b.setAttribute("aria-expanded", shown && !shown.hidden ? "true" : "false");
     });
   }
-  function showTip(el) {
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-drawer]");
+    if (!b) return;
+    var d = document.getElementById(b.dataset.drawer);
+    setDrawer(d.hidden, d.id);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (pinned) unpin();
+    else setDrawer(false);
+  });
+  // What sticks under the top bar sticks under all of it, however it wraps.
+  var bar = document.querySelector(".toolbar");
+  function barHeight() {
+    document.documentElement.style.setProperty("--bar-h", bar.offsetHeight + "px");
+  }
+  barHeight();
+  window.addEventListener("resize", barHeight);
+
+  // Review mode (r, or Review in the top bar): down the left, what there is
+  // to review, the assessment, the changes, the comments and the problems;
+  // beside it, the one row the chosen one is in, with its cards, a line
+  // saying which it is, and the buttons to the previous and the next (k,
+  // j). A problem whose words were not found is listed, not chosen.
+  var reviewing = false, reviewItems = [], reviewAt = -1;
+  var reviewList = document.getElementById("review-list");
+  var reviewHead = document.getElementById("review-head");
+  var reviewButton = document.querySelector("[data-review]");
+  var KIND_NAMES = { change: "Change", comment: "Comment", problem: "Problem" };
+  // A row's place: its number (or label) on the new side, else the old.
+  function rowLabel(row) {
+    var clean = function (td) { return td ? td.textContent.replace(/[^\d.]/g, "") : ""; };
+    return clean(row.querySelector("td.no.r")) || clean(row.querySelector("td.no.l"));
+  }
+  // The text of what is shown of a node, as a reader sees it: not what is
+  // for screen readers or paper, nor the marks, nor the version of its row
+  // hidden, nor the hyphenation's soft hyphens.
+  function textOf(node) {
+    if (!node) return "";
+    var out = "", walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (n.parentElement.closest(NOT_TEXT) || !isShown(n.parentElement)) continue;
+      out += n.data;
+    }
+    return out.replace(/\u00ad/g, "").replace(/\s+/g, " ").trim();
+  }
+  // What a row is, for the line saying where the chosen item is: a
+  // paragraph, a sentence (compared sentence by sentence) or a line.
+  function unitOf(row) {
+    if (!row.closest("table.prose")) return "line";
+    var split = row.closest(".split");
+    return split && split.dataset.split === "sentence" ? "sentence" : "paragraph";
+  }
+  // What a change is, in a few words: its first words removed and added.
+  function changeWhat(row) {
+    var what = el("span");
+    var first = function (sel) {
+      return Array.prototype.find.call(row.querySelectorAll(sel), isShown);
+    };
+    var del = first("td.code.left del"), ins = first("td.code.right ins");
+    if (row.classList.contains("insert") || row.classList.contains("moved-in")) {
+      ins = null;
+      what.appendChild(el("ins", null, textOf(row.querySelector("td.code.right"))));
+    } else if (row.classList.contains("delete") || row.classList.contains("moved-out")) {
+      del = null;
+      what.appendChild(el("del", null, textOf(row.querySelector("td.code.left"))));
+    }
+    if (del) what.appendChild(el("del", null, textOf(del)));
+    if (del && ins) what.appendChild(document.createTextNode(" → "));
+    if (ins) what.appendChild(el("ins", null, textOf(ins)));
+    // no words to show (a comment added, a space or a stop changed): the
+    // paragraph's own
+    if (!/\w/.test(what.textContent)) {
+      what.textContent = textOf(row.querySelector("td.code.right") || row.querySelector("td.code.left"));
+    }
+    return what;
+  }
+  function buildReview() {
+    reviewList.textContent = "";
+    reviewItems = [];
+    var root = document.querySelector(".split:not([hidden])") || document;
+    function add(item, ref, what) {
+      var b = el("button");
+      b.type = "button";
+      b.dataset.item = reviewItems.length;
+      b.appendChild(el("span", "ref" + (item.kind === "problem" ? " warn" : ""), ref));
+      var w = el("span", "what");
+      if (typeof what === "string") w.textContent = what; else w.appendChild(what);
+      b.appendChild(w);
+      item.button = b;
+      reviewItems.push(item);
+      reviewList.appendChild(b);
+      return b;
+    }
+    var buttons = document.querySelectorAll(".verdict-button");
+    if (buttons.length) {
+      reviewList.appendChild(el("h3", null, buttons.length > 1 ? "AI assessments" : "AI assessment"));
+      buttons.forEach(function (b) {
+        var verdict = b.querySelector(".verdict");
+        add({ kind: "assessment", id: b.dataset.drawer }, "",
+          b.querySelector(".role").textContent + (verdict ? ": " + verdict.textContent : ""));
+      });
+    }
+    var rows = Array.prototype.slice.call(root.querySelectorAll("tr.first-change"));
+    if (rows.length) {
+      reviewList.appendChild(el("h3", null, "Changes · " + fmt(rows.length)));
+      rows.forEach(function (row) { add({ kind: "change", row: row }, rowLabel(row), changeWhat(row)); });
+    }
+    var comments = Array.prototype.slice.call(root.querySelectorAll(".card.comment-card"));
+    if (comments.length) {
+      reviewList.appendChild(el("h3", null, "Comments · " + fmt(comments.length)));
+      comments.forEach(function (c) {
+        var row = c.closest("tr");
+        add({ kind: "comment", row: row, card: c }, rowLabel(row),
+          c.querySelector(".who").textContent + ": " + c.querySelector(".body").textContent);
+      });
+    }
+    if (aiNotes.length) {
+      reviewList.appendChild(el("h3", null, "Problems · " + fmt(aiNotes.length)));
+      aiOrder.forEach(function (k) {
+        var note = aiNotes[k], c = root.querySelector('.card[data-note="' + k + '"]');
+        var b = add({ kind: "problem", row: c && c.closest("tr"), card: c },
+          "⚠ " + note.num, note.problem);
+        if (!c) {
+          b.disabled = true;
+          b.querySelector(".what").textContent = note.problem + " (not found in the text)";
+        }
+      });
+    }
+  }
+  function selectReview(k) {
+    var item = reviewItems[k];
+    if (!item || item.button.disabled) return;
+    reviewAt = k;
+    reviewItems.forEach(function (it, i) {
+      it.button.setAttribute("aria-current", i === k ? "true" : "false");
+    });
+    item.button.scrollIntoView({ block: "nearest" });
+    document.querySelectorAll(".review-row").forEach(function (r) { r.classList.remove("review-row"); });
+    document.querySelectorAll(".review-file").forEach(function (f) { f.classList.remove("review-file"); });
+    unpin();
+    var which = reviewHead.querySelector(".which"), where = reviewHead.querySelector(".where");
+    if (item.kind === "assessment") {
+      setDrawer(true, item.id);
+      which.textContent = item.id === "writing" ? "AI writing" : "AI assessment";
+      where.textContent = "";
+      return;
+    }
+    var row = item.row, file = row.closest("details.file");
+    row.classList.add("review-row");
+    if (file) file.classList.add("review-file");
+    reveal(row);
+    if (item.card) pinMark(markOf(item.card));
+    var same = reviewItems.filter(function (it) { return it.kind === item.kind; });
+    which.textContent = KIND_NAMES[item.kind] + " " + fmt(same.indexOf(item) + 1) + " of " + fmt(same.length);
+    var path = file && file.querySelector(":scope > summary .path");
+    var files = document.querySelectorAll(".split:not([hidden]) details.file, main > details.file").length;
+    where.textContent = (files > 1 && path ? path.textContent + " · " : "") +
+      unitOf(row) + " " + rowLabel(row);
+    window.scrollTo(0, 0);
+  }
+  function stepReview(step) {
+    var k = reviewAt;
+    for (var t = 0; t < reviewItems.length; t++) {
+      k = (k + step + reviewItems.length) % reviewItems.length;
+      if (!reviewItems[k].button.disabled) { selectReview(k); return; }
+    }
+  }
+  function setReview(on) {
+    reviewing = on;
+    document.body.classList.toggle("review", on);
+    if (reviewButton) reviewButton.setAttribute("aria-pressed", on ? "true" : "false");
+    document.querySelectorAll(".review-row").forEach(function (r) { r.classList.remove("review-row"); });
+    document.querySelectorAll(".review-file").forEach(function (f) { f.classList.remove("review-file"); });
+    unpin();
+    if (on) {
+      buildReview();
+      var first = reviewItems.findIndex(function (it) {
+        return it.kind !== "assessment" && !it.button.disabled;
+      });
+      reviewAt = -1;
+      if (first >= 0) selectReview(first);
+    } else {
+      setDrawer(false);
+    }
+  }
+  document.addEventListener("click", function (e) {
+    if (e.target.closest("[data-review]")) { setReview(!reviewing); return; }
+    var item = e.target.closest("#review-list button[data-item]");
+    if (item) { selectReview(Number(item.dataset.item)); return; }
+    var step = e.target.closest("[data-review-step]");
+    if (step) stepReview(Number(step.dataset.reviewStep));
+  });
+
+  // The tooltips: who made a tracked change and when (formatted view),
+  // where a moved line went or came from (on its number) and a moved
+  // passage (on it), what formatting changed, and the top bar's help. One
+  // element shows them, placed by the script so no file box clips it, one
+  // at a time.
+  var tip = document.getElementById("tip");
+  var shown = null;
+  // The top bar's help, always on: its name, what it does, and its key.
+  document.querySelectorAll(".toolbar [title], #review-head [title]").forEach(function (e) {
+    e.dataset.help = e.title;
+    e.removeAttribute("title");
+  });
+  function add(cls, text) {
+    var e = document.createElement(cls === "b" ? "b" : "span");
+    if (cls !== "b") e.className = cls;
+    e.textContent = text;
+    tip.appendChild(e);
+  }
+  function showTip(e) {
     tip.textContent = "";
-    if (el.classList.contains("comment")) {
-      add("b", el.dataset.author || "Comment");
-      richLines(el.dataset.rich).forEach(function (p) { tip.appendChild(p); });
-      if (!el.dataset.rich) add("line", el.dataset.text);
-      if (el.dataset.date) add("when", el.dataset.date);
-    } else if (el.classList.contains("ai-mark")) {
-      var note = aiNotes[Number(el.dataset.note)];
-      add("b", "Problem " + note.num + ", marked by the AI");
-      add("line", note.problem);
-      if (note.solution) add("line", "Proposed: " + note.solution);
-    } else if (el.classList.contains("fmt")) {
+    if (e.classList.contains("fmt")) {
       add("b", "Formatting changed");
-      add("line", el.dataset.fmt);
-    } else if (el.dataset.move) {
-      add("b", el.dataset.move);
-      if (el.hasAttribute("data-move-edited")) add("line", "edited on the way");
-    } else if (el.matches(".s-tc-ins, .s-tc-del")) {
-      add("b", el.classList.contains("s-tc-ins") ? "Tracked insertion" : "Tracked deletion");
-      if (el.dataset.author) add("line", "by " + el.dataset.author);
-      if (el.dataset.date) add("when", el.dataset.date);
+      add("line", e.dataset.fmt);
+    } else if (e.dataset.move) {
+      add("b", e.dataset.move);
+      if (e.hasAttribute("data-move-edited")) add("line", "edited on the way");
+    } else if (e.matches(".s-tc-ins, .s-tc-del")) {
+      add("b", e.classList.contains("s-tc-ins") ? "Tracked insertion" : "Tracked deletion");
+      if (e.dataset.author) add("line", "by " + e.dataset.author);
+      if (e.dataset.date) add("when", e.dataset.date);
     } else {
       // "Name: what it does (k)", or a plain text
-      var m = /^(.*?)(?:: (.*?))?(?: \((.+)\))?$/.exec(el.dataset.help);
+      var m = /^(.*?)(?:: (.*?))?(?: \((.+)\))?$/.exec(e.dataset.help);
       if (m[2]) { add("b", m[1]); add("line", m[2]); } else add("line", m[1]);
       if (m[3]) add("when", "key: " + m[3]);
     }
     tip.hidden = false;
-    shown = el;
+    shown = e;
     placeTip();
   }
   // Below what is hovered, or above it when there is no room below.
   function placeTip() {
-    if (!shown || tipMoved) return;  // dragged: where it was dropped
+    if (!shown) return;
     var r = shown.getBoundingClientRect(), t = tip.getBoundingClientRect();
     // a switch of the View menu: beside the menu, not over its other rows
     var menu = shown.closest(".menu-panel");
@@ -1593,50 +1876,28 @@ thead.print, .print-note { display: none; }
     tip.hidden = true;
     shown = null;
   }
-  // The comment tooltips can be switched off in the toolbar (on by
-  // default); the choice is remembered like the views.
-  var commentTips = true;
-  function setCommentTips(on, remember) {
-    commentTips = on;
-    document.body.classList.toggle("no-comments-tips", !on);
-    var box = document.querySelector('[data-tips="comments"]');
-    if (box) box.setAttribute("aria-checked", on ? "true" : "false");
-    if (remember) {
-      try { localStorage.setItem("prosediff-tips-comments", on ? "1" : "0"); } catch (e) {}
-    }
-    hideTip();
-  }
-  try {
-    var savedTips = localStorage.getItem("prosediff-tips-comments");
-    setCommentTips(savedTips === null ? true : savedTips === "1", false);
-  } catch (e) { setCommentTips(true, false); }
-  // The switch is an icon button acting as a checkbox.
-  document.addEventListener("click", function (e) {
-    if (e.target.closest('[data-tips="comments"]')) setCommentTips(!commentTips, true);
-  });
-
   var anchorX = 0;
-  function tipTarget(el) {
-    return el.closest(".toolbar [data-help]") || el.closest("td[data-move]") ||
-      (commentTips && el.closest(".comment")) ||
-      (document.body.classList.contains("formats") && el.closest(".fmt")) ||
-      (document.body.classList.contains("formatted") && el.closest(".s-tc-ins, .s-tc-del")) ||
-      el.closest(".moved[data-move]") || el.closest(".ai-mark");
+  function tipTarget(e) {
+    return e.closest(".toolbar [data-help]") || e.closest("#review-head [data-help]") ||
+      e.closest("td[data-move]") ||
+      (document.body.classList.contains("formats") && e.closest(".fmt")) ||
+      (document.body.classList.contains("formatted") && e.closest(".s-tc-ins, .s-tc-del")) ||
+      e.closest(".moved[data-move]");
   }
   document.addEventListener("mouseover", function (e) {
-    if (pinned) return;  // a pinned comment keeps its tooltip
-    var el = tipTarget(e.target);
-    if (el === shown) return;
-    if (!el) { hideTip(); return; }
+    var t = tipTarget(e.target);
+    if (t === shown) return;
+    if (!t) { hideTip(); return; }
     anchorX = e.clientX;
-    showTip(el);
+    showTip(t);
   });
   document.addEventListener("focusin", function (e) {
-    if (pinned) return;
-    var el = tipTarget(e.target);
-    if (el) { anchorX = 0; showTip(el); }
+    var t = tipTarget(e.target);
+    if (t) { anchorX = 0; showTip(t); }
   });
-  document.addEventListener("focusout", function () { if (!pinned) hideTip(); });
+  document.addEventListener("focusout", hideTip);
+  // A button clicked has done what its help said: the help goes.
+  document.addEventListener("click", hideTip);
   // Scrolling keeps the tooltip where it belongs.
   window.addEventListener("scroll", function () { anchorX = 0; placeTip(); }, { passive: true });
 
@@ -1699,13 +1960,159 @@ thead.print, .print-note { display: none; }
     });
     svg.appendChild(g);
   }
+  // The margin's stacks of cards, placed down each file shown, each level
+  // with the top of its row: a stack taller than its row runs on down
+  // beside the rows below that have no cards, and when it reaches one that
+  // has, room is made after the row before it (--push), so that row's cards
+  // start beside it, never after its end; the file made taller when the
+  // last runs past its end. Where the cards sit under their rows (static:
+  // no margin), nothing to place.
+  var STACK_GAP = 8;
+  function layoutNotes(file) {
+    file.style.paddingBottom = "";
+    var table = file.querySelector("table.notes-on");
+    if (!table) return;
+    Array.prototype.forEach.call(table.rows, function (r) { r.style.removeProperty("--push"); });
+    if (!file.open || file.closest(".split[hidden]")) return;
+    var stacks = table.querySelectorAll("td.notes > .stack");
+    if (!stacks.length || getComputedStyle(stacks[0]).position !== "absolute") return;
+    var rows = Array.prototype.slice.call(table.rows), below = 0;
+    var topOf = function (el) {
+      return el.getBoundingClientRect().top - table.getBoundingClientRect().top;
+    };
+    stacks.forEach(function (stack) {
+      var cell = stack.parentElement, row = cell.parentElement;
+      if (!cell.offsetParent) return;  // a row folded away or hidden
+      var at = topOf(cell);
+      if (below > at) {
+        // the row shown before it, made taller by what the cards above need
+        var k = rows.indexOf(row) - 1;
+        while (k >= 0 && !rows[k].offsetParent) k--;
+        if (k >= 0) {
+          rows[k].style.setProperty("--push", Math.ceil(below - at) + "px");
+          at = topOf(cell);
+        }
+      }
+      stack.style.top = "4px";
+      below = at + 4 + stack.offsetHeight + STACK_GAP;
+    });
+    var past = below - table.offsetHeight;
+    if (past > 0) file.style.paddingBottom = past + "px";
+  }
+  // The columns' widths, set by dragging their handles and remembered like
+  // the views: the old version's share of the two versions' width, and the
+  // margin's width, in every file. None set: the table's own.
+  var widths = { share: null, notes: null };
+  try {
+    var savedShare = parseFloat(localStorage.getItem("prosediff-old-share"));
+    if (savedShare >= 0.15 && savedShare <= 0.85) widths.share = savedShare;
+    var savedNotes = parseFloat(localStorage.getItem("prosediff-notes-width"));
+    if (savedNotes >= 180) widths.notes = savedNotes;
+  } catch (e) {}
+  function gutterOf(table) {
+    var no = table.querySelector("td.no");
+    return no ? no.offsetWidth : 0;
+  }
+  function notesOf(table) {
+    var cell = table.querySelector("td.notes");
+    return cell && cell.offsetParent ? cell.offsetWidth : 0;
+  }
+  function applyWidths(table) {
+    var cols = table.querySelectorAll(":scope > colgroup > col");
+    if (cols.length < 4) return;
+    var notes = table.querySelector("col.notes");
+    if (notes) notes.style.width = widths.notes ? widths.notes + "px" : "";
+    if (widths.share === null) { cols[1].style.width = ""; return; }
+    var text = table.clientWidth - 2 * gutterOf(table) - notesOf(table);
+    cols[1].style.width = Math.round(text * widths.share) + "px";
+  }
+  // The handles of a file's table, where its columns meet.
+  function placeResizers(file) {
+    file.querySelectorAll(":scope > .col-resizer").forEach(function (h) { h.remove(); });
+    var table = file.querySelector("table");
+    if (!table || !file.open || file.closest(".split[hidden]") || !table.offsetParent ||
+        document.body.classList.contains("unified")) return;
+    var box = file.getBoundingClientRect(), t = table.getBoundingClientRect();
+    var left = table.querySelector("td.code.left"), notes = table.querySelector("td.notes");
+    var at = [];
+    if (left && left.offsetParent) at.push(["split", left.getBoundingClientRect().right]);
+    if (notes && notes.offsetParent) at.push(["notes", notes.getBoundingClientRect().left]);
+    at.forEach(function (a) {
+      var h = document.createElement("div");
+      h.className = "col-resizer";
+      h.dataset.resize = a[0];
+      h.setAttribute("aria-hidden", "true");
+      h.title = a[0] === "split"
+        ? "Drag to share the width between the old and the new version; double-click for the default"
+        : "Drag to widen or narrow the margin; double-click for the default";
+      h.style.left = (a[1] - box.left) + "px";
+      h.style.top = (t.top - box.top) + "px";
+      h.style.height = t.height + "px";
+      file.appendChild(h);
+    });
+  }
+  var dragging = null;
+  document.addEventListener("pointerdown", function (e) {
+    var h = e.target.closest(".col-resizer");
+    if (!h) return;
+    e.preventDefault();
+    h.setPointerCapture(e.pointerId);
+    h.classList.add("dragging");
+    document.body.classList.add("col-dragging");
+    dragging = { handle: h, kind: h.dataset.resize, table: h.parentElement.querySelector("table") };
+  });
+  document.addEventListener("pointermove", function (e) {
+    if (!dragging) return;
+    var table = dragging.table, t = table.getBoundingClientRect();
+    if (dragging.kind === "split") {
+      var gutter = gutterOf(table), text = table.clientWidth - 2 * gutter - notesOf(table);
+      var old = Math.min(Math.max(e.clientX - t.left - gutter, 0.15 * text), 0.85 * text);
+      widths.share = old / text;
+    } else {
+      widths.notes = Math.round(Math.min(Math.max(t.right - e.clientX, 180), 0.5 * t.width));
+    }
+    document.querySelectorAll("table").forEach(applyWidths);
+    dragging.handle.style.left = (e.clientX - dragging.handle.parentElement.getBoundingClientRect().left) + "px";
+    drawAllLinks();
+  });
+  function endDrag() {
+    if (!dragging) return;
+    dragging.handle.classList.remove("dragging");
+    document.body.classList.remove("col-dragging");
+    dragging = null;
+    try {
+      if (widths.share !== null) localStorage.setItem("prosediff-old-share", String(widths.share));
+      if (widths.notes !== null) localStorage.setItem("prosediff-notes-width", String(widths.notes));
+    } catch (e) {}
+    drawAllLinks();
+  }
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
+  // Double-clicked, a handle puts its columns back as the table has them.
+  document.addEventListener("dblclick", function (e) {
+    var h = e.target.closest(".col-resizer");
+    if (!h) return;
+    var key = h.dataset.resize === "split" ? "share" : "notes";
+    widths[key] = null;
+    try {
+      localStorage.removeItem(key === "share" ? "prosediff-old-share" : "prosediff-notes-width");
+    } catch (err) {}
+    document.querySelectorAll("table").forEach(applyWidths);
+    drawAllLinks();
+  });
   var linksPending = false;
   function drawAllLinks() {
     if (linksPending) return;
     linksPending = true;
     requestAnimationFrame(function () {
       linksPending = false;
-      document.querySelectorAll("details.file").forEach(drawLinks);
+      document.querySelectorAll("details.file").forEach(function (file) {
+        var table = file.querySelector("table");
+        if (table) applyWidths(table);
+        layoutNotes(file);
+        drawLinks(file);
+        if (!dragging) placeResizers(file);  // not the one held
+      });
     });
   }
   drawAllLinks();

@@ -247,7 +247,7 @@ def attach_carried(blocks: list[Block], carried: list) -> None:
 @dataclass(kw_only=True)
 class DocumentReader:
     """What the Word and OpenDocument readers share: their tracked changes
-    settled as changes says ("accept", "reject", or "all", kept as markup);
+    settled as changes says ("accept-all", "reject-all", or "show", kept as markup);
     the comments of a paragraph deleted as a whole carried to the next; and
     the languages the paragraphs are marked with, when asked for (languages,
     with an of(paragraphs) giving the language most of their letters are in
@@ -270,15 +270,15 @@ class DocumentReader:
     def keeps(self, kind: str) -> bool:
         """Whether the text of a tracked change ("insertion", "deletion")
         stays: accepted insertions, rejected deletions, all shown."""
-        return self.changes == "all" or (self.changes == "accept") == (kind == "insertion")
+        return self.changes == "show" or (self.changes == "accept-all") == (kind == "insertion")
 
     def settle_change(self, kind: str, inner: list, author: str = "", date: str = "") -> list:
         """What a tracked change of the inlines inner leaves: them, a span
-        marking them (with changes "all"; nothing when they hold no text),
+        marking them (with changes "show"; nothing when they hold no text),
         or, when its text goes, only the comments anchored in it."""
         if not self.keeps(kind):
             return comments_in(inner)
-        if self.changes == "all":
+        if self.changes == "show":
             return [Span(kind, inner, author=author, date=date)] if markdown(inner).strip() else []
         return inner
 
@@ -453,6 +453,21 @@ class Line(str):
     def replaced(self, text: str, styles: list[frozenset[str]]) -> "Line":
         """Another text of the same paragraph."""
         return Line(text, styles, self.lang, self.kind, self.source)
+
+
+HEADING_LEVEL = re.compile(r"h([1-6])")
+
+
+def heading_level(line: str) -> int:
+    """A heading's level, from the styles of its characters (h1 to h6); 0
+    when it has none. Not from its first character alone: a comment
+    anchored where the heading starts puts its placeholder, unstyled,
+    first."""
+    for styles in getattr(line, "styles", ()):
+        for s in styles:
+            if m := HEADING_LEVEL.fullmatch(s):
+                return int(m[1])
+    return 0
 
 
 def sub(pattern: re.Pattern, repl: Callable[[re.Match], str], line: str, count: int = 0) -> str:

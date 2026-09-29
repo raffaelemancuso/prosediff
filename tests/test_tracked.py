@@ -101,7 +101,7 @@ def lines(path, changes):
 
 def same(a, b, changes):
     """Whether two documents read alike, b's tracked changes settled so."""
-    return lines(a, "accept") == lines(b, changes)
+    return lines(a, "accept-all") == lines(b, changes)
 
 
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
@@ -112,8 +112,8 @@ def test_accepted_the_new_version_rejected_the_old(tmp_path, fmt):
     c = compare_paths(str(old), str(new), Options())
     out = write_output(c, tmp_path / f"out.{fmt}", fmt)
     assert out == tmp_path / f"out.{fmt}"
-    assert same(new, out, "accept")
-    assert same(old, out, "reject")
+    assert same(new, out, "accept-all")
+    assert same(old, out, "reject-all")
 
 
 def test_word_revisions_formatting_and_comments(tmp_path):
@@ -159,8 +159,8 @@ def test_a_deleted_last_paragraph(tmp_path, fmt):
     old = make(tmp_path / f"old.{fmt}", [("p", "One."), ("p", "Two.")])
     new = make(tmp_path / f"new.{fmt}", [("p", "One.")])
     out = write_output(compare_paths(str(old), str(new), Options()), tmp_path / f"o.{fmt}", fmt)
-    assert lines(out, "accept") == ["One."]
-    assert lines(out, "reject") == ["One.", "Two."]
+    assert lines(out, "accept-all") == ["One."]
+    assert lines(out, "reject-all") == ["One.", "Two."]
 
 
 def test_only_a_document_with_one_of_its_kind(tmp_path):
@@ -220,7 +220,7 @@ def test_cli_writes_tracked_changes(tmp_path, capsys):
     old, new = pair(tmp_path, "docx")
     out = tmp_path / "tracked.docx"
     assert main(["--files", str(old), str(new), "-o", str(out)]) == 0
-    assert same(new, out, "accept") and same(old, out, "reject")
+    assert same(new, out, "accept-all") and same(old, out, "reject-all")
     # two Word documents make no .odt: refused before comparing them
     with pytest.raises(SystemExit):
         main(["--files", str(old), str(new), "--format", "odt"])
@@ -298,7 +298,7 @@ def test_the_new_word_file_is_kept_whole_and_marked(tmp_path):
     assert "Quote Box" in [s.name for s in d.styles]
     assert len(d.inline_shapes) == 1 and [c.text for c in d.comments] == ["Which office?"]
     assert len(d.tables[0].rows) == 3  # the deleted row, back as a deleted row
-    assert same(new, out, "accept") and same(old, out, "reject")
+    assert same(new, out, "accept-all") and same(old, out, "reject-all")
 
 
 def test_the_new_odt_file_is_kept_and_marked(tmp_path):
@@ -336,4 +336,4 @@ def test_the_new_odt_file_is_kept_and_marked(tmp_path):
     assert 'loext:text-changes-only="false"' in content
     assert "styles.xml" in zipfile.ZipFile(out).namelist()
     assert "Box" in zipfile.ZipFile(out).read("styles.xml").decode()
-    assert same(new, out, "accept") and same(old, out, "reject")
+    assert same(new, out, "accept-all") and same(old, out, "reject-all")

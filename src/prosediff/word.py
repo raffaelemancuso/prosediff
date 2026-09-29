@@ -17,7 +17,7 @@ where it sits in the text:
   into a marker and list in the comments panel;
 - tracked changes are settled as asked: accepting keeps the inserted runs
   (w:ins, w:moveTo) and drops the deleted ones (w:del, w:moveFrom),
-  rejecting does the reverse, and "all" keeps both, marked as insertions
+  rejecting does the reverse, and "show" keeps both, marked as insertions
   and deletions with their author and date. The spaces at the edges of a
   change stay with it, and a comment anchored in dropped text is kept.
 
@@ -66,7 +66,7 @@ from prosediff.document import (
 )
 from prosediff.language import WordLanguages, most_letters
 
-CHANGES = ("accept", "reject", "all")
+CHANGES = ("accept-all", "reject-all", "show")
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 HEADING_STYLES = {"title": 1, **{f"heading {n}": n for n in range(1, 7)}}
 LIST_STYLES = ("list", "bullet", "number")
@@ -457,9 +457,9 @@ def _notes(document) -> dict:
     return notes
 
 
-def read_docx(data: bytes, changes: str = "accept") -> Document:
+def read_docx(data: bytes, changes: str = "accept-all") -> Document:
     """A Word document as prosediff reads it (prosediff.document), its
-    tracked changes settled ("accept", "reject") or kept as markup ("all"),
+    tracked changes settled ("accept-all", "reject-all") or kept as markup ("show"),
     its comments kept, each paragraph with the language it is marked with."""
     if changes not in CHANGES:
         raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")

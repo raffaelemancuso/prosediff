@@ -74,14 +74,14 @@ def test_comment_on_deleted_text_is_kept(tmp_path):
         comments='<w:comment w:id="0" w:author="Anna" w:date="2026-01-01T00:00:00Z">'
         "<w:p><w:r><w:t>Why?</w:t></w:r></w:p></w:comment>",
     )
-    accepted = document_to_markdown(d.read_bytes(), "a.docx", "accept").decode()
+    accepted = document_to_markdown(d.read_bytes(), "a.docx", "accept-all").decode()
     assert "gone" not in accepted and "Keep" in accepted and " new" in accepted
     assert '[Why?]{.comment-start id="0" author="Anna"' in accepted
-    rejected = document_to_markdown(d.read_bytes(), "a.docx", "reject").decode()
+    rejected = document_to_markdown(d.read_bytes(), "a.docx", "reject-all").decode()
     assert "gone" in rejected and "new" not in rejected and "Why?" in rejected
 
 
-def test_compare_two_docx_with_comments_panel(tmp_path):
+def test_compare_two_docx_with_a_new_comment(tmp_path):
     a = docx(tmp_path / "v1.docx", [[("run", "The first draft.")], [("run", "Unchanged.")]])
     b = docx(
         tmp_path / "v2.docx",
@@ -93,8 +93,8 @@ def test_compare_two_docx_with_comments_panel(tmp_path):
     assert f.markdown and "read from Word" in f.note
     assert [(e.status, e.author, e.text) for e in c.comments] == [("new", "Anna", "Why second?")]
     html = render(c)
-    assert "Comments: 1 new, 0 removed</h2>" in html
-    assert f'href="#{c.comments[0].anchor}"' in html and f'id="{c.comments[0].anchor}"' in html
+    assert 'class="comment new"' in html and 'data-author="Anna"' in html
+    assert f'id="{c.comments[0].anchor}"' in html and '<td class="notes"></td>' in html
 
 
 def test_inserted_paragraph_does_not_shift_the_pairing(tmp_path):

@@ -122,10 +122,13 @@ LANGUAGE_HINTS = {
     DOCUMENT: "The language Word and OpenDocument files are marked with.",
     GUESS: "Guessed from each file's text.",
 }
+# How the tracked changes are settled (DOCX_CHANGES), as the list names it.
+DOCX_CHANGE_LABELS = {"accept-all": "accept all", "reject-all": "reject all", "show": "show"}
+DOCX_CHANGE_VALUES = {label: value for value, label in DOCX_CHANGE_LABELS.items()}
 DOCX_CHANGE_HINTS = {
-    "accept": "Compare the documents with every tracked change accepted.",
-    "reject": "Compare the documents with every tracked change rejected.",
-    "all": "Show the tracked changes as Word does: insertions and deletions marked.",
+    "accept-all": "Compare the documents with every tracked change accepted.",
+    "reject-all": "Compare the documents with every tracked change rejected.",
+    "show": "Show the tracked changes as Word does: insertions and deletions marked.",
 }
 COMMENT_HINTS = {
     "markers": "Only the comments added or removed, set apart: a marker and a panel in the "
@@ -195,7 +198,7 @@ class Settings:
     # report, CriticMarkup in the diffs); "text": compared as text; "none"
     comments: str = "markers"
     empty_comments: bool = False
-    docx_changes: str = "accept"
+    docx_changes: str = "accept-all"
     align: str = "justify"
     # "auto": 0 for Markdown files and Word documents, 3 for the others; a
     # number applies to every file
@@ -242,6 +245,9 @@ class Settings:
     # whether the report is first shown without the assessment, and the AI
     # asked only once that preview is approved
     assess_preview: bool = True
+    # whether the AI is also asked, apart, if the new text reads as written by
+    # an AI
+    assess_ai_writing: bool = False
 
 
 READY = "Choose what to compare, then Compare."
@@ -346,6 +352,8 @@ def load_settings(path: Path | None = None) -> Settings:
         s.split = "both"
     if s.comments not in COMMENT_MODES:
         s.comments = "markers"
+    if s.docx_changes not in DOCX_CHANGES:
+        s.docx_changes = "accept-all"
     known_passage = {f.name for f in fields(MovedPassageSettings)}
     if not isinstance(s.moved_passages, dict):
         s.moved_passages = {}
@@ -449,7 +457,7 @@ def generate(
     if out is None and s.mode != "git":
         out = default_page(Path(old), Path(new))
     out = Path(with_format(str(out), fmt)) if out is not None else default_output(fmt)
-    assessment = None
+    assessment = writing = None
     write = partial(
         write_output,
         comparison,
@@ -477,6 +485,9 @@ def generate(
         )
         progress(f"Asking {s.assess} to assess the changes…")
         assessment = assess_comparison(comparison, request)
+        if s.assess_ai_writing:
+            progress(f"Asking {s.assess} whether the new text reads as written by an AI…")
+            writing = assess_comparison(comparison, request, kind="writing")
     progress(
         "Writing the report…"
         if fmt == "html"
@@ -484,7 +495,7 @@ def generate(
         if fmt in ("docx", "odt")
         else "Writing the diff…"
     )
-    out = write(assessment=assessment)
+    out = write(assessment=assessment, writing=writing)
     return out, comparison, assessment
 
 
@@ -727,7 +738,7 @@ class App:
 
     def build_compared_card(self, compared: ttk.Labelframe) -> None:
         """The options of what is compared."""
-        self.docx = tk.StringVar(value=self.s.docx_changes)
+        self.docx = tk.StringVar(value=DOCX_CHANGE_LABELS.get(self.s.docx_changes, "accept all"))
         field_row(
             compared,
             0,
@@ -736,14 +747,14 @@ class App:
                 ttk.Combobox(
                     compared,
                     textvariable=self.docx,
-                    values=DOCX_CHANGES,
+                    values=[DOCX_CHANGE_LABELS[v] for v in DOCX_CHANGES],
                     state="readonly",
                     width=12,
                 ),
-                DOCX_CHANGE_HINTS.get,
+                lambda label: DOCX_CHANGE_HINTS.get(DOCX_CHANGE_VALUES.get(label, ""), ""),
             ),
-            "Word and OpenDocument tracked changes: accept them, reject them, or show them "
-            "all, as Word does.",
+            "Word and OpenDocument tracked changes: accept them all, reject them all, or "
+            "show them, as Word does.",
         )
         self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "both")
         splits = ttk.Frame(compared)
@@ -1130,6 +1141,7 @@ class App:
         self.assess_annotate = tk.BooleanVar(value=self.s.assess_annotate)
         self.assess_save_prompt = tk.BooleanVar(value=self.s.assess_save_prompt)
         self.assess_preview = tk.BooleanVar(value=self.s.assess_preview)
+        self.assess_ai_writing = tk.BooleanVar(value=self.s.assess_ai_writing)
         switches = ttk.Frame(card)
         switches.grid(row=3, column=1, columnspan=2, sticky="w", **PAD)
         for text, var, tip in (
@@ -1141,7 +1153,7 @@ class App:
                 "before it reads it. No: the report stays as it is, unassessed.",
             ),
             (
-                "Mark problems in the text",
+                "Mark individual changes",
                 self.assess_annotate,
                 "Have the AI mark each problem in the text, from its first words to its "
                 "last, with what is wrong and the change it proposes: a numbered badge "
@@ -1149,7 +1161,15 @@ class App:
                 "listed in an AI marks panel.",
             ),
             (
-                "Save the text sent to the AI",
+                "Check for AI writing",
+                self.assess_ai_writing,
+                "Also ask the AI, apart, whether the text the changes added reads as written by "
+                "an AI: a second assessment, its verdict (likely, possibly or unlikely) in the "
+                "report's top bar. An indication, not a proof: careful writers show the same "
+                "signs, and writers in a second language are often taken for an AI wrongly.",
+            ),
+            (
+                "Save AI prompt",
                 self.assess_save_prompt,
                 "Also put the exact text the AI was sent (its system prompt and its "
                 "message) in the HTML report, in a closed panel at its end: to see what "
@@ -1541,7 +1561,7 @@ class App:
             include=self.include.get().strip(),
             comments=self.comments.get(),
             empty_comments=self.empty_comments.get(),
-            docx_changes=self.docx.get(),
+            docx_changes=DOCX_CHANGE_VALUES.get(self.docx.get(), "accept-all"),
             align=self.align.get(),
             context_lines=context,
             full=self.full.get(),
@@ -1572,6 +1592,7 @@ class App:
             assess_save_prompt=self.assess_save_prompt.get(),
             assess_annotate=self.assess_annotate.get(),
             assess_preview=self.assess_preview.get(),
+            assess_ai_writing=self.assess_ai_writing.get(),
         )
 
     def toggle_advanced(self) -> None:
@@ -1620,7 +1641,7 @@ class App:
         for var, value in (
             (self.comments, d.comments),
             (self.empty_comments, d.empty_comments),
-            (self.docx, d.docx_changes),
+            (self.docx, DOCX_CHANGE_LABELS[d.docx_changes]),
             (self.align, d.align),
             (self.context, d.context_lines),
             (self.full, d.full),
@@ -1642,6 +1663,7 @@ class App:
             (self.assess_save_prompt, d.assess_save_prompt),
             (self.assess_annotate, d.assess_annotate),
             (self.assess_preview, d.assess_preview),
+            (self.assess_ai_writing, d.assess_ai_writing),
         ):
             var.set(value)
         self.move_passages.set(d.move_passages)
@@ -1791,7 +1813,7 @@ class App:
             f"The report without the AI assessment is open in the browser: {path.name}\n\n"
             f"Send the changes to {self.job_settings.assess} for assessment?\n\n"
             "Yes: the AI assesses them and the report is written again with its "
-            "assessment. No: the report stays as it is.",
+            "assessment.\nNo: the report stays as it is.",
             parent=self.root,
         )
         if self.job is None:

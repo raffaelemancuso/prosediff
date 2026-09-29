@@ -16,7 +16,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from markupsafe import Markup, escape
+from markupsafe import Markup
 
 from prosediff.document import DATE_ATTRIBUTE, Rich, short_date, spaced
 
@@ -50,34 +50,10 @@ ID = re.compile(r'\bid="([^"]*)"')
 ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|'\"<>~^$])")
 
 
-# The HTML element each style of a comment's text is shown with.
-RICH_TAGS = {"strong": "b", "em": "i", "u": "u", "strike": "s", "sup": "sup", "sub": "sub"}
-
-
 def rich_json(rich: Rich) -> str:
     """A comment's paragraphs for the HTML report's script: a list of
     paragraphs, each of [text, "styles"] runs; "" when it has none."""
     return json.dumps([[[t, " ".join(s)] for t, s in p] for p in rich], ensure_ascii=False)
-
-
-def rich_html(rich: Rich, text: str) -> Markup:
-    """A comment's paragraphs as HTML, each run in the elements of its
-    styles (RICH_TAGS), a line break between paragraphs; text, escaped,
-    when it has none."""
-    if not rich:
-        return escape(text)
-    out = []
-    for p in rich:
-        runs = []
-        for t, styles in p:
-            html = str(escape(t))
-            for s in styles:
-                tag = RICH_TAGS.get(s)
-                if tag:
-                    html = f"<{tag}>{html}</{tag}>"
-            runs.append(html)
-        out.append("".join(runs))
-    return Markup("<br>".join(out))
 
 
 @dataclass
@@ -98,7 +74,7 @@ class Comment:
 
 @dataclass
 class CommentEntry:
-    """One comment of one file, for the comments panel."""
+    """One comment of one file, added, removed or kept, and where it is."""
 
     author: str
     text: str
@@ -108,18 +84,6 @@ class CommentEntry:
     line: int | None
     date: str = ""
     label: str = ""  # the line as the gutter shows it ("12.3")
-    # its place in the file's table, for the panel's reading order; None
-    # when no row shows it
-    order: int | None = None
-    rich: Rich = ()  # its paragraphs as written (Comment.rich)
-
-    @property
-    def icon(self) -> str:
-        return ICONS.get(self.status, COMMENT_MARK)
-
-    @property
-    def html(self) -> Markup:
-        return rich_html(self.rich, self.text)
 
 
 class Comments:

@@ -82,10 +82,10 @@ def write_tracked(comparison: Comparison, path: Path, fmt: str) -> Path:
     if fmt not in TRACKED_FORMATS:
         raise ValueError(f"format must be one of {tuple(TRACKED_FORMATS)}, not {fmt!r}")
     f = check_tracked(comparison, fmt)
-    if fmt == "odt" and f.document_changes != "accept":
+    if fmt == "odt" and f.document_changes != "accept-all":
         raise ValueError(
             "tracked changes as .odt accept the tracked changes the files have: "
-            "--docx-changes must be accept"
+            "--docx-changes must be accept-all"
         )
     from prosediff.redline import redline_docx, redline_odt
 
