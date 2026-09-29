@@ -72,7 +72,9 @@ h2 { font-size: 15px; margin: 0 0 6px; }
    mark ringed and its card too, until clicked again. */
 ::highlight(pin) { background-color: var(--flash); }
 td.code.pinned { background-color: var(--flash) !important; }
-.comment.pinned, .ai-mark.pinned { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
+.comment.pinned { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
+/* an AI mark keeps its own rounded shape, ringed a little apart from it */
+.ai-mark.pinned { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--current); }
 td.code .comment, td.code .ai-mark { cursor: pointer; }
 /* The margin: a card for each comment and each problem the AI marked,
    beside the row it is in, in the order they come in its text. */
@@ -324,9 +326,12 @@ td[data-move] { cursor: help; }
 /* A new or removed comment's icon says it all: no box around it. A new
    one is a green balloon with a + in it, in the text and in the panel. */
 .comment.new, .comment.removed { background: none; padding: 0; }
-svg.new-comment { width: 1.35em; height: 1.35em; vertical-align: -0.3em; }
+svg.new-comment, svg.removed-comment { width: 1.35em; height: 1.35em;
+  vertical-align: -0.3em; }
 svg.new-comment path { fill: var(--add); }
-svg.new-comment .plus { fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; }
+svg.removed-comment path { fill: var(--rem); }
+svg.new-comment .sign, svg.removed-comment .sign { fill: none; stroke: #fff;
+  stroke-width: 1.8; stroke-linecap: round; }
 /* The one tooltip of the HTML report, for the toolbar's help, where a moved
    line went, formatting and tracked changes. The script places it next to
    what is hovered or focused, so no file box clips it. */

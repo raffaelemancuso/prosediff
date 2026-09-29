@@ -70,7 +70,7 @@ prosediff sits between the two:
   or did not. Their tracked changes are accepted (or rejected) exactly as
   Word would, spaces included, and **their comments are kept**: each shown
   where it sits, new comments marked with a green balloon holding a +,
-  removed ones 🗑️, each with a card in the margin beside its paragraph
+  removed ones a red one holding a −, each with a card in the margin beside its paragraph
   (its author, date and text). Only new and removed comments are shown: those already
   in the old version are left out, even where they moved. The same works on
   OpenDocument texts (.odt) from LibreOffice, both read directly (no
@@ -150,7 +150,7 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--full`                   | show every line of each changed file                          |
 | `--max-hidden N`           | unchanged lines embedded per gap for the HTML report to reveal (default 500); longer gaps are left out, to keep the HTML report light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
-| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (a green balloon holding a + when added; 🗑️ when removed), with a card in the margin beside it (the author, the date and the comment); in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
+| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (a green balloon holding a + when added; a red one holding a − when removed), with a card in the margin beside it (the author, the date and the comment); in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
 | `--empty-comments`         | also show the comments that have no text, left out by default (a card saying "(no text)") |
 | `--docx-changes accept-all\|reject-all\|show` | the tracked changes of Word and OpenDocument documents: accept them all (`accept-all`, the default), reject them all (`reject-all`), or `show` them as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file (not Word or OpenDocument files, which are not read as Markdown) are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
@@ -478,7 +478,8 @@ back to its default (what is compared and where the output goes stay).
   on down the margin, pushing the next ones down, so the paragraphs keep the
   height of their text; a paragraph with a card is never folded away with
   the unchanged ones. In the text, a comment is a 💬 marker, a green balloon
-  holding a + when it was added since the base, or 🗑️ when it was removed;
+  holding a + when it was added since the base, or a red one holding a −
+  when it was removed;
   a problem, a numbered ⚠ badge. Clicking a card, or its mark in the text,
   pins it: the words it is anchored to stay highlighted, across paragraphs
   too (only its marker ringed when those words were deleted with a tracked

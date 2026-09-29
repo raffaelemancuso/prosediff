@@ -31,17 +31,23 @@ END_PLACEHOLDER = re.compile(f"[{chr(END_FIRST)}-{chr(END_FIRST + PUA_LAST - PUA
 ANY_PLACEHOLDER = re.compile(f"{PLACEHOLDER.pattern}|{END_PLACEHOLDER.pattern}")
 # A comment's marker.
 COMMENT_MARK = "\N{SPEECH BALLOON}"
+
+
+def balloon(kind: str, sign: str) -> Markup:
+    """A comment's balloon holding a sign, one glyph (no character draws it;
+    a squared NEW is unreadable at the size of the text)."""
+    return Markup(
+        f'<svg class="{kind}-comment" viewBox="0 0 16 16" aria-hidden="true">'
+        '<path d="M3 1.5h10A1.5 1.5 0 0 1 14.5 3v7a1.5 1.5 0 0 1-1.5 1.5H7.2L3.5 '
+        '14.5v-3H3A1.5 1.5 0 0 1 1.5 10V3A1.5 1.5 0 0 1 3 1.5Z"/>'
+        f'<path class="sign" d="{sign}"/></svg>'
+    )
+
+
 # One only the new side has, added since the base: a green balloon with a +
-# in it, one glyph (no character draws it; a squared NEW is unreadable at the
-# size of the text).
-NEW_COMMENT_MARK = Markup(
-    '<svg class="new-comment" viewBox="0 0 16 16" aria-hidden="true">'
-    '<path d="M3 1.5h10A1.5 1.5 0 0 1 14.5 3v7a1.5 1.5 0 0 1-1.5 1.5H7.2L3.5 '
-    '14.5v-3H3A1.5 1.5 0 0 1 1.5 10V3A1.5 1.5 0 0 1 3 1.5Z"/>'
-    '<path class="plus" d="M8 3.8v5.4M5.3 6.5h5.4"/></svg>'
-)
-# A comment only the old side has: removed since the base.
-REMOVED_COMMENT_MARK = "\N{WASTEBASKET}\N{VARIATION SELECTOR-16}"
+# in it; one only the old side has, removed since the base: a red one with a -.
+NEW_COMMENT_MARK = balloon("new", "M8 3.8v5.4M5.3 6.5h5.4")
+REMOVED_COMMENT_MARK = balloon("removed", "M5.3 6.5h5.4")
 ICONS = {"new": NEW_COMMENT_MARK, "removed": REMOVED_COMMENT_MARK}
 
 COMMENT_CLASS = re.compile(r"^\{\s*\.(comment-start|comment-end)\b")
