@@ -99,6 +99,8 @@ LANGUAGES += ("en", "it", "de", "fr", "es", "pt", "nl", "pl", "sv", "da", "fi", 
 NO_ASSESSMENT = "none"
 # What the model and effort fields say while the AI reports its models.
 LOADING = "Loading…"
+# The effort item of a model that says no default of its own: that default.
+MODEL_DEFAULT = "default"
 AIS = (NO_ASSESSMENT, "claude", "codex", "ollama")
 AI_HINTS = {
     NO_ASSESSMENT: "No assessment.",
@@ -1360,18 +1362,31 @@ class App:
         it supports is chosen already."""
         model = self.chosen_model()
         levels = [level for level, _ in model.efforts] if model else []
+        if levels and not model.default_effort:
+            levels.insert(0, MODEL_DEFAULT)  # shown, not an empty box
         self.effort_box.configure(values=levels)
         self.effort_box.state(["!disabled"] if self.ai_active() else ["disabled"])
         if keep and (self.assess_effort.get() in levels or model is None):
             return
-        self.assess_effort.set(model.default_effort if model else "")
+        default = model.default_effort if model else ""
+        self.assess_effort.set(default or (MODEL_DEFAULT if levels else ""))
 
     def model_hint(self, value: str) -> str:
         found = self.ai_models.get(self.assess_ai.get().strip(), [])
         return next((m.description for m in found if m.name == value), "")
 
+    def effort_chosen(self) -> str:
+        """The effort to ask for: "" for the model's own default; while the
+        models load, the one chosen before."""
+        effort = self.assess_effort.get().strip()
+        if effort == LOADING:
+            return self.pending[1]
+        return "" if effort == MODEL_DEFAULT else effort
+
     def effort_hint(self, value: str) -> str:
         model = self.chosen_model()
+        if value == MODEL_DEFAULT:
+            return "The model's own default effort: nothing is asked for."
         said = dict(model.efforts).get(value, "") if model else ""
         default = " (the model's default)" if model and value == model.default_effort else ""
         return f"{said}{default}".strip()
@@ -1444,6 +1459,27 @@ class App:
         self.progress = ttk.Progressbar(
             bottom, mode="indeterminate", bootstyle="striped", length=140
         )
+        # the question a preview asks, in this window above the buttons: a
+        # dialog of its own would open under the browser showing the preview
+        self.bottom = bottom
+        self.preview_bar = ttk.Labelframe(page, text="Preview", padding=(10, 8))
+        self.preview_text = tk.StringVar()
+        ttk.Label(
+            self.preview_bar, textvariable=self.preview_text, wraplength=500, justify="left"
+        ).pack(side="left", fill="x", expand=True)
+        ttk.Button(
+            self.preview_bar,
+            text="Don't send",
+            command=lambda: self.answer_preview(False),
+            bootstyle="secondary-outline",
+        ).pack(side="right")
+        self.send_button = ttk.Button(
+            self.preview_bar,
+            text="Send to the AI",
+            command=lambda: self.answer_preview(True),
+            bootstyle="primary",
+        )
+        self.send_button.pack(side="right", padx=(0, 8))
         self.root.bind("<Control-Return>", lambda e: self.run())
         self.root.bind("<Escape>", lambda e: self.cancel())
 
@@ -1640,11 +1676,7 @@ class App:
             output_format=self.output_format.get(),
             open_page=self.open_page.get(),
             assess=self.assess_spec(),
-            assess_effort=(
-                self.pending[1]
-                if self.assess_effort.get() == LOADING
-                else self.assess_effort.get().strip()
-            ),
+            assess_effort=self.effort_chosen(),
             assess_context=self.assess_context.get(),
             assess_instructions=self.assess_instructions.get().strip(),
             assess_save_prompt=self.assess_save_prompt.get(),
@@ -1776,6 +1808,7 @@ class App:
 
     def finish_job(self) -> None:
         self.job = None
+        self.preview_bar.pack_forget()
         self.progress.stop()
         self.progress.pack_forget()
         self.show_cancel(False)
@@ -1871,18 +1904,23 @@ class App:
 
     def preview(self, path: Path) -> None:
         """The report without the assessment, open in the browser: whether
-        its text goes to the AI is asked, and the answer sent back to the
-        comparison's process, which then goes on."""
-        self.set_stage("Preview open: waiting to send it to the AI…")
-        webbrowser.open(path.resolve().as_uri())
-        send = messagebox.askyesno(
-            "prosediff",
-            f"The report without the AI assessment is open in the browser: {path.name}\n\n"
-            f"Send the changes to {self.job_settings.assess} for assessment?\n\n"
-            "Yes: the AI assesses them and the report is written again with its "
-            "assessment.\nNo: the report stays as it is.",
-            parent=self.root,
+        its text goes to the AI is asked in this window (answer_preview), not
+        in a dialog, which the browser opening would cover."""
+        self.set_stage("Preview open in the browser: send it to the AI?")
+        self.preview_text.set(
+            f"The report without the AI assessment is open in the browser: {path.name}. "
+            f"Send the changes to {self.job_settings.assess} for assessment? Send: the "
+            "AI assesses them and the report is written again with its assessment. "
+            "Don't send: the report stays as it is."
         )
+        self.preview_bar.pack(fill="x", side="bottom", pady=(10, 0), after=self.bottom)
+        self.send_button.focus_set()
+        webbrowser.open(path.resolve().as_uri())
+
+    def answer_preview(self, send: bool) -> None:
+        """Send the preview's answer to the comparison's process, which then
+        goes on."""
+        self.preview_bar.pack_forget()
         if self.job is None:
             return  # cancelled while the question was open
         self.replies.put(send)

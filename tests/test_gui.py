@@ -1,6 +1,7 @@
 """The window: choosing the sides, generating the HTML report, remembering choices."""
 
 import json
+import queue
 import sys
 from dataclasses import fields, replace
 from pathlib import Path
@@ -327,6 +328,28 @@ def test_the_ai_reads_only_an_approved_preview(tmp_path, monkeypatch):
     assert len(asked) == 1
 
 
+def test_the_preview_is_asked_about_in_the_window(root, tmp_path, monkeypatch):
+    """The preview's question is a bar of the window, not a dialog the
+    browser would cover: shown with the report opened, its answer sent to
+    the comparison's process, gone once answered."""
+    opened = []
+    monkeypatch.setattr(gui.webbrowser, "open", opened.append)
+    monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: pytest.fail("no dialog"))
+    app = App(root, Settings(mode="files", assess="claude"))
+    app.job, app.job_settings = object(), app.collect()
+    app.messages, app.replies = queue.Queue(), queue.Queue()
+    page = tmp_path / "page.html"
+    page.write_text("")
+    app.preview(page)
+    root.update()
+    assert app.preview_bar.winfo_manager() == "pack" and "page.html" in app.preview_text.get()
+    assert opened == [page.resolve().as_uri()]
+    app.answer_preview(True)
+    app.job = None  # no process to poll
+    root.update()
+    assert app.replies.get_nowait() is True and not app.preview_bar.winfo_manager()
+
+
 def test_a_comparison_runs_apart_and_can_be_cancelled(root, tmp_path):
     """Compare starts the comparison in a process of its own and becomes
     Cancel, which stops it and all it started, and becomes Compare again;
@@ -397,8 +420,12 @@ def test_ai_model_and_effort_as_the_ai_reports(root):
     assert not any(s.instate(["disabled"]) for s in app.ai_switches)
     assert list(app.model_box["values"]) == ["default", "opus", "haiku"]
     assert app.assess_model.get() == "default" and app.assess_spec() == "claude"
-    assert list(app.effort_box["values"]) == ["low", "max"] and app.assess_effort.get() == ""
+    # Claude says no default effort: "default", its own, shown, not an empty box
+    assert list(app.effort_box["values"]) == ["default", "low", "max"]
+    assert app.assess_effort.get() == "default" and app.collect().assess_effort == ""
+    assert "own default" in app.effort_hint("default")
     app.assess_model.set("opus")
+    assert app.assess_effort.get() == "default"
     app.assess_effort.set("max")
     s = app.collect()
     assert (s.assess, s.assess_effort) == ("claude/opus", "max")
