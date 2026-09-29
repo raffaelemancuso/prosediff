@@ -286,11 +286,11 @@ td[data-move] { cursor: help; }
 .comment { font-size: 0.85em; background: var(--panel); border-radius: 3px;
   padding: 0 2px; }
 /* A new or removed comment's icon says it all: no box around it. A new
-   one is the balloon after a green +, in the text and in the panel. */
+   one is a green balloon with a + in it, in the text and in the panel. */
 .comment.new, .comment.removed { background: none; padding: 0; }
-.comment.new::before, .comment-icon.new::before { content: "+"; color: var(--add);
-  font: 700 1.1em/1 -apple-system, "Segoe UI", sans-serif; margin-right: 1px;
-  vertical-align: 0.1em; }
+svg.new-comment { width: 1.35em; height: 1.35em; vertical-align: -0.3em; }
+svg.new-comment path { fill: var(--add); }
+svg.new-comment .plus { fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; }
 /* The one tooltip of the HTML report, for comments (the author in bold, the
    comment below, its date in grey) and the toolbar's help. The script
    places it next to what is hovered or focused, so no file box clips it. */
@@ -303,6 +303,7 @@ td[data-move] { cursor: help; }
 #tip.draggable { pointer-events: auto; cursor: move; user-select: none;
   touch-action: none; }
 #tip b, #tip .line { display: block; }
+#tip .line:empty { height: 0.7em; }  /* a comment's blank line */
 #tip .when, #tip .more { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 tr.current td, tr.target td { box-shadow: inset 0 2px 0 var(--current); }
 tr.skip td { background: var(--skip); padding: 2px 8px;
@@ -502,7 +503,7 @@ thead.print, .print-note { display: none; }
 {% macro comment_list(items) %}
   <ul>
   {% for e in items %}
-    <li data-place="{{ loop.index }}" data-date="{{ e.date }}" data-status="{{ e.status }}"><span class="status-{{ e.status }}"><span class="comment-icon {{ e.status }}" aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}" data-comment="{{ e.text }}" data-side="{{ "left" if e.status == "removed" else "right" }}">{{ e.text or "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
+    <li data-place="{{ loop.index }}" data-date="{{ e.date }}" data-status="{{ e.status }}"><span class="status-{{ e.status }}"><span class="comment-icon {{ e.status }}" aria-hidden="true">{{ e.icon }}</span> {{ e.status }}</span><span class="role">{{ e.author or "—" }}{% if e.date %}<br><small>{{ e.date }}</small>{% endif %}</span><a href="#{{ e.anchor }}" data-comment="{{ e.text }}" data-side="{{ "left" if e.status == "removed" else "right" }}">{{ e.html if e.text else "(no text)" }}</a><span class="sr"> in {{ e.path }}{% if e.line %}, line {{ e.label or e.line }}{% endif %}</span></li>
   {% endfor %}
   </ul>
 {% endmacro %}
@@ -586,10 +587,47 @@ thead.print, .print-note { display: none; }
 <span class="view-label" title="The prose compared {{ split }} by {{ split }}"><b>{{ split | capitalize }} view</b>{% if other %}<button type="button" class="btn" data-split-to="{{ other }}" title="Show the prose compared {{ other }} by {{ other }} (s)">⇄ {{ other }}s</button>{% endif %}</span>
 {%- endmacro %}
 
-{# The body of the report for one comparison: its summary, its comments,
-   its files. prefix sets its ids apart when the report holds two, one per
-   split; other is the other split then. #}
+{# The body of the report for one comparison: the AI's marks, its comments,
+   its summary, its files. prefix sets its ids apart when the report holds
+   two, one per split; other is the other split then. #}
 {% macro report_body(c, split, prefix="", other=none) %}
+{% if assessment and assessment.annotations and not assessment.error %}
+<details class="comments-panel ai-notes">
+  <summary class="comments-head">
+    <h2>AI marks: {{ assessment.annotations | length | counted("problem") }}</h2>
+    <span class="role">each ⚠ in the text; click one, here or there, to pin it</span>
+  </summary>
+  <ol>
+  {% for a in assessment.annotations %}
+    <li data-note="{{ loop.index0 }}"><span class="ai-num" aria-hidden="true">⚠ {{ loop.index }}</span>
+      <span><button type="button" class="btn ai-show" data-note="{{ loop.index0 }}" title="Show it in the text">“{{ a.start }}”{% if a.end != a.start %} … “{{ a.end }}”{% endif %}</button>
+      <span class="role">({{ "new version" if a.side == "new" else "old version" }})</span>
+      <span class="role ai-missing" hidden>not found in the text</span><br>
+      <span class="ai-problem">{{ a.problem }}</span>{% if a.solution %} <span class="ai-solution"><b>Proposed:</b> {{ a.solution }}</span>{% endif %}</span></li>
+  {% endfor %}
+  </ol>
+</details>
+{% endif %}
+{% if c.comments %}
+{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
+<details class="comments-panel">
+  <summary class="comments-head">
+    <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
+    <span class="comments-switch" role="group" aria-label="Show comments">
+      <span class="role">Show</span>
+      <button type="button" class="btn" data-show="all" aria-pressed="true">all</button>
+      <button type="button" class="btn" data-show="new" aria-pressed="false">new</button>
+      <button type="button" class="btn" data-show="removed" aria-pressed="false">removed</button>
+    </span>
+    <span class="comments-switch" role="group" aria-label="Sort comments">
+      <span class="role">Sort by</span>
+      <button type="button" class="btn" data-sort="place" aria-pressed="true" title="In the order they appear in the report; again to reverse">reading order<span class="dir" aria-hidden="true">↓</span></button>
+      <button type="button" class="btn" data-sort="date" aria-pressed="false" title="By when they were written; again to reverse">date<span class="dir" aria-hidden="true"></span></button>
+    </span>
+  </summary>
+  {{ comment_list(c.comments_in_reading_order(("new", "removed"))) }}
+</details>
+{% endif %}
 {% if not c.files %}
 <p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
 {% else %}
@@ -613,43 +651,6 @@ thead.print, .print-note { display: none; }
   <button type="button" class="btn" data-files="close">Collapse all</button></p>
   {% endif %}
 </div>
-{% endif %}
-{% if c.comments %}
-{% set new_c = c.comments_with("new") %}{% set gone_c = c.comments_with("removed") %}
-<details class="comments-panel">
-  <summary class="comments-head">
-    <h2 id="{{ prefix }}comments-title">Comments: {{ new_c | length | comma }} new, {{ gone_c | length | comma }} removed</h2>
-    <span class="comments-switch" role="group" aria-label="Show comments">
-      <span class="role">Show</span>
-      <button type="button" class="btn" data-show="all" aria-pressed="true">all</button>
-      <button type="button" class="btn" data-show="new" aria-pressed="false">new</button>
-      <button type="button" class="btn" data-show="removed" aria-pressed="false">removed</button>
-    </span>
-    <span class="comments-switch" role="group" aria-label="Sort comments">
-      <span class="role">Sort by</span>
-      <button type="button" class="btn" data-sort="place" aria-pressed="true" title="In the order they appear in the report; again to reverse">reading order<span class="dir" aria-hidden="true">↓</span></button>
-      <button type="button" class="btn" data-sort="date" aria-pressed="false" title="By when they were written; again to reverse">date<span class="dir" aria-hidden="true"></span></button>
-    </span>
-  </summary>
-  {{ comment_list(c.comments_in_reading_order(("new", "removed"))) }}
-</details>
-{% endif %}
-{% if assessment and assessment.annotations and not assessment.error %}
-<details class="comments-panel ai-notes">
-  <summary class="comments-head">
-    <h2>AI marks: {{ assessment.annotations | length | counted("problem") }}</h2>
-    <span class="role">each ⚠ in the text; click one, here or there, to pin it</span>
-  </summary>
-  <ol>
-  {% for a in assessment.annotations %}
-    <li data-note="{{ loop.index0 }}"><span class="ai-num" aria-hidden="true">⚠ {{ loop.index }}</span>
-      <span><button type="button" class="btn ai-show" data-note="{{ loop.index0 }}" title="Show it in the text">“{{ a.start }}”{% if a.end != a.start %} … “{{ a.end }}”{% endif %}</button>
-      <span class="role">({{ "new version" if a.side == "new" else "old version" }})</span>
-      <span class="role ai-missing" hidden>not found in the text</span><br>
-      <span class="ai-problem">{{ a.problem }}</span>{% if a.solution %} <span class="ai-solution"><b>Proposed:</b> {{ a.solution }}</span>{% endif %}</span></li>
-  {% endfor %}
-  </ol>
-</details>
 {% endif %}
 
 
@@ -1152,13 +1153,43 @@ thead.print, .print-note { display: none; }
   var canHighlight = window.CSS && CSS.highlights && typeof Highlight === "function";
   // ranges: the text to highlight; null when it is not known, the cell
   // (the paragraph) highlighted instead; none: nothing but the mark.
+  // Not the document's text: what screen readers and paper alone get, and
+  // the marks put in it (a comment's marker and the end of its words, a
+  // problem's badge and what it says, written out when expanded).
+  var NOT_TEXT = ".sr, .print-note, .comment, .comment-end, .sign, .ai-mark, .ai-inline";
+  // The ranges, their start and end kept, without what is not text between
+  // them (NOT_TEXT): a comment anchored to words a problem was also marked
+  // on highlights those words, not the problem's badge before them.
+  function textOnly(ranges) {
+    var out = [];
+    ranges.forEach(function (r) {
+      var root = r.commonAncestorContainer;
+      if (root.nodeType !== Node.ELEMENT_NODE) root = root.parentElement;
+      var inside = Array.prototype.filter.call(
+        root.querySelectorAll(NOT_TEXT),
+        function (m) { return r.intersectsNode(m); });
+      // those inside another go with it
+      inside = inside.filter(function (m) {
+        return !inside.some(function (o) { return o !== m && o.contains(m); });
+      });
+      var piece = r.cloneRange();
+      inside.forEach(function (m) {
+        piece.setEndBefore(m);
+        if (piece.toString()) out.push(piece);
+        piece = r.cloneRange();
+        piece.setStartAfter(m);
+      });
+      if (piece.toString()) out.push(piece);
+    });
+    return out;
+  }
   function pin(mark, ranges, cell) {
     var again = pinned && pinned.mark === mark;
     unpin();
     if (again) return;
     if (ranges && ranges.length && canHighlight) {
       var highlight = new Highlight();
-      ranges.forEach(function (r) { highlight.add(r); });
+      textOnly(ranges).forEach(function (r) { highlight.add(r); });
       CSS.highlights.set("pin", highlight);
     } else if (!ranges && cell) {
       cell.classList.add("pinned");
@@ -1252,13 +1283,11 @@ thead.print, .print-note { display: none; }
     if (!data) return;
     try { aiNotes = JSON.parse(data.textContent); } catch (e) { return; }
     var QUOTES = { "‘": "'", "’": "'", "“": '"', "”": '"' };
-    // Not text: what screen readers and paper alone get, the marks. A row
-    // holding a moved passage is written twice, its words marked as moved
-    // (.pv-on) and as removed and added (.pv-off), the "Moved passages"
-    // switch hiding one: each is searched apart, so a problem gets a badge
-    // in both and the one on screen always has it.
-    var SKIP = ".sr, .print-note, .comment, .comment-end, .sign, .ai-mark";
-    var VERSIONS = [SKIP + ", .pv-off", SKIP + ", .pv-on"];
+    // Not text: NOT_TEXT. A row holding a moved passage is written twice,
+    // its words marked as moved (.pv-on) and as removed and added (.pv-off),
+    // the "Moved passages" switch hiding one: each is searched apart, so a
+    // problem gets a badge in both and the one on screen always has it.
+    var VERSIONS = [NOT_TEXT + ", .pv-off", NOT_TEXT + ", .pv-on"];
     // Text as it is matched, each character with the text node and offset
     // it comes from (none for a space put between two cells).
     function Hay() { this.text = ""; this.at = []; }
@@ -1489,11 +1518,34 @@ thead.print, .print-note { display: none; }
     el.textContent = text;
     tip.appendChild(el);
   }
+  // A comment's paragraphs as written (data-rich): a line each, each run
+  // in the elements of its styles, built as elements (no HTML parsed).
+  var RICH_TAGS = { strong: "b", em: "i", u: "u", strike: "s", sup: "sup", sub: "sub" };
+  function richLines(json) {
+    var paragraphs;
+    try { paragraphs = JSON.parse(json || "[]"); } catch (e) { return []; }
+    return paragraphs.map(function (runs) {
+      var line = document.createElement("span");
+      line.className = "line";
+      runs.forEach(function (run) {
+        var node = document.createTextNode(run[0]);
+        run[1].split(" ").forEach(function (s) {
+          if (!RICH_TAGS[s]) return;
+          var el = document.createElement(RICH_TAGS[s]);
+          el.appendChild(node);
+          node = el;
+        });
+        line.appendChild(node);
+      });
+      return line;
+    });
+  }
   function showTip(el) {
     tip.textContent = "";
     if (el.classList.contains("comment")) {
       add("b", el.dataset.author || "Comment");
-      add("line", el.dataset.text);
+      richLines(el.dataset.rich).forEach(function (p) { tip.appendChild(p); });
+      if (!el.dataset.rich) add("line", el.dataset.text);
       if (el.dataset.date) add("when", el.dataset.date);
     } else if (el.classList.contains("ai-mark")) {
       var note = aiNotes[Number(el.dataset.note)];

@@ -17,13 +17,15 @@ prosediff.document.Document:
   text and leaves the deleted out, rejecting does the reverse, and "all"
   keeps both, marked as insertions and deletions. A comment anchored in
   dropped text is kept. Deleted text that spanned several paragraphs comes
-  back, when rejected, as one run of text.
+  back, when rejected, as those paragraphs, each of its own kind (a heading,
+  a list item); shown with "all", as one run of text.
 
 Headers, footers, frames' text and the table of contents are left out; an
 image is written [image], with its description when it has one.
 """
 
 import re
+from dataclasses import dataclass
 from io import BytesIO
 from itertools import groupby
 from operator import itemgetter
@@ -45,6 +47,7 @@ from prosediff.document import (
     NoteRef,
     Span,
     Text,
+    comment_runs,
     join_paragraphs,
     markdown,
     spaced,
@@ -103,6 +106,25 @@ class OdtError(RuntimeError):
 
 # An inline of a paragraph and the tracked insertion it belongs to (or None).
 Tagged = tuple[object, str | None]
+# A paragraph's kind: ("p",), ("item",) or ("heading", level).
+Kind = tuple
+
+
+@dataclass
+class Break:
+    """A paragraph break inside a rejected deletion, among the inlines of
+    the paragraph it is in: the kind of the deleted paragraph it ends and of
+    the one it starts (None for an empty one, which takes the kind of the
+    paragraph around it, as it merged into it)."""
+
+    before: Kind | None
+    after: Kind | None
+
+
+def source_of(el: Element) -> tuple[str, str]:
+    """Where a paragraph is (document.Source): content.xml, its XPath."""
+    x = el._Element__element  # odfdo's lxml element
+    return ("content.xml", x.getroottree().getpath(x))
 
 
 def _text_of(el: Element, path: str) -> str:
@@ -198,13 +220,44 @@ class Reader(DocumentReader):
             return []
         saved = self.open
         self.open = []
+        paragraphs = [
+            ([i for i, _ in self.inline(p, frozenset())], kind)
+            for p, kind in self.deleted_paragraphs(change)
+        ]
+        self.open = saved
+        if self.changes == "reject" and len(paragraphs) > 1:
+            # the paragraphs back, a break between each two
+            out: list[Tagged] = []
+            for k, (inlines, kind) in enumerate(paragraphs):
+                if k:
+                    before = paragraphs[k - 1]
+                    out.append(
+                        (
+                            Break(
+                                before[1] if markdown(before[0]).strip() else None,
+                                kind if markdown(inlines).strip() else None,
+                            ),
+                            None,
+                        )
+                    )
+                out += [(i, None) for i in inlines]
+            return out
         inner: list = []
-        for p in change.get_elements("text:p|text:h"):
+        for inlines, _ in paragraphs:
             if inner:
                 inner.append(Text(" "))
-            inner += [i for i, _ in self.inline(p, frozenset())]
-        self.open = saved
+            inner += inlines
         return [(i, None) for i in self.settle_change("deletion", inner, author, date)]
+
+    def deleted_paragraphs(self, el: Element, item: bool = False):
+        """The paragraphs a deletion holds, each with its kind: those in a
+        list too, as list items."""
+        for child in el.children:
+            if child.tag in ("text:p", "text:h"):
+                yield child, self.kind_of(child, item)
+            elif child.tag == "text:list":
+                for entry in child.get_elements("text:list-item|text:list-header"):
+                    yield from self.deleted_paragraphs(entry, True)
 
     def settle(self, tagged: list[Tagged]) -> list:
         """The inlines of a paragraph, its insertions settled: kept, dropped
@@ -223,15 +276,22 @@ class Reader(DocumentReader):
 
     def comment(self, el: Element) -> CommentMark:
         self.comment_count += 1
-        texts = [p.text_recursive for p in el.get_elements("text:p")]
+        paragraphs = el.get_elements("text:p")
+        texts = [p.text_recursive for p in paragraphs]
         cid = str(self.comment_count - 1)
         if name := el.get_attribute_string("office:name"):
             self.comment_names[name] = cid
+        # its paragraphs read as the body's are, in their styles, outside
+        # any insertion the annotation sits in
+        saved, self.open = self.open, []
+        rich = comment_runs([i for i, _ in self.inline(p, frozenset())] for p in paragraphs)
+        self.open = saved
         return CommentMark(
             cid,
             _text_of(el, "dc:creator"),
             spaced(" ".join(texts)),
             _text_of(el, "dc:date")[:19],
+            rich,
         )
 
     def text(self, text: str | None, styles: frozenset[str]) -> list[Tagged]:
@@ -268,7 +328,15 @@ class Reader(DocumentReader):
                     self.open = saved
                     number = len(self.notes) + 1
                     language = self.language_of(paragraphs)
-                    self.notes.append(Block("note", note, number=number, language=language))
+                    self.notes.append(
+                        Block(
+                            "note",
+                            note,
+                            number=number,
+                            language=language,
+                            source=tuple(source_of(p) for p in paragraphs),
+                        )
+                    )
                     out.append((NoteRef(number), where))
             elif tag == "office:annotation":
                 out.append((self.comment(child), None))
@@ -306,24 +374,59 @@ class Reader(DocumentReader):
     # Blocks ------------------------------------------------------------------------
 
     def paragraph_inlines(self, el: Element) -> list:
-        return strip(self.settle(self.inline(el, frozenset())))
+        """A paragraph's inlines, as one: the paragraphs a rejected
+        deletion brings back into it (in a table's cell, a footnote) joined
+        by a space."""
+        inlines = self.settle(self.inline(el, frozenset()))
+        return strip([Text(" ") if isinstance(i, Break) else i for i in inlines])
 
     def cell(self, paragraphs: list[Element]) -> list:
         """The inlines of several paragraphs, as one, a space between them."""
         return join_paragraphs(self.paragraph_inlines(p) for p in paragraphs)
 
-    def paragraph(self, el: Element, item: bool = False) -> Block | None:
-        inlines = self.paragraph_inlines(el)
-        if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
-            return None
-        language = self.language_of([el])
+    def kind_of(self, el: Element, item: bool = False) -> Kind:
+        """A paragraph's kind: a heading (text:h, or of a heading's style),
+        a list item, or a paragraph."""
         if el.tag == "text:h":
-            level = min(el.get_attribute_integer("text:outline-level") or 1, 6)
-            return Block("heading", inlines, level=level, language=language)
+            return ("heading", min(el.get_attribute_integer("text:outline-level") or 1, 6))
         level = self.paragraph_level(el.get_attribute_string("text:style-name"))
         if level and not item:
-            return Block("heading", inlines, level=level, language=language)
-        return Block("item" if item else "p", inlines, language=language)
+            return ("heading", level)
+        return ("item",) if item else ("p",)
+
+    def paragraphs(self, el: Element, item: bool = False) -> list[Block]:
+        """The blocks of a paragraph: one, or, when a rejected deletion
+        brings paragraphs back into it (Break), one for each, a paragraph
+        brought back empty taking the kind of the one around it."""
+        inlines = self.settle(self.inline(el, frozenset()))
+        own = self.kind_of(el, item)
+        pieces: list[list] = [[]]
+        breaks: list[Break] = []
+        for i in inlines:
+            if isinstance(i, Break):
+                breaks.append(i)
+                pieces.append([])
+            else:
+                pieces[-1].append(i)
+        language = self.language_of([el])
+        source = (source_of(el),)
+        out = []
+        for k, piece in enumerate(pieces):
+            before = breaks[k - 1].after if k else None
+            after = breaks[k].before if k < len(breaks) else None
+            kind = before or after or own
+            if block := self.block(strip(piece), kind, language, source):
+                out.append(block)
+        return out
+
+    def block(
+        self, inlines: list, kind: Kind, language: str | None, source: tuple = ()
+    ) -> Block | None:
+        if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
+            return None
+        if kind[0] == "heading":
+            return Block("heading", inlines, level=kind[1], language=language, source=source)
+        return Block(kind[0], inlines, language=language, source=source)
 
     def table(self, el: Element) -> Block:
         rows = [
@@ -337,15 +440,23 @@ class Reader(DocumentReader):
             )
         ]
         paragraphs = el.get_elements(".//text:p|.//text:h")
-        return Block("table", rows=rows, language=self.language_of(paragraphs))
+        row_sources = [
+            tuple(source_of(p) for p in tr.get_elements(".//text:p|.//text:h"))
+            for tr in el.get_elements(
+                "table:table-row|table:table-header-rows/table:table-row"
+                "|table:table-rows/table:table-row"
+            )
+        ]
+        return Block(
+            "table", rows=rows, language=self.language_of(paragraphs), row_sources=row_sources
+        )
 
     def blocks(self, container: Element, item: bool = False) -> list[Block]:
         out: list[Block] = []
         for child in container.children:
             tag = child.tag
             if tag in ("text:p", "text:h"):
-                if block := self.paragraph(child, item):
-                    out.append(block)
+                out += self.paragraphs(child, item)
             elif tag == "text:list":
                 for entry in child.get_elements("text:list-item|text:list-header"):
                     out += self.blocks(entry, True)

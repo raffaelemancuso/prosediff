@@ -30,6 +30,7 @@ import tkinter as tk
 import webbrowser
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields, replace
+from functools import partial
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from tkinter import ttk as tk_ttk
@@ -79,6 +80,7 @@ from prosediff.render import (
     default_output,
     default_split,
     format_of,
+    open_output,
     write_output,
 )
 from prosediff.sources import DOCX_CHANGES, FOLDER_FILES, SourceError, default_page
@@ -220,7 +222,9 @@ class Settings:
     # a codec's name, or "auto": UTF-8 unless a file shows it is not
     encoding: str = AUTO_ENCODING
     output: str = ""
-    # "html": the HTML report; "diff", "wdiff": a unified or word diff (prosediff.unified)
+    # "html": the HTML report; "diff", "wdiff": a unified or word diff
+    # (prosediff.unified); "docx", "odt": a document of tracked changes
+    # (prosediff.tracked)
     output_format: str = "html"
     open_page: bool = True
     # the AI that assesses the changes (prosediff.assess): "claude", "codex",
@@ -234,6 +238,9 @@ class Settings:
     assess_save_prompt: bool = False
     # whether the AI marks the problems in the text
     assess_annotate: bool = True
+    # whether the report is first shown without the assessment, and the AI
+    # asked only once that preview is approved
+    assess_preview: bool = True
 
 
 READY = "Choose what to compare, then Compare."
@@ -372,12 +379,17 @@ def context_of(s: Settings) -> Context:
 
 
 def generate(
-    s: Settings, progress: Callable[[str], None] = lambda stage: None
+    s: Settings,
+    progress: Callable[[str], None] = lambda stage: None,
+    approve: Callable[[Path], bool] | None = None,
 ) -> tuple[Path, Comparison, Assessment | None]:
     """Compare as the settings say and write the HTML report; returns its
-    path, the comparison and the AI's assessment (None when none was asked:
-    a failed one holds its error, and the report is written all the same).
-    progress is told each stage as it starts ("Comparing…")."""
+    path, the comparison and the AI's assessment (None when none was asked,
+    or the preview was not approved: a failed one holds its error, and the
+    report is written all the same). progress is told each stage as it
+    starts ("Comparing…"). With an AI to assess and s.assess_preview, the
+    report is first written without the assessment, and approve, given its
+    path, says whether the text goes to the AI (no approve: it goes)."""
     paths = s.paths or None
     options = Options(
         context=context_of(s),
@@ -435,7 +447,23 @@ def generate(
         out = default_page(Path(old), Path(new))
     out = Path(with_format(str(out), fmt)) if out is not None else default_output(fmt)
     assessment = None
-    if s.assess and fmt == "html":  # a .diff or .wdiff has no place for it
+    write = partial(
+        write_output,
+        comparison,
+        out,
+        fmt,
+        s.paths,
+        align=s.align,
+        context=context_of(s),
+        sentences=sentences,
+        split=split,
+    )
+    if s.assess and fmt == "html" and s.assess_preview and approve is not None:
+        progress("Writing the preview…")
+        write()
+        if not approve(out):
+            return out, comparison, None
+    if s.assess and fmt == "html":  # no other format has a place for it
         request = AssessRequest(
             s.assess,
             effort=s.assess_effort,
@@ -446,18 +474,14 @@ def generate(
         )
         progress(f"Asking {s.assess} to assess the changes…")
         assessment = assess_comparison(comparison, request)
-    progress("Writing the report…" if fmt == "html" else "Writing the diff…")
-    write_output(
-        comparison,
-        out,
-        fmt,
-        s.paths,
-        align=s.align,
-        context=context_of(s),
-        sentences=sentences,
-        split=split,
-        assessment=assessment,
+    progress(
+        "Writing the report…"
+        if fmt == "html"
+        else "Writing the document…"
+        if fmt in ("docx", "odt")
+        else "Writing the diff…"
     )
+    out = write(assessment=assessment)
     return out, comparison, assessment
 
 
@@ -487,13 +511,28 @@ class JobResult:
     assessment: Assessment | None = None
 
 
-def run_job(s: Settings, messages) -> None:
+# How long a preview waits for the window to say whether the AI assesses;
+# unanswered, it does not.
+PREVIEW_WAIT_S = 3600
+
+
+def run_job(s: Settings, messages, replies) -> None:
     """generate, in a process of its own that the window can stop: each
     stage, then the result or the error, sent back on messages, as
-    ("stage", text), ("done", JobResult) or ("error", text)."""
+    ("stage", text), ("done", JobResult) or ("error", text). A preview is
+    sent as ("preview", path), and the window's answer, whether the AI
+    assesses, read from replies."""
     invisible_console()  # its console programs open no window either
+
+    def approve(path: Path) -> bool:
+        messages.put(("preview", path))
+        try:
+            return bool(replies.get(timeout=PREVIEW_WAIT_S))
+        except queue.Empty:
+            return False
+
     try:
-        path, c, assessment = generate(s, lambda stage: messages.put(("stage", stage)))
+        path, c, assessment = generate(s, lambda stage: messages.put(("stage", stage)), approve)
     except JOB_ERRORS as e:
         messages.put(("error", str(e) or type(e).__name__))
         return
@@ -552,7 +591,7 @@ class App:
         # the comparison running (a process of its own), what it sends back,
         # its settings, and the stage it is at
         self.job: multiprocessing.process.BaseProcess | None = None
-        self.messages = None
+        self.messages = self.replies = None
         self.job_settings: Settings | None = None
         self.stage, self.stage_started = "", 0.0
         root.title("prosediff: compare two versions")
@@ -916,6 +955,18 @@ class App:
             ("html", "HTML report", "Side by side, in the browser: words, moves, comments."),
             ("diff", "Unified diff", "A .diff, as git diff writes it; a patch for text files."),
             ("wdiff", "Word diff", "A .wdiff: the words changed in each line, [-old-]{+new+}."),
+            (
+                "docx",
+                "Word, tracked",
+                "A .docx: the new version, each change since the old one a tracked change "
+                "to accept or reject in Word; its text, formatting, headings, list items "
+                "and new comments, not its layout. Paragraph by paragraph.",
+            ),
+            (
+                "odt",
+                "OpenDocument, tracked",
+                "An .odt: the same, for LibreOffice Writer.",
+            ),
         ):
             button = ttk.Radiobutton(
                 formats,
@@ -1022,6 +1073,9 @@ class App:
         self.assess_context = tk.StringVar(
             value=self.s.assess_context if self.s.assess_context in CONTEXTS else "document"
         )
+        # what only matters when an AI assesses, greyed out while none is
+        # chosen (update_ai_switches)
+        self.ai_switches = []
         reads = ttk.Frame(card)
         for value, text, tip in (
             (
@@ -1050,6 +1104,7 @@ class App:
             )
             button.pack(side="left")
             hint(button, tip)
+            self.ai_switches.append(button)
         field_row(card, 1, "Reads", reads, "What the model is sent, besides the instructions.")
         self.assess_instructions = tk.StringVar(value=self.s.assess_instructions)
         ttk.Label(card, text="Instructions").grid(row=2, column=0, sticky="w", **PAD)
@@ -1061,18 +1116,26 @@ class App:
             'asked for, what to look at (e.g. "the journal is Research Policy; check that '
             'the introduction was cut by a fifth"); or a text file holding them.',
         )
-        browse(
+        pick = browse(
             card,
             lambda: self.pick_into(self.assess_instructions, "Instructions for the AI"),
             "Choose a text file holding the instructions",
-        ).grid(row=2, column=2, **PAD)
+        )
+        pick.grid(row=2, column=2, **PAD)
+        self.ai_switches += [entry, pick]
         self.assess_annotate = tk.BooleanVar(value=self.s.assess_annotate)
         self.assess_save_prompt = tk.BooleanVar(value=self.s.assess_save_prompt)
+        self.assess_preview = tk.BooleanVar(value=self.s.assess_preview)
         switches = ttk.Frame(card)
         switches.grid(row=3, column=1, columnspan=2, sticky="w", **PAD)
-        # greyed out while no AI is chosen (update_ai_switches)
-        self.ai_switches = []
         for text, var, tip in (
+            (
+                "Preview before sending",
+                self.assess_preview,
+                "First write the report without the assessment and open it, then ask "
+                "whether to send the changes to the AI: to check what it will read "
+                "before it reads it. No: the report stays as it is, unassessed.",
+            ),
             (
                 "Mark problems in the text",
                 self.assess_annotate,
@@ -1125,7 +1188,8 @@ class App:
             box.state(["!disabled"] if on else ["disabled"])
 
     def update_ai_switches(self) -> None:
-        """The AI assessment's switches, greyed out while no AI will assess."""
+        """What the AI is sent and the AI assessment's switches, greyed out
+        while no AI will assess."""
         for switch in self.ai_switches:
             switch.state(["!disabled"] if self.ai_active() else ["disabled"])
 
@@ -1378,6 +1442,8 @@ class App:
             "html": ("the HTML report", [("HTML report", "*.html")]),
             "diff": ("the diff", [("Unified diff", "*.diff *.patch")]),
             "wdiff": ("the word diff", [("Word diff", "*.wdiff")]),
+            "docx": ("the tracked changes", [("Word document", "*.docx")]),
+            "odt": ("the tracked changes", [("OpenDocument text", "*.odt")]),
         }
         what, filetypes = kinds.get(fmt, kinds["html"])
         f = filedialog.asksaveasfilename(
@@ -1501,6 +1567,7 @@ class App:
             assess_instructions=self.assess_instructions.get().strip(),
             assess_save_prompt=self.assess_save_prompt.get(),
             assess_annotate=self.assess_annotate.get(),
+            assess_preview=self.assess_preview.get(),
         )
 
     def toggle_advanced(self) -> None:
@@ -1570,6 +1637,7 @@ class App:
             (self.assess_instructions, d.assess_instructions),
             (self.assess_save_prompt, d.assess_save_prompt),
             (self.assess_annotate, d.assess_annotate),
+            (self.assess_preview, d.assess_preview),
         ):
             var.set(value)
         self.move_passages.set(d.move_passages)
@@ -1596,8 +1664,10 @@ class App:
         self.progress.start(12)
         # a process of its own, which Cancel stops with all it started
         context = multiprocessing.get_context("spawn")
-        self.messages = context.Queue()
-        self.job = context.Process(target=run_job, args=(s, self.messages), daemon=True)
+        self.messages, self.replies = context.Queue(), context.Queue()
+        self.job = context.Process(
+            target=run_job, args=(s, self.messages, self.replies), daemon=True
+        )
         self.job.start()
         self.job_settings = s
         self.show_cancel(True)
@@ -1672,6 +1742,9 @@ class App:
             self.set_stage(value)
             self.root.after(100, self.poll)
             return
+        if kind == "preview":
+            self.preview(value)
+            return
         s = self.job_settings
         self.finish_job()
         if kind == "error":
@@ -1701,7 +1774,26 @@ class App:
             icon="",
         ).show_toast()
         if s.open_page:
-            webbrowser.open(path.resolve().as_uri())
+            open_output(path)
+
+    def preview(self, path: Path) -> None:
+        """The report without the assessment, open in the browser: whether
+        its text goes to the AI is asked, and the answer sent back to the
+        comparison's process, which then goes on."""
+        self.set_stage("Preview open: waiting to send it to the AI…")
+        webbrowser.open(path.resolve().as_uri())
+        send = messagebox.askyesno(
+            "prosediff",
+            f"The report without the AI assessment is open in the browser: {path.name}\n\n"
+            f"Send the changes to {self.job_settings.assess} for assessment?\n\n"
+            "Yes: the AI assesses them and the report is written again with its "
+            "assessment. No: the report stays as it is.",
+            parent=self.root,
+        )
+        if self.job is None:
+            return  # cancelled while the question was open
+        self.replies.put(send)
+        self.root.after(100, self.poll)
 
 
 def hint(widget: tk.Misc, text: str) -> None:

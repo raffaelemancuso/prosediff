@@ -108,3 +108,40 @@ def test_broken_odt_is_listed_as_binary(tmp_path):
     (tmp_path / "b.odt").write_bytes(b"not a zip either")
     (f,) = compare_paths(tmp_path / "a.odt", tmp_path / "b.odt").files
     assert f.binary and "not a readable OpenDocument text" in f.note
+
+
+def test_paragraphs_deleted_whole_come_back_rejected(tmp_path):
+    """LibreOffice keeps a paragraph deleted whole in its region with the
+    (empty) start of the next, a text:change at that start, in a list when
+    the next is a list item: rejected, it comes back as a paragraph of its
+    own, a deleted heading a heading; accepted, it goes, no empty paragraph
+    left; shown with "all", it is one run of deleted text, as before."""
+    tracked = changes(
+        "ct1", "deletion", '<text:h text:outline-level="2">Old heading</text:h><text:p/>'
+    ) + changes(
+        "ct2",
+        "deletion",
+        "<text:p>Old paragraph.</text:p>"
+        "<text:list><text:list-item><text:p/></text:list-item></text:list>",
+    )
+    d = odt_xml(
+        tmp_path / "d.odt",
+        f"<text:tracked-changes>{tracked}</text:tracked-changes>"
+        '<text:p>Kept.</text:p><text:p><text:change text:change-id="ct1"/>Next.</text:p>'
+        '<text:list><text:list-item><text:p><text:change text:change-id="ct2"/>An item.'
+        "</text:p></text:list-item></text:list>",
+    ).read_bytes()
+    assert markdown_of(d, "d.odt", "reject").strip().split("\n\n") == [
+        "Kept.",
+        "## Old heading",
+        "Next.",
+        "Old paragraph.",
+        "- An item.",
+    ]
+    assert markdown_of(d, "d.odt", "accept").strip().split("\n\n") == [
+        "Kept.",
+        "Next.",
+        "- An item.",
+    ]
+    shown = markdown_of(d, "d.odt", "all").strip().split("\n\n")
+    assert shown[1].startswith("[Old heading ]{.deletion") and shown[1].endswith("Next.")

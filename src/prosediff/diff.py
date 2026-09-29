@@ -332,6 +332,18 @@ class FileDiff:
     pairs: list[tuple[int | None, int | None]] = field(default_factory=list)
     old_lines: list[str] = field(default_factory=list)
     new_lines: list[str] = field(default_factory=list)
+    # The same lines as compared, for the documents of tracked changes
+    # (prosediff.tracked): a document's with the styles of each character
+    # and the kind of its paragraph (document.Line), footnotes by their own
+    # numbers, comments still placeholders.
+    old_text: list[str] = field(default_factory=list)
+    new_text: list[str] = field(default_factory=list)
+    # A Word or OpenDocument side's file, as read, and how its own tracked
+    # changes were settled (Options.docx_changes): for prosediff.tracked to
+    # mark the changes in a copy of the new one, all else kept.
+    old_data: bytes = field(default=b"", repr=False)
+    new_data: bytes = field(default=b"", repr=False)
+    document_changes: str = "accept"
     # The comments folded out of those lines, behind their placeholders.
     comments: Comments | None = None
     # Set apart the ids of its rows, when a report holds two comparisons.
@@ -2550,7 +2562,7 @@ def build_files(
                 return comment_markdown(c)
             if not c.text and not options.empty_comments:
                 return ""
-            mark = comments.placeholder(quoted_author(c.author), c.text, short_date(c.date))
+            mark = comments.placeholder(quoted_author(c.author), c.text, short_date(c.date), c.rich)
             if mark is None:
                 return comment_markdown(c)
             started[c.id] = mark
@@ -2606,6 +2618,9 @@ def build_files(
             continue
         if from_word:
             fd.markdown = True
+            fd.old_data = old_bytes if old_doc is not None else b""
+            fd.new_data = new_bytes if new_doc is not None else b""
+            fd.document_changes = options.docx_changes
             kinds = {
                 DOCUMENT_SUFFIXES[Path(p).suffix.lower()]
                 for p in (fd.old_path, fd.new_path)
@@ -2661,9 +2676,12 @@ def build_files(
         if fd.markdown:
             fd.old_lines = [diff_line(x, fn.old if fn else {}) for x in old]
             fd.new_lines = [diff_line(x, fn.new if fn else {}) for x in new]
+            fd.old_text = [footnotes.numbered_line(x, fn.old if fn else {}) for x in old]
+            fd.new_text = [footnotes.numbered_line(x, fn.new if fn else {}) for x in new]
             fd.comments = comments
         else:
             fd.old_lines, fd.new_lines = list(old), list(new)
+            fd.old_text, fd.new_text = list(old), list(new)
         fd.rows, fd.additions, fd.deletions = align(
             old,
             new,
@@ -2784,7 +2802,9 @@ def comment_entries(
             label = row.left_label if status == "removed" else row.right_label
         c = comments.get(ph)
         entries.append(
-            CommentEntry(c.author, c.text, status, fd.path, anchor, line, c.date, label, order)
+            CommentEntry(
+                c.author, c.text, status, fd.path, anchor, line, c.date, label, order, c.rich
+            )
         )
     entries.sort(key=lambda e: (e.line is None, e.line or 0))
     return entries

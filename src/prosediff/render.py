@@ -1,7 +1,11 @@
-"""Render a Comparison to a self-contained HTML report, or to a unified diff
-(prosediff.unified)."""
+"""Render a Comparison to a self-contained HTML report, to a unified diff
+(prosediff.unified), or to a document of tracked changes (prosediff.tracked)."""
 
+import os
+import subprocess
+import sys
 import tempfile
+import webbrowser
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -13,6 +17,7 @@ from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
 from prosediff.language import file_language_note, flag_code, paragraph_language_note
+from prosediff.tracked import TRACKED_FORMATS, write_tracked
 from prosediff.unified import unified
 
 
@@ -56,22 +61,34 @@ def default_split(fmt: str) -> str:
 
 
 def check_split(split: str, fmt: str) -> None:
-    """Refuse both splits for a diff, which holds one (ValueError)."""
+    """Refuse both splits for a diff, which holds one, and sentences for a
+    document of tracked changes, whose paragraphs are paragraphs
+    (ValueError)."""
     if split == "both" and fmt != "html":
         raise ValueError("both splits are for the HTML report: a diff holds one")
+    if split == "sentence" and fmt in TRACKED_FORMATS:
+        raise ValueError(f"a .{fmt} of tracked changes compares paragraph by paragraph")
 
 
-# What prosediff writes: the HTML report, a unified diff or a word diff; and their
-# files' suffix.
-FORMATS = {"html": ".html", "diff": ".diff", "wdiff": ".wdiff"}
-# The suffixes each text format is recognised by.
-TEXT_SUFFIXES = {".diff": "diff", ".patch": "diff", ".wdiff": "wdiff"}
+# What prosediff writes: the HTML report, a unified diff, a word diff, or a
+# Word document or an OpenDocument text of tracked changes; and their files'
+# suffix.
+FORMATS = {"html": ".html", "diff": ".diff", "wdiff": ".wdiff", "docx": ".docx", "odt": ".odt"}
+# The suffixes each format but the HTML report is recognised by.
+TEXT_SUFFIXES = {
+    ".diff": "diff",
+    ".patch": "diff",
+    ".wdiff": "wdiff",
+    ".docx": "docx",
+    ".odt": "odt",
+}
 HOMEPAGE = "https://github.com/raffaelemancuso/prosediff"
 
 
 def format_of(path: Path | str | None) -> str:
     """The format a file name asks for: a unified diff for .diff and .patch,
-    a word diff for .wdiff, else the HTML report."""
+    a word diff for .wdiff, a document of tracked changes for .docx and .odt,
+    else the HTML report."""
     return TEXT_SUFFIXES.get(Path(path).suffix.lower(), "html") if path else "html"
 
 
@@ -165,15 +182,21 @@ def write_output(
     sentences: Comparison | None = None,
     split: str = "paragraph",
     assessment: Assessment | None = None,
-) -> None:
-    """Write the HTML report (fmt "html"), the unified diff ("diff") or the word
-    diff ("wdiff"), LF line ends on every system. The text formats have
-    context unchanged lines around each change (None: every line; "auto":
-    git's 3). sentences and split as in render; a text format holds one
-    comparison only. An AI's assessment, given, heads the HTML report (and,
-    when asked for, the text sent to the AI ends it); a text format has none."""
+) -> Path:
+    """Write the HTML report (fmt "html"), the unified diff ("diff"), the word
+    diff ("wdiff"), LF line ends on every system, or the Word document
+    ("docx") or OpenDocument text ("odt") of tracked changes; returns the
+    path written, another than path when path was open and locked
+    (prosediff.tracked.save). The text formats have context unchanged lines
+    around each change (None: every line; "auto": git's 3); a document of
+    tracked changes holds every line. sentences and split as in render; the
+    other formats hold one comparison only. An AI's assessment, given, heads
+    the HTML report (and, when asked for, the text sent to the AI ends it);
+    the other formats have none."""
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {tuple(FORMATS)}, not {fmt!r}")
+    if fmt in TRACKED_FORMATS:
+        return write_tracked(comparison, path, fmt)
     if fmt != "html":
         text = unified(comparison, CONTEXT if context == "auto" else context, fmt)
     else:
@@ -182,6 +205,19 @@ def write_output(
         )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+    return path
+
+
+def open_output(path: Path) -> None:
+    """Show the output: the HTML report and the diffs in the browser, a
+    document in the program that opens it."""
+    if path.suffix.lower() not in (".docx", ".odt"):
+        webbrowser.open(path.resolve().as_uri())
+    elif sys.platform == "win32":
+        os.startfile(path)
+    else:
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        subprocess.Popen([opener, str(path)])
 
 
 def assess_comparison(comparison: Comparison, request: AssessRequest) -> Assessment:

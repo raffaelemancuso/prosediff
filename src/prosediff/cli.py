@@ -4,7 +4,6 @@ git's own commands."""
 
 import argparse
 import sys
-import webbrowser
 from dataclasses import fields
 from pathlib import Path
 
@@ -54,6 +53,7 @@ from prosediff.render import (
     default_output,
     default_split,
     format_of,
+    open_output,
     package_version,
     write_output,
 )
@@ -148,7 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="output file (default: with --open, a new HTML report in the temporary folder; "
         "otherwise, for two folders, prosediff.html in the new one; for two files, "
         "OLD_vs_NEW.html next to the new one; else diff.html; "
-        ".diff or .wdiff for --format diff or wdiff)",
+        ".diff, .wdiff, .docx or .odt for --format diff, wdiff, docx or odt)",
     )
     ap.add_argument(
         "--format",
@@ -159,11 +159,17 @@ def build_parser() -> argparse.ArgumentParser:
         "added or "
         "removed in CriticMarkup); wdiff: the same as git diff --word-diff writes it, "
         "[-removed-]{+added+} within each line. With -U lines of context (default: 3) "
-        "or --full (default: diff when OUTPUT ends in .diff or .patch, wdiff for .wdiff, "
-        "else html)",
+        "or --full. docx, odt: the new version as a Word document or an OpenDocument "
+        "text, each change since the old one a tracked change to accept or reject, "
+        "paragraph by paragraph; its text, formatting, headings, list items and new "
+        "comments, not its layout (default: diff when OUTPUT ends in .diff or .patch, "
+        "wdiff for .wdiff, docx for .docx, odt for .odt, else html)",
     )
     ap.add_argument(
-        "--open", action="store_true", help="open the HTML report in the browser once written"
+        "--open",
+        action="store_true",
+        help="open the output once written: the HTML report and the diffs in the browser, "
+        "a .docx or .odt in the program that opens it",
     )
     lines = ap.add_mutually_exclusive_group()
     lines.add_argument(
@@ -541,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{PROG}: the assessment failed: {assessment.error}", file=sys.stderr)
 
     output = _output_path(args, fmt)
-    write_output(
+    output = write_output(
         comparison,
         output,
         fmt,
@@ -562,7 +568,7 @@ def main(argv: list[str] | None = None) -> int:
         verdict = f" ({assessment.verdict})" if assessment.verdict else ""
         print(f"{PROG}: assessment{verdict}, at the top of the HTML report")
     if args.open:
-        webbrowser.open(output.resolve().as_uri())
+        open_output(output)
     return 0
 
 

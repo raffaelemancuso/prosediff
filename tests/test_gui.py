@@ -2,7 +2,7 @@
 
 import json
 import sys
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
@@ -299,6 +299,36 @@ def test_the_stages_are_told(tmp_path):
     s = Settings(mode="files", old=str(old), new=str(new), output_format="wdiff")
     generate(s, stages.append)
     assert stages == ["Comparing…", "Writing the diff…"]
+
+
+def test_the_ai_reads_only_an_approved_preview(tmp_path, monkeypatch):
+    """With an AI chosen, the report is first written without it and the
+    preview shown; the AI is asked only once it is approved."""
+    old, new = two_files(tmp_path, "One.\n", "Two.\n")
+    asked = []
+    monkeypatch.setattr(gui, "assess_comparison", lambda c, request: asked.append(request))
+    s = Settings(mode="files", old=str(old), new=str(new), assess="claude", split="paragraph")
+    previews = []
+
+    def refuse(path):
+        previews.append(path)
+        assert path.is_file()  # written before the question
+        return False
+
+    path, _, assessment = generate(s, approve=refuse)
+    assert previews == [path] and asked == [] and assessment is None
+    stages = []
+    generate(s, stages.append, approve=lambda path: True)
+    assert len(asked) == 1
+    assert stages == [
+        "Comparing…",
+        "Writing the preview…",
+        "Asking claude to assess the changes…",
+        "Writing the report…",
+    ]
+    asked.clear()
+    generate(replace(s, assess_preview=False), approve=refuse)  # switched off: no question
+    assert len(asked) == 1
 
 
 def test_a_comparison_runs_apart_and_can_be_cancelled(root, tmp_path):

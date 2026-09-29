@@ -164,6 +164,12 @@ def numbered(text: str, labels: dict[str, str], quote=str) -> str:
     return STAND_IN.sub(lambda m: quote(f"[^{labels.get(m[0], '?')}]"), text)
 
 
+def numbered_line(line: str, labels: dict[str, str]) -> str:
+    """A line with each stand-in written as its footnote, [^label], a
+    document's line keeping its styles (document.sub)."""
+    return sub(STAND_IN, lambda m: f"[^{labels.get(m[0], '?')}]", line)
+
+
 def restore(markup: Markup, labels: dict[str, str]) -> Markup:
     """A side's markup with its own footnote numbers back."""
     if not STAND_IN.search(str(markup)):

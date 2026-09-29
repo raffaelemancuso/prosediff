@@ -12,12 +12,13 @@ characters become markers, and the end an empty span the HTML report
 highlights the anchor up to, when the HTML report is built.
 """
 
+import json
 import re
 from dataclasses import dataclass
 
-from markupsafe import Markup
+from markupsafe import Markup, escape
 
-from prosediff.document import DATE_ATTRIBUTE, short_date, spaced
+from prosediff.document import DATE_ATTRIBUTE, Rich, short_date, spaced
 
 PUA_FIRST, PUA_LAST = 0xE000, 0xF8FF
 PLACEHOLDER = re.compile(f"[{chr(PUA_FIRST)}-{chr(PUA_LAST)}]")
@@ -28,12 +29,20 @@ END_FIRST = 0x100000
 END_PLACEHOLDER = re.compile(f"[{chr(END_FIRST)}-{chr(END_FIRST + PUA_LAST - PUA_FIRST)}]")
 # Either: what is a comment's, not text.
 ANY_PLACEHOLDER = re.compile(f"{PLACEHOLDER.pattern}|{END_PLACEHOLDER.pattern}")
-# A comment's marker; one only the new side has (added since the base) is
-# the same balloon, which the HTML report marks with a green + (its class
-# "new"): a squared NEW is unreadable at the size of the text.
+# A comment's marker.
 COMMENT_MARK = "\N{SPEECH BALLOON}"
+# One only the new side has, added since the base: a green balloon with a +
+# in it, one glyph (no character draws it; a squared NEW is unreadable at the
+# size of the text).
+NEW_COMMENT_MARK = Markup(
+    '<svg class="new-comment" viewBox="0 0 16 16" aria-hidden="true">'
+    '<path d="M3 1.5h10A1.5 1.5 0 0 1 14.5 3v7a1.5 1.5 0 0 1-1.5 1.5H7.2L3.5 '
+    '14.5v-3H3A1.5 1.5 0 0 1 1.5 10V3A1.5 1.5 0 0 1 3 1.5Z"/>'
+    '<path class="plus" d="M8 3.8v5.4M5.3 6.5h5.4"/></svg>'
+)
 # A comment only the old side has: removed since the base.
 REMOVED_COMMENT_MARK = "\N{WASTEBASKET}\N{VARIATION SELECTOR-16}"
+ICONS = {"new": NEW_COMMENT_MARK, "removed": REMOVED_COMMENT_MARK}
 
 COMMENT_CLASS = re.compile(r"^\{\s*\.(comment-start|comment-end)\b")
 AUTHOR = re.compile(r'\bauthor="((?:[^"\\]|\\.)*)"')
@@ -41,11 +50,43 @@ ID = re.compile(r'\bid="([^"]*)"')
 ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|'\"<>~^$])")
 
 
+# The HTML element each style of a comment's text is shown with.
+RICH_TAGS = {"strong": "b", "em": "i", "u": "u", "strike": "s", "sup": "sup", "sub": "sub"}
+
+
+def rich_json(rich: Rich) -> str:
+    """A comment's paragraphs for the HTML report's script: a list of
+    paragraphs, each of [text, "styles"] runs; "" when it has none."""
+    return json.dumps([[[t, " ".join(s)] for t, s in p] for p in rich], ensure_ascii=False)
+
+
+def rich_html(rich: Rich, text: str) -> Markup:
+    """A comment's paragraphs as HTML, each run in the elements of its
+    styles (RICH_TAGS), a line break between paragraphs; text, escaped,
+    when it has none."""
+    if not rich:
+        return escape(text)
+    out = []
+    for p in rich:
+        runs = []
+        for t, styles in p:
+            html = str(escape(t))
+            for s in styles:
+                tag = RICH_TAGS.get(s)
+                if tag:
+                    html = f"<{tag}>{html}</{tag}>"
+            runs.append(html)
+        out.append("".join(runs))
+    return Markup("<br>".join(out))
+
+
 @dataclass
 class Comment:
     author: str
     text: str
     date: str = ""  # "YYYY-MM-DD HH:MM", as Word stamped it
+    # its paragraphs as written (document.comment_runs), to be shown
+    rich: Rich = ()
 
     @property
     def label(self) -> str:
@@ -70,10 +111,15 @@ class CommentEntry:
     # its place in the file's table, for the panel's reading order; None
     # when no row shows it
     order: int | None = None
+    rich: Rich = ()  # its paragraphs as written (Comment.rich)
 
     @property
     def icon(self) -> str:
-        return REMOVED_COMMENT_MARK if self.status == "removed" else COMMENT_MARK
+        return ICONS.get(self.status, COMMENT_MARK)
+
+    @property
+    def html(self) -> Markup:
+        return rich_html(self.rich, self.text)
 
 
 class Comments:
@@ -88,13 +134,13 @@ class Comments:
         self._by_key: dict[tuple[str, str], str] = {}
         self._items: list[Comment] = []
 
-    def placeholder(self, author: str, text: str, date: str = "") -> str | None:
+    def placeholder(self, author: str, text: str, date: str = "", rich: Rich = ()) -> str | None:
         key = (author, text)
         if key not in self._by_key:
             if PUA_FIRST + len(self._items) > PUA_LAST:
                 return None  # out of placeholders: leave the span as it is
             self._by_key[key] = chr(PUA_FIRST + len(self._items))
-            self._items.append(Comment(author, text, date))
+            self._items.append(Comment(author, text, date, rich))
         return self._by_key[key]
 
     def get(self, placeholder: str) -> Comment:
@@ -221,8 +267,10 @@ def plain(text: str) -> str:
 
 MARKER = Markup(
     '<span class="comment{}" tabindex="0" role="note" data-c="{}" data-author="{}" '
-    'data-date="{}" data-text="{}" aria-label="{}">{}</span>'
+    'data-date="{}" data-text="{}"{} aria-label="{}">{}</span>'
 )
+# A comment's paragraphs as written, for the tooltip (rich_json).
+RICH_ATTRIBUTE = Markup(' data-rich="{}"')
 # Where the text a comment is anchored to ends: nothing to see, a place the
 # HTML report highlights the text up to.
 END_MARKER = Markup('<span class="comment-end" data-c="{}"></span>')
@@ -247,7 +295,7 @@ def show_comments(
     def marker(m: re.Match) -> str:
         c = comments.get(m[0])
         status = "new" if m[0] in new else "removed" if m[0] in removed else ""
-        icon = REMOVED_COMMENT_MARK if status == "removed" else COMMENT_MARK
+        icon = ICONS.get(status, COMMENT_MARK)
         label = f"{status} {c.label}" if status else c.label
         return str(
             MARKER.format(
@@ -256,6 +304,7 @@ def show_comments(
                 c.author,
                 c.date,
                 c.text,
+                RICH_ATTRIBUTE.format(rich_json(c.rich)) if c.rich else "",
                 label,
                 icon,
             )

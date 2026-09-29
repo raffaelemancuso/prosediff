@@ -546,6 +546,31 @@ def test_problems_marked_by_the_ai(browser, tmp_path):
     page.context.close()
 
 
+def test_a_comment_over_an_ai_mark_leaves_its_badge_out(browser, tmp_path):
+    """A comment anchored to the words the AI also marked highlights those
+    words, pinned, but not the AI's badge before them, nor the other
+    comment's marker."""
+    from prosediff.assess import Annotation, Assessment
+
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("# A title\n", encoding="utf-8")
+    one = '[First.]{.comment-start id="1" author="A" date="2026-09-25T10:00:00Z"}'
+    two = '[Second.]{.comment-start id="2" author="A" date="2026-09-25T10:05:00Z"}'
+    ends = '[]{.comment-end id="1"}[]{.comment-end id="2"}'
+    new.write_text(f"# {one}{two}A new title{ends}\n", encoding="utf-8")
+    a = Assessment("claude", "## Verdict\n**Mixed**.", "m")
+    a.annotations = [Annotation("new", "A new title", "A new title", "Vague.", "")]
+    page = open_report(
+        browser, tmp_path, compare_paths(old, new, Options(context=None)), assessment=a
+    )
+    assert page.locator("td.code .ai-mark").count() == 1
+    page.locator('td.code .comment[data-text="First."]').first.click()
+    page.wait_for_function('CSS.highlights.has("pin")', timeout=5_000)
+    assert highlighted(page).replace("­", "") == "A new title"
+    assert page.locator(".ai-mark.pinned").count() == 0
+    page.context.close()
+
+
 def test_ai_marks_in_a_moved_passage_row(browser, tmp_path):
     """A row holding a moved passage is written twice, with the passage
     shown as moved and without: a problem marked in it has a badge in the
@@ -821,3 +846,19 @@ def test_moved_passages_switch(browser, tmp_path):
 def test_no_moved_passages_switch_without_passages(page):
     """A report with no moved passage has no switch for them."""
     assert page.locator('[data-toggle="passages"]').count() == 0
+
+
+def test_a_comment_tooltip_shows_its_paragraphs_and_italics(browser, tmp_path):
+    """A Word comment's tooltip has a line for each of its paragraphs, the
+    blank one too, and its italics."""
+    from test_comments import commented_documents
+
+    old, new = commented_documents(tmp_path, "docx")
+    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
+    page.locator("td.code .comment").first.hover()
+    tip = page.locator("#tip")
+    lines = tip.locator(".line")
+    assert lines.all_inner_texts() == ["Please cite:", "", "See Research Policy, 49."]
+    assert tip.locator("i").inner_text() == "Research Policy"
+    assert lines.nth(1).evaluate("e => e.getBoundingClientRect().height") > 0
+    page.context.close()

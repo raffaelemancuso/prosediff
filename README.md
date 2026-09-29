@@ -64,7 +64,7 @@ prosediff sits between the two:
   draft_returned.docx` shows what a co-author changed, whatever they tracked
   or did not. Their tracked changes are accepted (or rejected) exactly as
   Word would, spaces included, and **their comments are kept**: each shown
-  where it sits, with its author and date, new comments marked with a green + (+💬), removed ones 🗑️, and all
+  where it sits, with its author and date, new comments marked with a green balloon holding a +, removed ones 🗑️, and all
   listed in a panel. Only new and removed comments are shown: those already
   in the old version are left out, even where they moved. The same works on
   OpenDocument texts (.odt) from LibreOffice, both read directly (no
@@ -138,13 +138,13 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--untracked`              | with `--git` and the working tree, also show the untracked files `.gitignore` does not exclude |
 | `-w`, `--ignore-whitespace`| compare lines ignoring whitespace, as `git diff -w`           |
 | `-p`, `--path PATH`        | with `--git` or `--folders`, restrict the diff to this file or folder (repeatable) |
-| `-o`, `--output FILE`      | output file. Default: with `--open`, a new HTML report in the temporary folder; otherwise, comparing two folders, `prosediff.html` in the new one (never compared itself when the folders are compared again); comparing two files, `OLD_vs_NEW.html` next to the new one; else `diff.html` (`.diff` or `.wdiff` with `--format diff` or `wdiff`). The GUI does the same |
-| `--format html\|diff\|wdiff` | `html`: the HTML report (default); `diff`: a unified diff, with `-U` lines of context (default 3) or `--full`, its lines paired as the HTML report pairs them (an edited line's removal followed by its new text). A text file's diff is a patch `git apply` and `patch` can apply. For Markdown files and Word and OpenDocument documents, the lines are those the HTML report compares: one per paragraph (or sentence, with `--by-sentence`), blank lines left out, numbered as in the HTML report; a document's formatting is written in Markdown (`**bold**`), the comments added or removed in [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit) (`{>>Author (date): text<<}`; those both sides have are left out, as in the HTML report), and tracked changes kept with `--docx-changes all` as `{++inserted++}` and `{--deleted--}`: a diff to read, not to apply. `wdiff`: a word diff, as `git diff --word-diff` writes one, the same lines with the words changed within each marked `[-removed-]{+added+}` (paired as in the HTML report), a line removed or added whole marked whole. Moved lines are marked only in the HTML report. Default: `diff` when the output file ends in `.diff` or `.patch`, `wdiff` for `.wdiff`. In the GUI, "Format" |
+| `-o`, `--output FILE`      | output file. Default: with `--open`, a new HTML report in the temporary folder; otherwise, comparing two folders, `prosediff.html` in the new one (never compared itself when the folders are compared again); comparing two files, `OLD_vs_NEW.html` next to the new one; else `diff.html` (`.diff`, `.wdiff`, `.docx` or `.odt` with `--format diff`, `wdiff`, `docx` or `odt`). The GUI does the same |
+| `--format html\|diff\|wdiff\|docx\|odt` | `html`: the HTML report (default); `diff`: a unified diff, with `-U` lines of context (default 3) or `--full`, its lines paired as the HTML report pairs them (an edited line's removal followed by its new text). A text file's diff is a patch `git apply` and `patch` can apply. For Markdown files and Word and OpenDocument documents, the lines are those the HTML report compares: one per paragraph (or sentence, with `--by-sentence`), blank lines left out, numbered as in the HTML report; a document's formatting is written in Markdown (`**bold**`), the comments added or removed in [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit) (`{>>Author (date): text<<}`; those both sides have are left out, as in the HTML report), and tracked changes kept with `--docx-changes all` as `{++inserted++}` and `{--deleted--}`: a diff to read, not to apply. `wdiff`: a word diff, as `git diff --word-diff` writes one, the same lines with the words changed within each marked `[-removed-]{+added+}` (paired as in the HTML report), a line removed or added whole marked whole. `docx`, `odt`: the new version as a Word document or an OpenDocument text, each change since the old one a tracked change to accept or reject in Word or LibreOffice (see [Tracked changes](#tracked-changes)); paragraph by paragraph only. Moved lines are marked only in the HTML report. Default: `diff` when the output file ends in `.diff` or `.patch`, `wdiff` for `.wdiff`, `docx` for `.docx`, `odt` for `.odt`. In the GUI, "Format" |
 | `-U`, `--context N`        | unchanged lines shown around each change, in every file; unset, 0 in Markdown files and Word documents (whose lines are whole paragraphs) and 3 in the others. In the GUI, the "Context lines" box: `auto` or a number |
 | `--full`                   | show every line of each changed file                          |
 | `--max-hidden N`           | unchanged lines embedded per gap for the HTML report to reveal (default 500); longer gaps are left out, to keep the HTML report light |
 | `--align left\|justify`    | alignment of wrapped lines (default left)                     |
-| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (+💬, a green +, when added; 🗑️ when removed), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
+| `--comments markers\|text\|none` | the comments of Markdown files and Word and OpenDocument documents, in every format. `markers` (default): set apart from the text, only those added or removed since the base shown, the comments both sides have left out; in the HTML report each is a 💬 marker (a green balloon holding a + when added; 🗑️ when removed), with the author, the comment and its date on hover, and listed in a panel; in the diffs it is written in CriticMarkup (`{>>Author (date): text<<}`). `text`: the comment markup compared as part of the text, as pandoc writes it. `none`: every comment left out, so a line whose only change was a comment is unchanged. In the GUI, "Comments" |
 | `--empty-comments`         | also show the comments that have no text, left out by default (listed as "(no text)" in the panel) |
 | `--docx-changes accept\|reject\|all` | the tracked changes of Word and OpenDocument documents: accept them (default), reject them, or keep them all, shown as Word shows them (insertions underlined, deletions struck through, who made each and when on hover) |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) both versions of every Markdown file (not Word or OpenDocument files, which are not read as Markdown) are piped through, stdin to stdout, before comparing; line numbers are then those of the filtered text |
@@ -187,10 +187,36 @@ Examples:
   comparison as a unified diff, to read in an editor or send as a patch;
 - `prosediff --files draft_v1.docx draft_v2.docx -o changes.wdiff
   --comments none`: as a word diff, the comments left out;
+- `prosediff --files draft_v1.docx draft_v2.docx -o redline.docx`: the
+  new version with every change a tracked change, to accept or reject in
+  Word (`-o redline.odt` for LibreOffice);
 - `prosediff --files draft_v1.docx draft_v2_returned.docx --assess claude
   --open`: the report, headed by Claude Code's assessment of the revision;
 - `prosediff --files draft_v1.docx draft_v2_returned.docx --assess
   ollama/qwen3`: the same by a local model, nothing leaving the computer.
+
+## Tracked changes
+
+`--format docx` and `--format odt` (in the window, "Word, tracked" and
+"OpenDocument, tracked") write the new version with each change since the
+old one as the word processor's own tracked change, by the target commit's
+author (else `prosediff`): what Word's *Compare* and LibreOffice's *Compare
+Document* make, from prosediff's own pairing of paragraphs and words, and
+from any two sources prosediff reads (Markdown, text, Word, OpenDocument),
+neither needing tracked changes of its own. Accepting every change gives
+the new version, rejecting every one the old: a paragraph added or removed
+whole is inserted or deleted with its paragraph mark, leaving no empty
+paragraph behind. The text keeps its bold, italic, underline,
+strikethrough, superscript and subscript, its headings and list items;
+words whose formatting alone changed are a formatting change in Word (an
+OpenDocument text shows them in their new formatting). The comments added
+since the base are comments of the document, over the words they were
+anchored to, with their paragraphs and formatting. The layout, tables
+(each row a paragraph, its cells apart by `|`), images and page setup of
+the documents are not kept. Word does not read tracked changes from an
+`.odt`: open it in LibreOffice. A document open, and so locked, in Word
+or LibreOffice is left be, the output written beside it as
+`NAME__locked_YYYYMMDD_HHMMSS.docx`, with a warning.
 
 ## AI assessment
 
@@ -267,6 +293,11 @@ to Anthropic's or OpenAI's (or the API's) servers under your account; with
 Ollama it stays on the computer. The HTML report itself still needs no
 network to read. A long revision is cut at about 100,000 tokens, the model
 told; a local model is given a context window to fit the diff.
+
+In the window, "Preview before sending" (on by default) first writes the
+report without the assessment and opens it, then asks whether to send the
+changes to the AI: yes, and the report is written again with the
+assessment; no, and it stays as it is.
 
 The assessment is an AI's reading: check it against the text. Its worth is
 the model's: a local model needs to be large enough to follow the
@@ -419,9 +450,12 @@ back to its default (what is compared and where the output goes stay).
   (or Esc)
   (only its marker ringed when those words were deleted with a tracked
   change; its whole paragraph when a Markdown file does not say where its
-  text ends). In the text, a comment is a 💬 marker, after a green + (+💬) when it was added
-  since the base, or 🗑️ when it was removed; hovering or focusing it
-  shows the author in bold, the comment below and its date in grey.
+  text ends). In the text, a comment is a 💬 marker, a green balloon
+  holding a + when it was added since the base, or 🗑️ when it was
+  removed; hovering or focusing it shows the author in bold, the comment
+  below, with the paragraphs and the formatting it has in Word or
+  LibreOffice, and its date in grey. A pinned comment highlights its
+  words only, not a mark among them (another comment's, an AI badge).
 - With more than one file, the changed files with their counts of lines
   and words added and removed (and moved lines), linked to their tables;
   buttons expand or collapse every file at once. A single file needs
@@ -717,3 +751,12 @@ passages, report `docs/passage_benchmark.txt`) and
 recommendation in `docs/word_matcher_benchmark.md`). Their test set is kept
 in `docs/benchmark_data/`: the Project Gutenberg books, as served, and the
 simulated revisions made from them, so no run downloads or rebuilds them.
+
+## Acknowledgements
+
+prosediff was inspired by [diff2html](https://diff2html.xyz/)
+([rtfpessoa/diff2html](https://github.com/rtfpessoa/diff2html)), whose
+side-by-side HTML view of a diff it carries over from code to prose.
+
+prosediff was written with the help of [Claude Code](https://claude.com/claude-code),
+Anthropic's AI coding assistant.

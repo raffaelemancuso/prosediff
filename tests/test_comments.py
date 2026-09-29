@@ -1,9 +1,10 @@
 """Comments: folding pandoc comment spans into markers, and the comments panel."""
 
+import pytest
 from helpers import END, NOTE, two_folders
 
 from prosediff import Options, compare, compare_paths, render
-from prosediff.comments import REMOVED_COMMENT_MARK, end_of, number_of
+from prosediff.comments import NEW_COMMENT_MARK, REMOVED_COMMENT_MARK, end_of, number_of
 from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
 
 MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
@@ -81,7 +82,7 @@ def test_plain_and_show_comments():
     # a comment added since the base has its own icon
     new = str(show_comments(folded, comments, frozenset(PLACEHOLDER.findall(folded))))
     # the balloon, marked new by its class (a green + in the HTML report)
-    assert 'class="comment new"' in new and f">{COMMENT_MARK}</span>" in new
+    assert 'class="comment new"' in new and f">{NEW_COMMENT_MARK}</span>" in new
     assert 'aria-label="new comment by Anna' in new
     # and so has a comment removed since the base
     gone = str(show_comments(folded, comments, removed=frozenset(PLACEHOLDER.findall(folded))))
@@ -203,7 +204,7 @@ def test_comments_panel_statuses_and_links(tmp_path):
     # in the panel
     assert html.count('class="comment new"') == 1
     assert html.count('class="comment removed"') == 1
-    assert by_text["New remark."].icon == COMMENT_MARK
+    assert by_text["New remark."].icon == NEW_COMMENT_MARK
     assert by_text["Old remark."].icon == REMOVED_COMMENT_MARK
     assert not PLACEHOLDER.search(html)  # every comment became a marker
 
@@ -229,3 +230,61 @@ def test_a_comment_dated_without_a_time_keeps_its_date():
     span = '[Why?]{.comment-start id="1" author="A" date="2026-09-23"}'
     folded = fold_comments(f"x {span} y", comments)
     assert comments.get(folded[2]).date == "2026-09-23"
+
+
+def commented_documents(tmp_path, ext):
+    """Two versions of a document, the new one with a comment of two
+    paragraphs, a blank one between them, a title in italics."""
+    import docx
+    import odfdo
+
+    if ext == "docx":
+        for name, comment in (("old", False), ("new", True)):
+            d = docx.Document()
+            p = d.add_paragraph("Some text.")
+            if comment:
+                c = d.add_comment(p.runs[0], text="Please cite:", author="Anna")
+                c.add_paragraph("")
+                second = c.add_paragraph("See ")
+                second.add_run("Research Policy").italic = True
+                second.add_run(", 49.")
+            d.save(tmp_path / f"{name}.docx")
+    else:
+        for name, comment in (("old", False), ("new", True)):
+            d = odfdo.Document("text")
+            d.body.clear()
+            d.insert_style(odfdo.Style("text", name="I", italic=True), automatic=True)
+            p = odfdo.Paragraph("Some text.")
+            if comment:
+                note = odfdo.Annotation("Please cite:", creator="Anna", name="n1")
+                note.append(odfdo.Paragraph(""))
+                second = odfdo.Paragraph("See ")
+                second.append(odfdo.Span("Research Policy", style="I"))
+                second.append(", 49.")
+                note.append(second)
+                p.insert(note, position=0)
+            d.body.append(p)
+            d.save(tmp_path / f"{name}.{ext}")
+    return tmp_path / f"old.{ext}", tmp_path / f"new.{ext}"
+
+
+@pytest.mark.parametrize("ext", ["docx", "odt"])
+def test_a_comment_keeps_its_paragraphs_and_formatting(tmp_path, ext):
+    """A comment of a Word or OpenDocument document keeps its paragraphs,
+    the blank line between them and its italics, for the tooltip
+    (data-rich) and the panel; its text stays one line, for the other
+    formats and to be told apart."""
+    old, new = commented_documents(tmp_path, ext)
+    c = compare_paths(old, new, Options())
+    (entry,) = c.comments
+    assert entry.text == "Please cite: See Research Policy, 49."
+    assert entry.rich == (
+        (("Please cite:", ()),),
+        (),
+        (("See ", ()), ("Research Policy", ("em",)), (", 49.", ())),
+    )
+    assert str(entry.html) == "Please cite:<br><br>See <i>Research Policy</i>, 49."
+    html = render(c)
+    rich = "[[[&#34;Please cite:&#34;, &#34;&#34;]], [], [[&#34;See &#34;, &#34;&#34;]"
+    assert f'data-rich="{rich}' in html
+    assert "<i>Research Policy</i>" in html  # in the panel

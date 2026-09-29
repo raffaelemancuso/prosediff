@@ -49,12 +49,65 @@ class Span:
 
 @dataclass
 class CommentMark:
-    """Where a comment starts."""
+    """Where a comment starts. text: its text in one line; rich: its
+    paragraphs as written, for the HTML report to show (comment_runs)."""
 
     id: str
     author: str
     text: str
     date: str = ""
+    rich: tuple = ()
+
+
+# A comment as written: its paragraphs, each a tuple of runs, each run its
+# text and its styles, sorted (STRONG, EM, ...).
+Rich = tuple[tuple[tuple[str, tuple[str, ...]], ...], ...]
+
+
+def _styled_runs(items: Iterable, styles: frozenset[str], runs: list) -> None:
+    """Append the text of inlines to runs, a run for each change of style."""
+    for i in items:
+        if isinstance(i, Text):
+            style = tuple(sorted((styles | i.styles) & set(FORMATTING)))
+            if runs and runs[-1][1] == style:
+                runs[-1] = (runs[-1][0] + i.text, style)
+            else:
+                runs.append((i.text, style))
+        elif isinstance(i, Span):
+            _styled_runs(i.children, styles, runs)
+
+
+def comment_runs(paragraphs: Iterable[Iterable]) -> Rich:
+    """A comment's paragraphs, each given as its inlines, as runs of styled
+    text (a link's text in the link's styles), each paragraph's spaces as
+    spaced makes them; an empty paragraph between two others is a blank
+    line, those before the first and after the last are left out."""
+    out = []
+    for inlines in paragraphs:
+        runs: list[tuple[str, tuple[str, ...]]] = []
+        _styled_runs(inlines, frozenset(), runs)
+        # the spacing of the paragraph, as spaced: one space, none at the ends
+        text = "".join(t for t, _ in runs)
+        if not text.strip():
+            out.append(())
+            continue
+        tidy, pos = [], 0
+        for t, style in runs:
+            t = re.sub(r"\s+", " ", t)
+            if pos == 0 or (tidy and tidy[-1][0].endswith(" ")):
+                t = t.lstrip()
+            if t:
+                tidy.append((t, style))
+            pos += len(t)
+        if tidy:
+            last, style = tidy[-1]
+            tidy[-1] = (last.rstrip(), style)
+        out.append(tuple((t, s) for t, s in tidy if t))
+    while out and not out[-1]:
+        out.pop()
+    while out and not out[0]:
+        out.pop(0)
+    return tuple(out)
 
 
 @dataclass
@@ -98,6 +151,15 @@ class Block:
     rows: list[list[list]] = field(default_factory=list)
     number: int = 0
     language: str | None = None
+    # Where it is in the file: its paragraphs' locators (Source), and a
+    # table's, row by row; for prosediff.tracked to mark its changes there.
+    source: tuple = ()
+    row_sources: list[tuple] = field(default_factory=list)
+
+
+# Where a paragraph is in a document's package: the part (its name, e.g.
+# "/word/document.xml", "content.xml") and the XPath of the paragraph in it.
+Source = tuple[str, str]
 
 
 @dataclass
@@ -373,6 +435,7 @@ class Line(str):
         styles: list[frozenset[str]] | None = None,
         lang: str = "",
         kind: str = "p",
+        source: tuple = (),
     ):
         line = super().__new__(cls, text)
         line.styles = list(styles) if styles is not None else [frozenset()] * len(text)
@@ -380,15 +443,16 @@ class Line(str):
             raise ValueError("a style for each character")
         line.lang = lang
         line.kind = kind
+        line.source = source  # its paragraphs in the file (Block.source)
         return line
 
     def cut(self, start: int, end: int) -> "Line":
         """The line from start to end, with its styles."""
-        return Line(self[start:end], self.styles[start:end], self.lang, self.kind)
+        return Line(self[start:end], self.styles[start:end], self.lang, self.kind, self.source)
 
     def replaced(self, text: str, styles: list[frozenset[str]]) -> "Line":
         """Another text of the same paragraph."""
-        return Line(text, styles, self.lang, self.kind)
+        return Line(text, styles, self.lang, self.kind, self.source)
 
 
 def sub(pattern: re.Pattern, repl: Callable[[re.Match], str], line: str, count: int = 0) -> str:
@@ -435,8 +499,8 @@ class Builder:
         self.text.append(text)
         self.styles += [styles] * len(text)
 
-    def line(self, lang: str, kind: str) -> Line:
-        return Line("".join(self.text), self.styles, lang, kind)
+    def line(self, lang: str, kind: str, source: tuple = ()) -> Line:
+        return Line("".join(self.text), self.styles, lang, kind, source)
 
 
 def short_date(date: str) -> str:
@@ -477,13 +541,14 @@ def lines(doc: Document, comment: Callable[[CommentMark | CommentEnd], str]) -> 
     for block in doc.blocks + doc.notes:
         lang = block.language or ""
         if block.kind == "table":
-            for row in block.rows:
+            for n, row in enumerate(block.rows):
                 b = Builder()
                 for k, cell in enumerate(row):
                     if k:
                         b.add(" | ")
                     _add(b, cell, frozenset(), comment)
-                out.append(b.line(lang, "row"))
+                sources = block.row_sources
+                out.append(b.line(lang, "row", sources[n] if n < len(sources) else ()))
             continue
         b = Builder()
         if block.kind == "item":
@@ -492,5 +557,5 @@ def lines(doc: Document, comment: Callable[[CommentMark | CommentEnd], str]) -> 
             b.add(f"[^{block.number}]: ")
         styles = frozenset({f"h{min(block.level, 6)}"}) if block.kind == "heading" else frozenset()
         _add(b, block.inlines, styles, comment)
-        out.append(b.line(lang, block.kind))
+        out.append(b.line(lang, block.kind, block.source))
     return out

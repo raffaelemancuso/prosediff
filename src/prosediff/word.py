@@ -32,9 +32,11 @@ from dataclasses import dataclass, field
 from io import BytesIO
 
 import docx
+from docx.enum.text import WD_UNDERLINE
 from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
+from docx.text.hyperlink import Hyperlink
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from docx_plus.styles.inspect import resolve_effective_formatting
@@ -53,8 +55,10 @@ from prosediff.document import (
     DocumentReader,
     Image,
     NoteRef,
+    Source,
     Span,
     Text,
+    comment_runs,
     join_paragraphs,
     markdown,
     spaced,
@@ -131,7 +135,8 @@ class Reader(DocumentReader):
         # as written, like a tracked change's: python-docx's timestamp makes
         # a date without a time midnight
         date = c._comment_elm.get(qn("w:date")) or ""
-        return [CommentMark(cid, c.author or "", spaced(c.text), date)]
+        rich = comment_runs(comment_inlines(p) for p in c.paragraphs)
+        return [CommentMark(cid, c.author or "", spaced(c.text), date, rich)]
 
     def comment_end(self, cid: str) -> list:
         """Where the text of a comment ends, once, after where it starts."""
@@ -235,6 +240,11 @@ class Reader(DocumentReader):
         """The inlines of several paragraphs, as one, a space between them."""
         return join_paragraphs(self.paragraph_inlines(p, part) for p in paragraphs)
 
+    def source(self, el, part=None) -> Source:
+        """Where a paragraph is: its part's name and its XPath there."""
+        part = self.document.part if part is None else part
+        return (str(part.partname), el.getroottree().getpath(el))
+
     def paragraph(self, el) -> Block | None:
         inlines = self.paragraph_inlines(el)
         if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
@@ -242,19 +252,29 @@ class Reader(DocumentReader):
         language = self.language_of([el])
         p = Paragraph(el, _Story(self.document.part))
         style = _style_name(p)
+        source = (self.source(el),)
         if style in HEADING_STYLES:
-            return Block("heading", inlines, level=HEADING_STYLES[style], language=language)
+            level = HEADING_STYLES[style]
+            return Block("heading", inlines, level=level, language=language, source=source)
         numbered = el.find(f"{qn('w:pPr')}/{qn('w:numPr')}") is not None
         if numbered or style.startswith(LIST_STYLES):
-            return Block("item", inlines, language=language)
-        return Block("p", inlines, language=language)
+            return Block("item", inlines, language=language, source=source)
+        return Block("p", inlines, language=language, source=source)
 
     def table(self, el) -> Block:
         rows = [
             [self.cell(tc.iter(qn("w:p"))) for tc in tr.findall(qn("w:tc"))]
             for tr in el.iter(qn("w:tr"))
         ]
-        return Block("table", rows=rows, language=self.language_of(el.iter(qn("w:p"))))
+        return Block(
+            "table",
+            rows=rows,
+            language=self.language_of(el.iter(qn("w:p"))),
+            row_sources=[
+                tuple(self.source(p) for tc in tr.findall(qn("w:tc")) for p in tc.iter(qn("w:p")))
+                for tr in el.iter(qn("w:tr"))
+            ],
+        )
 
     def body(self) -> list[Block]:
         """The paragraphs and tables of the document; comments carried past
@@ -295,9 +315,36 @@ class Reader(DocumentReader):
                     self.cell(paragraphs, part),
                     number=k,
                     language=self.language_of(paragraphs),
+                    source=tuple(self.source(p, part) for p in paragraphs),
                 )
             )
         return out
+
+
+def comment_inlines(p: Paragraph) -> list[Text]:
+    """A paragraph of a comment as runs of text in their styles: those set
+    on each run, and the Strong and Emphasis character styles. (docx-plus
+    resolves the formatting of the body's runs only: a comment's are in a
+    part of their own, docx_plus.styles.inspect finding no document for
+    them.)"""
+    out = []
+    for item in p.iter_inner_content():
+        for r in item.runs if isinstance(item, Hyperlink) else [item]:
+            f, styles = r.font, set()
+            if f.bold or _style_name(r) == "strong":
+                styles.add(STRONG)
+            if f.italic or _style_name(r) == "emphasis":
+                styles.add(EM)
+            if f.underline not in (None, False, WD_UNDERLINE.NONE):
+                styles.add(UNDERLINE)
+            if f.strike or f.double_strike:
+                styles.add(STRIKE)
+            if f.superscript:
+                styles.add(SUP)
+            elif f.subscript:
+                styles.add(SUB)
+            out.append(Text(r.text, frozenset(styles)))
+    return out
 
 
 def _style_name(x) -> str:
