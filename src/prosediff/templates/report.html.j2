@@ -1964,7 +1964,8 @@ thead.print, .print-note { display: none; }
   // with the top of its row: a stack taller than its row runs on down
   // beside the rows below that have no cards, and when it reaches one that
   // has, room is made after the row before it (--push), so that row's cards
-  // start beside it, never after its end; the file made taller when the
+  // start beside it, never after its end; nor past a fold of unchanged
+  // lines, which is moved down below the cards; the file made taller when the
   // last runs past its end. Where the cards sit under their rows (static:
   // no margin), nothing to place.
   var STACK_GAP = 8;
@@ -1980,21 +1981,33 @@ thead.print, .print-note { display: none; }
     var topOf = function (el) {
       return el.getBoundingClientRect().top - table.getBoundingClientRect().top;
     };
+    // the row shown before rows[k] made taller by px, on top of what it has
+    var pushBefore = function (k, px) {
+      k--;
+      while (k >= 0 && !rows[k].offsetParent) k--;
+      if (k < 0) return false;
+      var had = parseFloat(rows[k].style.getPropertyValue("--push")) || 0;
+      rows[k].style.setProperty("--push", Math.ceil(had + px) + "px");
+      return true;
+    };
     stacks.forEach(function (stack) {
       var cell = stack.parentElement, row = cell.parentElement;
       if (!cell.offsetParent) return;  // a row folded away or hidden
-      var at = topOf(cell);
-      if (below > at) {
-        // the row shown before it, made taller by what the cards above need
-        var k = rows.indexOf(row) - 1;
-        while (k >= 0 && !rows[k].offsetParent) k--;
-        if (k >= 0) {
-          rows[k].style.setProperty("--push", Math.ceil(below - at) + "px");
-          at = topOf(cell);
-        }
-      }
+      var at = topOf(cell), i = rows.indexOf(row);
+      // made room for by the row before it, when the cards above need it
+      if (below > at && pushBefore(i, below - at)) at = topOf(cell);
       stack.style.top = "4px";
       below = at + 4 + stack.offsetHeight + STACK_GAP;
+      // the next fold shown, before any row with cards, moved down below them
+      for (var k = i + 1; k < rows.length; k++) {
+        if (!rows[k].offsetParent) continue;
+        if (rows[k].querySelector("td.notes > .stack")) break;
+        if (rows[k].classList.contains("skip")) {
+          var fold = topOf(rows[k]);
+          if (below > fold) pushBefore(k, below - fold);
+          break;
+        }
+      }
     });
     var past = below - table.offsetHeight;
     if (past > 0) file.style.paddingBottom = past + "px";

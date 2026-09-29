@@ -132,7 +132,8 @@ def test_next_and_previous_change(page):
 def test_unchanged_lines_and_a_file_open_and_close(page):
     """A fold opens on its own; a file closes by its heading, and jumping to
     a change opens it. One file has no list of files and no buttons for all
-    of them."""
+    of them; no moved passage, no switch for them."""
+    assert page.locator('[data-toggle="passages"]').count() == 0
     hidden = page.locator("tbody[hidden]").first
     assert not hidden.is_visible()
     folds = page.locator("tbody[hidden]").count()
@@ -231,7 +232,7 @@ def test_views_are_remembered(page):
     assert page.get_attribute('[data-toggle="formatted"]', "aria-pressed") == "true"
     assert page.locator(".s-strong").first.evaluate("e => getComputedStyle(e).fontWeight") == "700"
     assert edited_line_colour() == "transparent"
-    for key in "uft":  # t, the tint of before, does nothing
+    for key in "uf":
         page.keyboard.press(key)
     # an unchanged row shows its new side only, its cards beside it
     left = page.locator("tr.equal td.left").first
@@ -248,8 +249,16 @@ def test_views_are_remembered(page):
 
 
 def test_toolbar_help_tooltips(page):
+    """The toolbar's buttons explain themselves on hover; a change, or the
+    row it is in, shows nothing."""
     tip = page.locator("#tip")
-    assert page.locator(".toolbar [title]").count() == 0  # no browser tooltip
+    # no browser tooltip
+    assert page.locator(".toolbar [title], table [title]").count() == 0
+    page.locator("ins").first.hover()
+    assert not tip.is_visible()
+    box = page.locator("tr.replace td.code.right").first.bounding_box()
+    page.mouse.move(box["x"] + box["width"] - 3, box["y"] + box["height"] - 3)
+    assert not tip.is_visible()
     page.click(".menu-button")
     page.hover('[data-toggle="formatted"]')
     assert tip.is_visible()
@@ -515,17 +524,6 @@ def test_ai_marks_in_a_moved_passage_row(browser, tmp_path):
     page.context.close()
 
 
-def test_changes_carry_no_tooltip(page):
-    """Hovering a change, or the row it is in, shows nothing."""
-    tip = page.locator("#tip")
-    assert page.locator("table [title]").count() == 0
-    page.locator("ins").first.hover()
-    assert not tip.is_visible()
-    box = page.locator("tr.replace td.code.right").first.bounding_box()
-    page.mouse.move(box["x"] + box["width"] - 3, box["y"] + box["height"] - 3)
-    assert not tip.is_visible()
-
-
 def test_tracked_and_formatting_changes(browser, tmp_path):
     """A tracked change kept as markup says who made it and when. Off by
     default, the formatting changes of a document stay out of sight; the
@@ -637,33 +635,13 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     page.context.close()
 
 
-def test_moved_passage_tells_where_and_is_joined(browser, tmp_path):
-    """A sentence moved from one paragraph into another, compared paragraph
-    by paragraph: hovering either end tells where it went or came from and
-    lights up both; a line joins them."""
-    old, new = tmp_path / "a.md", tmp_path / "b.md"
-    moved = "This sentence moves to the end of the text."
-    old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
-    new.write_bytes(f"The first sentence stays here.\n\nA middle one stays. {moved}\n".encode())
-    page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
-    page.keyboard.press("v")  # the moved passages, off by default
-    page.keyboard.press("l")  # and the lines between moves
-    assert "1 moved passage" in page.locator("details.file summary").inner_text()
-    tip = page.locator("#tip")
-    page.locator("td.left .moved").hover()
-    assert tip.locator("b").inner_text() == "Moved to line 3"
-    sync_api.expect(page.locator(".moved.pair-hot")).to_have_count(2)
-    page.locator("td.right .moved").hover()
-    assert tip.locator("b").inner_text() == "Moved from line 1"
-    sync_api.expect(page.locator("svg.move-links path")).to_have_count(1)
-    page.context.close()
-
-
 def test_moved_passages_switch(browser, tmp_path):
-    """The "Moved passages" switch, off by default: a moved passage removed
-    in one place and added in the other, the counts without it; on, it is
-    shown as moved and counted; the choice remembered, and the key v turns
-    it back off."""
+    """The "Moved passages" switch, off by default: a sentence moved from one
+    paragraph into another is removed in one place and added in the other,
+    the counts without it; on, it is shown as moved and counted, hovering
+    either end tells where it went or came from and lights up both, and a
+    line joins them; the choice remembered, and the key v turns it back
+    off."""
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     moved = "This sentence moves to the end of the text."
     old.write_bytes(f"The first sentence stays here. {moved}\n\nA middle one stays.\n".encode())
@@ -680,17 +658,20 @@ def test_moved_passages_switch(browser, tmp_path):
     assert switch.get_attribute("aria-pressed") == "true"
     assert page.locator("td.left .moved").is_visible()
     assert "1 moved passage" in summary.inner_text()
+    tip = page.locator("#tip")
+    page.locator("td.left .moved").hover()
+    assert tip.locator("b").inner_text() == "Moved to line 3"
+    sync_api.expect(page.locator(".moved.pair-hot")).to_have_count(2)
+    page.locator("td.right .moved").hover()
+    assert tip.locator("b").inner_text() == "Moved from line 1"
+    page.keyboard.press("l")  # the lines between moves
+    sync_api.expect(page.locator("svg.move-links path")).to_have_count(1)
     page.reload()
     assert switch.get_attribute("aria-pressed") == "true"
     page.keyboard.press("v")
     assert not page.locator("td.left .moved").is_visible()
     assert "moved passage" not in summary.inner_text()
     page.context.close()
-
-
-def test_no_moved_passages_switch_without_passages(page):
-    """A report with no moved passage has no switch for them."""
-    assert page.locator('[data-toggle="passages"]').count() == 0
 
 
 def test_a_comment_card_shows_its_paragraphs_and_italics(browser, tmp_path):
@@ -820,6 +801,31 @@ def test_cards_run_on_down_the_margin(browser, tmp_path):
     assert abs(two["y"] - second["y"]) < 8  # level with its own row
     file = page.locator("details.file").first.bounding_box()
     assert file["y"] + file["height"] >= two["y"] + two["height"]  # the file holds them
+    page.context.close()
+
+
+def test_a_fold_moves_down_below_the_cards(browser, tmp_path):
+    """Cards that run past their row's end never cross the fold of
+    unchanged lines below it: the fold moves down, also when a long comment
+    is shown whole."""
+    lines = [f"Line {k} of the text." for k in range(1, 31)]
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    long = " ".join(f"Remark {k} on this line, told at some length." for k in range(40))
+    lines[4] = f'Line 5, changed.[{long}]{{.comment-start id="1" author="A"}}'
+    new.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new))
+    card = page.locator(".card").first
+    fold = page.locator("tr.skip:visible").nth(1)  # the one after the changed line
+
+    def clear():
+        box = card.bounding_box()
+        return box["y"] + box["height"] <= fold.bounding_box()["y"]
+
+    assert clear()
+    card.get_by_text("Show all").click()
+    page.wait_for_timeout(100)
+    assert card.get_by_text("Show less").is_visible() and clear()
     page.context.close()
 
 
