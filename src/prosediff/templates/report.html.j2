@@ -2009,13 +2009,20 @@ thead.print, .print-note { display: none; }
     var savedNotes = parseFloat(localStorage.getItem("prosediff-notes-width"));
     if (savedNotes >= 180) widths.notes = savedNotes;
   } catch (e) {}
+  // The first cell of a kind that shows: those of rows folded away have no
+  // size, and a table can start with a fold.
+  function shownCell(table, selector) {
+    var cells = table.querySelectorAll(selector);
+    for (var i = 0; i < cells.length; i++) if (cells[i].offsetParent) return cells[i];
+    return null;
+  }
   function gutterOf(table) {
-    var no = table.querySelector("td.no");
+    var no = shownCell(table, "td.no");
     return no ? no.offsetWidth : 0;
   }
   function notesOf(table) {
-    var cell = table.querySelector("td.notes");
-    return cell && cell.offsetParent ? cell.offsetWidth : 0;
+    var cell = shownCell(table, "td.notes");
+    return cell ? cell.offsetWidth : 0;
   }
   function applyWidths(table) {
     var cols = table.querySelectorAll(":scope > colgroup > col");
@@ -2033,10 +2040,10 @@ thead.print, .print-note { display: none; }
     if (!table || !file.open || file.closest(".split[hidden]") || !table.offsetParent ||
         document.body.classList.contains("unified")) return;
     var box = file.getBoundingClientRect(), t = table.getBoundingClientRect();
-    var left = table.querySelector("td.code.left"), notes = table.querySelector("td.notes");
+    var left = shownCell(table, "td.code.left"), notes = shownCell(table, "td.notes");
     var at = [];
-    if (left && left.offsetParent) at.push(["split", left.getBoundingClientRect().right]);
-    if (notes && notes.offsetParent) at.push(["notes", notes.getBoundingClientRect().left]);
+    if (left) at.push(["split", left.getBoundingClientRect().right]);
+    if (notes) at.push(["notes", notes.getBoundingClientRect().left]);
     at.forEach(function (a) {
       var h = document.createElement("div");
       h.className = "col-resizer";

@@ -859,6 +859,25 @@ def test_columns_resized_by_dragging_their_handles(page):
     assert abs(old_width - new_width) < 3
 
 
+def test_column_handles_when_the_table_starts_folded(browser, tmp_path):
+    """A table that starts with unchanged lines folded away still has its
+    handles, placed by the rows that show."""
+    lines = [f"Line {k} of the text." for k in range(1, 31)]
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines[24] = 'Line 25, changed.[A note.]{.comment-start id="1" author="A"}'
+    new.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new))
+    assert not page.get_by_text("Line 1 of the text.").first.is_visible()  # folded away
+    split = page.locator('.col-resizer[data-resize="split"]')
+    notes = page.locator('.col-resizer[data-resize="notes"]')
+    assert split.is_visible() and notes.is_visible()
+    cell = page.locator("tr.replace td.code.left").first.bounding_box()
+    box = split.bounding_box()
+    assert abs(box["x"] + box["width"] / 2 - (cell["x"] + cell["width"])) < 3
+    page.context.close()
+
+
 def test_the_margin_hidden_and_shown(page):
     """Margin (g) hides the margin, the two versions taking its width, and
     brings it back; remembered across a reload."""
