@@ -846,7 +846,7 @@ def test_advanced_moved_passage_settings(root, tmp_path):
     assert app.advanced_window.state() == "withdrawn"
     app.toggle_advanced()
     root.update()
-    assert app.advanced_window.state() == "normal"
+    assert app.advanced_window.state() != "withdrawn"  # "zoomed" on macOS
     app.toggle_advanced()
     root.update()
     assert app.advanced_window.state() == "withdrawn"
