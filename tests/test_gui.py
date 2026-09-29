@@ -378,9 +378,9 @@ def test_a_comparison_runs_apart_and_can_be_cancelled(root, tmp_path):
 
 
 def test_the_model_list_says_loading_until_the_ai_answers(root, monkeypatch):
-    """While the AI reports its models, the model and effort fields say
-    Loading and cannot be used; the model saved comes back once they are
-    known."""
+    """The AI, model and effort saved are shown at once, checked once the AI
+    reports its models; an AI chosen then shows Loading in the model and
+    effort fields, which cannot be used, until it does."""
     import threading
 
     answer = threading.Event()
@@ -392,14 +392,61 @@ def test_the_model_list_says_loading_until_the_ai_answers(root, monkeypatch):
     monkeypatch.setattr(gui, "models_of", slow)
     app = App(root, Settings(mode="files", assess="claude/opus", assess_effort="max"))
     root.update()
+    assert (app.assess_ai.get(), app.assess_model.get(), app.assess_effort.get()) == (
+        "claude",
+        "opus",
+        "max",
+    )
+    s = app.collect()
+    assert (s.assess, s.assess_effort) == ("claude/opus", "max")
+    app.assess_ai.set("codex")
     assert app.assess_model.get() == "Loading…" and app.model_box.instate(["disabled"])
     assert app.assess_effort.get() == "Loading…" and app.effort_box.instate(["disabled"])
-    s = app.collect()
-    assert (s.assess, s.assess_effort) == ("claude/opus", "max")  # kept meanwhile
     answer.set()
+    settle(root, app, "codex")
+    assert app.assess_model.get() == "gpt-6-astra" and not app.model_box.instate(["disabled"])
+    app.assess_ai.set("claude")
+    assert app.assess_model.get() == "default" and root.shown == []  # opus was offered
+
+
+def test_the_ai_list_says_loading_until_the_ais_are_known(root, monkeypatch):
+    """With no AI saved, the AI list says Loading and cannot be used until
+    the AIs are found in the background; then no AI is chosen."""
+    import threading
+
+    answer = threading.Event()
+
+    def slow():
+        answer.wait(10)
+        return ["openai"]
+
+    monkeypatch.setattr(gui, "providers", slow)
+    app = App(root, Settings(mode="files"))
+    root.update()
+    assert app.assess_ai.get() == "Loading…" and app.ai_box.instate(["disabled"])
+    assert app.collect().assess == "" and app.model_box.instate(["disabled"])
+    answer.set()
+    settle(root, app)
+    assert app.assess_ai.get() == "none" and not app.ai_box.instate(["disabled"])
+    assert list(app.ai_box["values"]) == [*gui.AIS, "openai"] and root.shown == []
+
+
+def test_a_saved_ai_or_model_no_longer_offered_is_an_error(root):
+    """A saved AI no longer offered (any-llm's provider gone), or a saved
+    model its AI no longer reports, is said in an error, and replaced: by no
+    AI, by the AI's default model."""
+    app = App(root, Settings(mode="files", assess="mistral/large"))
+    settle(root, app)
+    assert "The AI saved, mistral, is not available" in root.shown[0]
+    assert app.assess_ai.get() == "none" and app.collect().assess == ""
+    root.shown.clear()
+    app = App(root, Settings(mode="files", assess="claude/opus-3"))
     settle(root, app, "claude")
-    assert (app.assess_model.get(), app.assess_effort.get()) == ("opus", "max")
-    assert not app.model_box.instate(["disabled"])
+    assert root.shown == [
+        "The model saved, opus-3, is not one claude offers any more: its default, "
+        "default, is chosen instead."
+    ]
+    assert app.assess_model.get() == "default" and app.collect().assess == "claude"
 
 
 def test_ai_model_and_effort_as_the_ai_reports(root):

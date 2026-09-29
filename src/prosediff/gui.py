@@ -794,6 +794,27 @@ class App:
             "out.",
         )
         self.comments.trace_add("write", lambda *_: self.update_empty_comments())
+        self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "both")
+        splits = ttk.Frame(compared)
+        split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
+        for value, text in split_names:
+            ttk.Radiobutton(
+                splits,
+                text=text,
+                value=value,
+                variable=self.split,
+                bootstyle="secondary-outline-toolbutton",
+                padding=(8, 3),
+            ).pack(side="left")
+        field_row(
+            compared,
+            2,
+            "Compare by",
+            splits,
+            "How prose is compared: paragraph by paragraph, sentence by sentence (a sentence "
+            "moved between paragraphs is recognised), or both, in one HTML report whose "
+            "toolbar switches between the two.",
+        )
         self.ignore_ws = tk.BooleanVar(value=self.s.ignore_whitespace)
         switch_row(
             right,
@@ -809,32 +830,11 @@ class App:
         compared.grid(row=0, column=0, sticky="nw")
         shown = ttk.Frame(card)
         shown.grid(row=0, column=1, sticky="nw", padx=(18, 0))
-        self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "both")
-        splits = ttk.Frame(compared)
-        split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
-        for value, text in split_names:
-            ttk.Radiobutton(
-                splits,
-                text=text,
-                value=value,
-                variable=self.split,
-                bootstyle="secondary-outline-toolbutton",
-                padding=(8, 3),
-            ).pack(side="left")
-        field_row(
-            compared,
-            0,
-            "Compare by",
-            splits,
-            "How prose is compared: paragraph by paragraph, sentence by sentence (a sentence "
-            "moved between paragraphs is recognised), or both, in one HTML report whose "
-            "toolbar switches between the two.",
-        )
         self.context = tk.StringVar(value=self.s.context_lines)
         # "auto": 0 around the changes of Markdown and Word, 3 of other files
         field_row(
             compared,
-            1,
+            0,
             "Context lines",
             ttk.Spinbox(compared, values=("auto", *range(51)), textvariable=self.context, width=10),
             "Unchanged lines shown around each change. auto: none in Markdown files and Word "
@@ -843,7 +843,7 @@ class App:
         self.align = tk.StringVar(value=self.s.align)
         field_row(
             compared,
-            2,
+            1,
             "Wrapped lines",
             item_hints(
                 ttk.Combobox(
@@ -880,26 +880,6 @@ class App:
         # and sentences must be, how moved passages are told from chance
         # likeness (one field for each of MovedPassageSettings), and the
         # encoding of text files
-        self.advanced_row = ttk.Frame(page)
-        self.advanced_row.pack(fill="x", pady=(8, 0))
-        self.advanced_button = ttk.Button(
-            self.advanced_row,
-            text="Advanced settings…",
-            command=self.toggle_advanced,
-            bootstyle="link",
-            padding=(0, 4),
-        )
-        self.advanced_button.pack(side="left")
-        hint(
-            self.advanced_button,
-            "Open the settings few need to change in a window of their own, beside this "
-            "one; they apply to the next comparison as they are when it starts.",
-        )
-        ttk.Label(
-            self.advanced_row,
-            text="how the report shows it, moved passages, encoding…",
-            bootstyle="secondary",
-        ).pack(side="left", padx=(8, 0))
         # a window of its own, hidden until asked for: this one would grow past
         # the screen
         self.advanced_window = tk.Toplevel(self.root)
@@ -1070,10 +1050,14 @@ class App:
         card.pack(fill="x", pady=(10, 0))
         self.ai_card = card
         card.columnconfigure(1, weight=1)
-        ai, _, model = (self.s.assess or NO_ASSESSMENT).partition("/")
-        self.assess_ai = tk.StringVar(value=ai)
+        # the AI saved shown at once, checked once the AIs and its models are
+        # known (add_found, update_models); none saved: "Loading…" until the
+        # AIs are known, then none
+        ai, _, model = self.s.assess.partition("/")
+        self.assess_ai = tk.StringVar(value=ai or LOADING)
         self.assess_model = tk.StringVar(value=model or (CLAUDE_DEFAULT if ai == "claude" else ""))
         self.assess_effort = tk.StringVar(value=self.s.assess_effort)
+        self.saved_model = (ai, self.assess_model.get()) if ai else None
         # the models each AI reports, once asked; the AIs being asked; what
         # the background found, for tkinter's own thread
         self.ai_models: dict[str, list[ModelInfo]] = {}
@@ -1085,7 +1069,7 @@ class App:
         ai_row = ttk.Frame(card)
         ai_row.grid(row=0, column=1, columnspan=2, sticky="w", **PAD)
         self.ai_box = item_hints(
-            ttk.Combobox(ai_row, textvariable=self.assess_ai, values=AIS, width=12),
+            ttk.Combobox(ai_row, textvariable=self.assess_ai, width=12),
             lambda value: AI_HINTS.get(
                 value,
                 f"{value}: a model of its API, through any-llm, "
@@ -1234,13 +1218,24 @@ class App:
         self.update_models(keep=True)  # the model and effort saved stay
         self.output_format.trace_add("write", lambda *_: self.update_ai_card())
         self.update_ai_card()
-        # the providers any-llm reaches, for the AI list
-        self.ask("providers", providers)
+        # the AIs: prosediff's own and the providers any-llm reaches
+        self.ask("providers", lambda: [*AIS, *(p for p in providers() if p not in AIS)])
+
+    def ai_chosen(self) -> str:
+        """The AI chosen; "" while the AIs are being found."""
+        ai = self.assess_ai.get().strip()
+        return "" if ai == LOADING else ai
+
+    def complain(self, text: str) -> None:
+        """An error found by the window itself, said in a dialog and the
+        status line."""
+        self.status.set(text)
+        messagebox.showerror("prosediff", text, parent=self.root)
 
     def ai_active(self) -> bool:
         """Whether an AI will assess: one is chosen, and the output is the HTML
         report, the only one with room for its assessment."""
-        chosen = self.assess_ai.get().strip() not in ("", NO_ASSESSMENT)
+        chosen = self.ai_chosen() not in ("", NO_ASSESSMENT)
         return chosen and self.output_format.get() == "html"
 
     def update_ai_card(self) -> None:
@@ -1253,6 +1248,8 @@ class App:
             widgets.extend(w.winfo_children())
             if isinstance(w, tk_ttk.Widget):
                 w.state(["!disabled"] if html else ["disabled"])
+        if self.assess_ai.get() == LOADING:
+            self.ai_box.state(["disabled"])  # until the AIs are known
         self.update_ai_switches()
         on = self.ai_active() and self.assess_model.get() != LOADING
         for box in (self.model_box, self.effort_box):
@@ -1298,13 +1295,23 @@ class App:
                 break
             self.asking.discard(kind)
             if kind == "providers":
-                others = [p for p in found if p not in AIS]
-                self.ai_box.configure(values=(*AIS, *others))
+                self.ai_box.configure(values=found)
+                ai = self.assess_ai.get().strip()
+                if ai == LOADING:
+                    self.assess_ai.set(NO_ASSESSMENT)
+                elif ai not in found:
+                    self.complain(
+                        f"The AI saved, {ai}, is not available any more"
+                        + (f" ({error})" if error else "")
+                        + ": no AI assesses the changes until another is chosen."
+                    )
+                    self.assess_ai.set(NO_ASSESSMENT)
+                self.update_ai_card()
                 continue
             self.ai_models[kind] = found
             if error:
                 self.status.set(f"The models of {kind} are not known: {error}")
-            if self.assess_ai.get().strip() == kind:
+            if self.ai_chosen() == kind:
                 self.update_models(keep=True)
         if self.asking:
             self.root.after(200, self.add_found)
@@ -1314,11 +1321,15 @@ class App:
         in the background the first time); none for none. The model shown
         becomes the AI's own default, the first it reports, unless keep and
         one is already chosen."""
-        ai = self.assess_ai.get().strip()
+        ai = self.ai_chosen()
         self.model_box.state(["!disabled"] if self.ai_active() else ["disabled"])
         if ai in ("", NO_ASSESSMENT):
             self.model_box.configure(values=())
             self.update_efforts()
+            return
+        if ai not in self.ai_models and self.saved_model == (ai, self.assess_model.get()):
+            # the model saved shown meanwhile, checked once they are known
+            self.ask(ai, lambda: models_of(ai))
             return
         if ai not in self.ai_models:
             # "Loading…" until the AI has said its models; the model and
@@ -1338,6 +1349,15 @@ class App:
             return
         models = [m.name for m in self.ai_models[ai]]
         self.model_box.configure(values=models)
+        if self.saved_model and self.saved_model[0] == ai:
+            saved, self.saved_model = self.saved_model[1], None
+            if models and self.assess_model.get() == saved and saved not in models:
+                self.complain(
+                    f"The model saved, {saved}, is not one {ai} offers any more: its "
+                    f"default, {models[0]}, is chosen instead."
+                )
+                self.assess_model.set(models[0])
+                return
         if self.assess_model.get() == LOADING:
             model, effort = self.pending
             self.pending = ("", "")
@@ -1353,7 +1373,7 @@ class App:
     def chosen_model(self) -> ModelInfo | None:
         """The model chosen, as its AI reports it; None when unknown."""
         name = self.assess_model.get().strip()
-        found = self.ai_models.get(self.assess_ai.get().strip(), [])
+        found = self.ai_models.get(self.ai_chosen(), [])
         return next((m for m in found if m.name == name), None)
 
     def update_efforts(self, keep: bool = False) -> None:
@@ -1372,7 +1392,7 @@ class App:
         self.assess_effort.set(default or (MODEL_DEFAULT if levels else ""))
 
     def model_hint(self, value: str) -> str:
-        found = self.ai_models.get(self.assess_ai.get().strip(), [])
+        found = self.ai_models.get(self.ai_chosen(), [])
         return next((m.description for m in found if m.name == value), "")
 
     def effort_chosen(self) -> str:
@@ -1395,7 +1415,7 @@ class App:
         """The AI assessment asked for, as --assess takes it: "claude",
         "claude/opus", "ollama/qwen3"; "" for none. Claude Code's own
         default is asked for by naming no model."""
-        ai, model = self.assess_ai.get().strip(), self.assess_model.get().strip()
+        ai, model = self.ai_chosen(), self.assess_model.get().strip()
         if model == LOADING:
             model = self.pending[0]  # the one chosen before, or the AI's default
         if ai in ("", NO_ASSESSMENT):
@@ -1456,6 +1476,21 @@ class App:
         )
         save.pack(side="right", padx=(0, 8))
         hint(save, f"Open the window with these choices next time ({settings_file()})")
+        advanced = ttk.Button(
+            bottom,
+            text="Advanced settings",
+            image=ttk.Icon("sliders", size=16),
+            compound="left",
+            command=self.toggle_advanced,
+            bootstyle="secondary-outline",
+        )
+        advanced.pack(side="right", padx=(0, 8))
+        hint(
+            advanced,
+            "Open the settings few need to change in a window of their own, beside this "
+            "one: how the report shows the changes, moved passages, the encoding of text "
+            "files. They apply to the next comparison as they are when it starts.",
+        )
         self.progress = ttk.Progressbar(
             bottom, mode="indeterminate", bootstyle="striped", length=140
         )
