@@ -73,6 +73,14 @@ h2 { font-size: 15px; margin: 0 0 6px; }
 ::highlight(pin) { background-color: var(--flash); }
 td.code.pinned { background-color: var(--flash) !important; }
 .comment.pinned { box-shadow: 0 0 0 3px var(--current); border-radius: 3px; }
+/* a new or removed comment's balloon is outlined itself, tail and all,
+   not the square box it is drawn in */
+.comment.new.pinned, .comment.removed.pinned { box-shadow: none; }
+.comment.pinned svg { overflow: visible; }
+.comment.pinned svg path.ring { stroke: var(--current); stroke-width: 5.6;
+  stroke-linejoin: round; }
+.comment.pinned svg path:not(.sign):not(.ring) { stroke: var(--bg); stroke-width: 2.8;
+  stroke-linejoin: round; paint-order: stroke fill; }
 /* an AI mark keeps its own rounded shape, ringed a little apart from it */
 .ai-mark.pinned { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--current); }
 td.code .comment, td.code .ai-mark { cursor: pointer; }
@@ -330,6 +338,7 @@ svg.new-comment, svg.removed-comment { width: 1.35em; height: 1.35em;
   vertical-align: -0.3em; }
 svg.new-comment path { fill: var(--add); }
 svg.removed-comment path { fill: var(--rem); }
+svg.new-comment path.ring, svg.removed-comment path.ring { fill: none; }
 svg.new-comment .sign, svg.removed-comment .sign { fill: none; stroke: #fff;
   stroke-width: 1.8; stroke-linecap: round; }
 /* The one tooltip of the HTML report, for the toolbar's help, where a moved
@@ -1497,14 +1506,14 @@ thead.print, .print-note { display: none; }
     head.appendChild(button);
     c.appendChild(head);
     c.appendChild(body);
-    // a long one shows its first lines, the rest on asking
-    if (body.textContent.length > 280 || body.children.length > 4) {
-      body.classList.add("clamped");
-      var more = el("button", "more", "Show all");
-      more.type = "button";
-      more.setAttribute("aria-expanded", "false");
-      c.appendChild(more);
-    }
+    // its first lines shown, the rest on asking when there is more: whether
+    // there is, measured once it is laid out (fitCards)
+    body.classList.add("clamped");
+    var more = el("button", "more", "Show all");
+    more.type = "button";
+    more.hidden = true;
+    more.setAttribute("aria-expanded", "false");
+    c.appendChild(more);
     return c;
   }
   // A card's text shown whole (opening) or cut to its first lines again,
@@ -1539,6 +1548,15 @@ thead.print, .print-note { display: none; }
       if (performance.now() - t0 > 600) { ended = true; done(); return; }  // no transitionend
       requestAnimationFrame(follow);
     })();
+  }
+  // Show all offered on the cards of a file whose text, cut to its first
+  // lines, has more than those: measured at the width they have now.
+  function fitCards(file) {
+    file.querySelectorAll(".card .body.clamped").forEach(function (body) {
+      if (!body.offsetParent) return;  // not laid out: measured when it is
+      var more = body.parentElement.querySelector(".more");
+      if (more) more.hidden = body.scrollHeight <= body.clientHeight + 1;
+    });
   }
   // The height of a card's text cut to its first lines.
   function clampedHeight(body) {
@@ -2180,6 +2198,7 @@ thead.print, .print-note { display: none; }
       document.querySelectorAll("details.file").forEach(function (file) {
         var table = file.querySelector("table");
         if (table) applyWidths(table);
+        fitCards(file);  // before the cards are placed: a button makes one taller
         layoutNotes(file);
         drawLinks(file);
         if (!dragging) placeResizers(file);  // not the one held

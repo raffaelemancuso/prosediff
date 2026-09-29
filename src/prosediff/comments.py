@@ -33,13 +33,19 @@ ANY_PLACEHOLDER = re.compile(f"{PLACEHOLDER.pattern}|{END_PLACEHOLDER.pattern}")
 COMMENT_MARK = "\N{SPEECH BALLOON}"
 
 
+BALLOON = (
+    "M3 1.5h10A1.5 1.5 0 0 1 14.5 3v7a1.5 1.5 0 0 1-1.5 1.5H7.2L3.5 "
+    "14.5v-3H3A1.5 1.5 0 0 1 1.5 10V3A1.5 1.5 0 0 1 3 1.5Z"
+)
+
+
 def balloon(kind: str, sign: str) -> Markup:
     """A comment's balloon holding a sign, one glyph (no character draws it;
-    a squared NEW is unreadable at the size of the text)."""
+    a squared NEW is unreadable at the size of the text); under it, its
+    shape again, drawn only as the ring round it when it is pinned."""
     return Markup(
         f'<svg class="{kind}-comment" viewBox="0 0 16 16" aria-hidden="true">'
-        '<path d="M3 1.5h10A1.5 1.5 0 0 1 14.5 3v7a1.5 1.5 0 0 1-1.5 1.5H7.2L3.5 '
-        '14.5v-3H3A1.5 1.5 0 0 1 1.5 10V3A1.5 1.5 0 0 1 3 1.5Z"/>'
+        f'<path class="ring" d="{BALLOON}"/><path d="{BALLOON}"/>'
         f'<path class="sign" d="{sign}"/></svg>'
     )
 

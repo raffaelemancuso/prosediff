@@ -408,16 +408,16 @@ its ⓘ; in a drop-down list, on an item to learn what it means): Word and
 OpenDocument tracked changes, the comments (markers, text or none), the
 document language (`default`: the one Word and OpenDocument files mark, the
 others guessed; `document`; `guess`, guessed from each file; or a code such
-as `it`), which splits sentences and hyphenates lines, and a switch to
-ignore whitespace.
+as `it`), which splits sentences and hyphenates lines, a switch to ignore
+whitespace, and how prose is compared ("Compare by": paragraphs, sentences
+or both, the default).
 
-Below it, **Advanced settings…** opens the rest in a window of its own,
-beside the main one (Close, or Escape, hides it again; what it holds
-applies to the next comparison). Its **Report** card: how prose is compared ("Compare by": paragraphs,
-sentences or both, the default), context lines or whole files, the
-alignment of wrapped lines, whether passages moved within or between
-paragraphs are followed too ("Moved passages"), and comments without text.
-Then the settings few need to change: how alike a paragraph and a sentence must stay to
+The **Advanced settings** button, in the bar at the bottom, opens the rest
+in a window of its own, beside the main one (Close, or Escape, hides it
+again; what it holds applies to the next comparison). Its **Report** card:
+context lines or whole files, the alignment of wrapped lines, whether
+passages moved within or between paragraphs are followed too ("Moved
+passages"), and comments without text. Then the settings few need to change: how alike a paragraph and a sentence must stay to
 count as moved and how that is measured (a threshold and an algorithm for
 each, "Moved paragraphs" and "Moved sentences"); how moved passages are
 told from chance likeness, the same as the `--passage-*` options, each

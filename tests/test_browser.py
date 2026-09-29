@@ -842,6 +842,25 @@ def test_a_fold_moves_down_below_the_cards(browser, tmp_path):
     page.context.close()
 
 
+def test_show_all_only_when_the_text_runs_past_its_lines(browser, tmp_path):
+    """A card's text is cut to its first lines only when it runs past them
+    at the margin's width: a comment that fits in a wide margin has no Show
+    all, and gets one in a narrow one."""
+    old, new = tmp_path / "a.md", tmp_path / "b.md"
+    old.write_text("One line.\n", encoding="utf-8")
+    text = " ".join(["A remark of some length on this line."] * 8)  # about 300 characters
+    new.write_text(f'One line.[{text}]{{.comment-start id="1" author="A"}}\n', encoding="utf-8")
+    page = open_report(browser, tmp_path, compare_paths(old, new))
+    more = page.locator(".card .more")
+    for width, shown in ((900, False), (200, True)):
+        page.evaluate(f"localStorage.setItem('prosediff-notes-width', '{width}')")
+        page.reload()
+        page.wait_for_timeout(100)
+        assert more.is_visible() is shown, width
+    page.evaluate("localStorage.removeItem('prosediff-notes-width')")
+    page.context.close()
+
+
 def test_columns_resized_by_dragging_their_handles(page):
     """The line between the old and the new version, and the margin's edge,
     are handles: dragged, they resize the columns, remembered across a
