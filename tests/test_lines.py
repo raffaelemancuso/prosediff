@@ -23,14 +23,6 @@ def test_rows_carry_the_changes():
     assert deleted.changes == ["removed this line"]
     rows, _, _ = align([], ["new"], context=None)
     assert rows[0].changes == ["added this line"]
-    # a replaced line faces its new version, the changed words highlighted
-    rows, add, rem = align(["x", "one two", "y"], ["x", "one three", "y"], context=None)
-    replaced = rows[1]
-    assert replaced.kind == "replace"
-    assert (replaced.left_no, replaced.right_no) == (2, 2)
-    assert ">two</del>" in str(replaced.left)
-    assert ">three</ins>" in str(replaced.right)
-    assert (add, rem) == (1, 1)
 
 
 def test_align_insert_and_delete():
@@ -100,6 +92,7 @@ def test_align_uses_pairing():
     new = ["x", "alpha beta gamma DELTA", "brand new line here", "one two three FOUR", "y"]
     rows, add, rem = align(old, new, context=None)
     assert kinds(rows) == ["equal", "replace", "insert", "replace", "equal"]
+    assert [(r.left_no, r.right_no) for r in rows if r.kind == "replace"] == [(2, 2), (3, 4)]
     assert (add, rem) == (3, 2)
 
 

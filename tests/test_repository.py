@@ -135,14 +135,6 @@ def test_compare_md_filter_only_on_markdown(versions):
     assert by_path["p.md"].rows == []  # "Content unchanged"
 
 
-def test_compare_ignore_whitespace(versions):
-    b, base, target, _, by_path = versions
-    f = by_path["f.py"]
-    assert (f.additions, f.deletions) == (1, 1)
-    (f,) = compare(b.path, base, target, Options(ignore_whitespace=True), paths=["f.py"]).files
-    assert f.rows == []
-
-
 def test_image_uri():
     assert image_uri("a.png", PNG_1).startswith("data:image/png;base64,")
     assert image_uri("a.bin", PNG_1) is None

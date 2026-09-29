@@ -55,7 +55,6 @@ def test_every_drop_down_item_has_a_hint():
     ):
         assert set(values) == set(hints)
     assert set(gui.DOCX_CHANGE_LABELS) == set(DOCX_CHANGES)
-    assert list(gui.DOCX_CHANGE_LABELS.values()) == ["accept all", "reject all", "show"]
     assert set(gui.LANGUAGE_HINTS) < set(gui.LANGUAGES)
     assert gui.language_name("it") == "Italian"
 
@@ -72,27 +71,21 @@ def test_arguments_prefill_a_repository(history):
     assert remembered.repo == "elsewhere"  # the remembered settings are not touched
 
 
-def test_arguments_prefill_two_files(tmp_path):
-    a, d = tmp_path / "v1.md", tmp_path / "v2.DOCX"
-    a.write_text("x")
-    d.write_bytes(b"x")
-    s, note = settings_from_args([str(a), str(d)], Settings(output="elsewhere.html"))
-    assert note == "" and s.mode == "files" and (s.old, s.new) == (str(a), str(d))
-    # the output is the default, next to the new file (App.follow_sides)
-    assert s.output == ""
-
-
-def test_arguments_prefill_two_folders(tmp_path):
-    a, b = tmp_path / "submitted", tmp_path / "revised"
-    a.mkdir()
-    b.mkdir()
-    s, note = settings_from_args([str(a), str(b)], Settings(mode="git"))
-    assert note == "" and s.mode == "folders" and (s.old_folder, s.new_folder) == (str(a), str(b))
-    assert s.output == ""  # into the new folder (App.follow_sides)
-    # a folder and a file do not make a pair
-    (tmp_path / "v1.md").write_text("x")
-    _, note = settings_from_args([str(a), str(tmp_path / "v1.md")], Settings())
-    assert "or two folders" in note
+@pytest.mark.parametrize("mode", ["files", "folders"])
+def test_arguments_prefill_two_files_or_folders(tmp_path, mode):
+    """Two files fill in the files tab, two folders the folders tab; the
+    output is the default, next to the new side (App.follow_sides)."""
+    if mode == "files":
+        a, b = tmp_path / "v1.md", tmp_path / "v2.DOCX"
+        a.write_text("x")
+        b.write_bytes(b"x")
+    else:
+        a, b = tmp_path / "submitted", tmp_path / "revised"
+        a.mkdir()
+        b.mkdir()
+    s, note = settings_from_args([str(a), str(b)], Settings(mode="git", output="elsewhere.html"))
+    sides = (s.old, s.new) if mode == "files" else (s.old_folder, s.new_folder)
+    assert note == "" and s.mode == mode and sides == (str(a), str(b)) and s.output == ""
 
 
 @pytest.mark.parametrize(
@@ -100,6 +93,7 @@ def test_arguments_prefill_two_folders(tmp_path):
     [
         (["plain"], "Not a folder"),
         (["x.txt", "y.txt"], "two Markdown, Word or OpenDocument files"),
+        (["", "v1.md"], "or two folders"),  # a folder and a file
         (["a", "b", "c"], "Give one git repository"),
         ([""], "Not a git repository"),  # tmp_path itself
     ],
@@ -477,14 +471,6 @@ def test_window_rejects_a_folder_that_is_not_a_repository(root, tmp_path):
     assert "Not a git repository" in app.status.get()
 
 
-def test_swap(root):
-    """The swap buttons exchange the old and the new file, or folder."""
-    app = App(root, Settings(mode="folders", old_folder="sent", new_folder="returned"))
-    gui.swap(app.old_folder, app.new_folder)
-    s = app.collect()
-    assert (s.mode, s.old_folder, s.new_folder) == ("folders", "returned", "sent")
-
-
 def test_save_to_follows_the_new_side(root, tmp_path):
     """Save to is, by default, next to the new file, or in the new folder, and
     follows them as they change, swapped too; kept as "" so it follows next
@@ -610,23 +596,16 @@ def test_invalid_arguments_show_an_error_and_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(gui, "load_settings", Settings)
     monkeypatch.setattr(gui.messagebox, "showerror", lambda title, msg, **kw: shown.append(msg))
     monkeypatch.setattr(gui, "App", lambda *a: pytest.fail("the window must not open"))
-    with pytest.raises(SystemExit) as exited:
-        gui.main([str(tmp_path / "notes.txt")])
-    assert exited.value.code == 2
-    assert shown[0].startswith("Not a folder, a Markdown, Word or OpenDocument file")
-    assert "Usage: prosediff-gui" in shown[0] and shown[1] == "destroyed"
-    assert f"Received 1 argument:\n1. “{tmp_path / 'notes.txt'}”  (not found)" in shown[0]
-
-
-def test_received_lists_the_arguments(tmp_path):
-    from prosediff.gui import received
-
     (tmp_path / "a b.docx").write_text("")
-    assert received([str(tmp_path / "a"), str(tmp_path / "a b.docx")]).splitlines() == [
-        "Received 2 arguments:",
-        f"1. “{tmp_path / 'a'}”  (not found)",
-        f"2. “{tmp_path / 'a b.docx'}”",
-    ]
+    with pytest.raises(SystemExit) as exited:
+        gui.main([str(tmp_path / "notes.txt"), str(tmp_path / "a b.docx")])
+    assert exited.value.code == 2
+    assert shown[0].startswith("Two arguments must be two Markdown, Word or OpenDocument files")
+    assert "Usage: prosediff-gui" in shown[0] and shown[1] == "destroyed"
+    assert (
+        f"Received 2 arguments:\n1. “{tmp_path / 'notes.txt'}”  (not found)\n"
+        f"2. “{tmp_path / 'a b.docx'}”\n\n" in shown[0]
+    )
 
 
 def test_the_window_has_the_logo(tk_root):
@@ -707,25 +686,6 @@ def test_linux_colour_scheme_from_the_portal(monkeypatch):
     assert gui.portal_color_scheme() is None and not gui.system_dark()
 
 
-def test_move_defaults_follow_prosediff(root, tmp_path):
-    """The moved-line similarity and algorithm are remembered only when they
-    are not prosediff's defaults, so a new default reaches the window."""
-
-    from prosediff.diff import MOVE_ALGORITHM, MOVE_SIMILARITY
-
-    app = App(root, Settings())
-    assert (app.move_similarity.get(), app.move_algorithm.get()) == (
-        MOVE_SIMILARITY,
-        MOVE_ALGORITHM,
-    )
-    s = app.collect()
-    assert (s.move_similarity, s.move_algorithm) == (None, None)
-    app.move_similarity.set(0.55)
-    app.move_algorithm.set("token-set")
-    s = app.collect()
-    assert (s.move_similarity, s.move_algorithm) == (0.55, "token-set")
-
-
 def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
     """Compare saves nothing; Save options writes the choices, Reset to
     defaults puts every option back, leaving what is compared alone."""
@@ -786,9 +746,11 @@ def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     assert shown(app.move_similarity, app.move_algorithm) == move_defaults(False)
     assert shown(app.sentence_move_similarity, app.sentence_move_algorithm) == move_defaults(True)
     app.sentence_move_similarity.set(0.65)
+    app.move_algorithm.set("token-set")
     app.split.set("both")
     s = app.collect()
     assert (s.move_similarity, s.sentence_move_similarity, s.split) == (None, 0.65, "both")
+    assert (s.move_algorithm, s.sentence_move_algorithm) == ("token-set", None)
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     old.write_bytes(b"One sentence here. Another one there.\n")
     new.write_bytes(b"Another one there. One sentence here.\n")

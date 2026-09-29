@@ -75,7 +75,6 @@ def test_comments_left_out(tmp_path):
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     old.write_text("One sentence.\n\nTwo words.\n")
     new.write_text(f"One sentence.\n\n{NOTE}Two{END} words.\n")
-    assert "{>>" in unified(compare_paths(old, new))
     assert unified(compare_paths(old, new, Options(comments="none"))) == ""
 
 

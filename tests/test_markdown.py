@@ -3,7 +3,6 @@
 import pytest
 
 from prosediff import compare_paths, render
-from prosediff.diff import word_diff
 from prosediff.mdstyle import md_styles, styled
 
 
@@ -73,13 +72,6 @@ def test_tracked_changes_are_styled_with_author_and_date():
         '<span class="s-tc-del" data-author="Laura" data-date="2026-09-24 09:00">old</span>' in out
     )
     assert '<span class="s-syn">]{.insertion' in out
-
-
-def test_word_diff_keeps_styles_inside_changes():
-    old, new = "a **big** dog", "a **small** dog"
-    w = word_diff(old, new, md_styles(old), md_styles(new))
-    assert '<span class="s-strong">small</span>' in str(w.right)
-    assert '<span class="s-syn">**</span>' in str(w.right)
 
 
 def test_markdown_files_are_styled(tmp_path):

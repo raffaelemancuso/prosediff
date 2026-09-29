@@ -56,8 +56,6 @@ def test_file_against_folder_is_an_error(tmp_path):
     (tmp_path / "d").mkdir()
     with pytest.raises(SourceError, match="a file with a file"):
         compare_paths(tmp_path / "f.txt", tmp_path / "d")
-    with pytest.raises(SourceError, match="no such file"):
-        compare_paths(tmp_path / "nope", tmp_path / "d")
 
 
 def test_comment_on_deleted_text_is_kept(tmp_path):

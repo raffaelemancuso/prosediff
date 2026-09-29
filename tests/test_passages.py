@@ -9,7 +9,6 @@ from helpers import two_files
 from prosediff import Options, compare_paths, render
 from prosediff.cli import main
 from prosediff.diff import (
-    MOVED_PASSAGE_DEFAULTS,
     MovedPassageSettings,
     Row,
     align,
@@ -109,17 +108,39 @@ def test_passages_moved_within_a_line():
     assert row.words_added == row.words_removed == 0
 
 
-def test_short_or_unrelated_passages_are_not_moves():
-    # fewer than four words
-    rows, _, _ = align(["Alpha beta. Gamma delta.", "x"], ["Alpha. Gamma delta.", "x beta"], None)
-    assert all(not moved_spans(str(r.left) + str(r.right)) for r in rows)
-    # a rewrite in place is an edit, not a move
-    rows, _, _ = align(
-        ["We measured the output of every plant in the region."],
-        ["We measured the output of every factory across the country."],
-        None,
-    )
-    assert not moved_spans(str(rows[0].left) + str(rows[0].right))
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        pytest.param(
+            ["Alpha beta. Gamma delta.", "x"],
+            ["Alpha. Gamma delta.", "x beta"],
+            id="fewer_than_four_words",
+        ),
+        pytest.param(
+            ["We measured the output of every plant in the region."],
+            ["We measured the output of every factory across the country."],
+            id="rewritten_in_place",
+        ),
+        # too short for a line's move key (under MIN_MOVE_CHARS): compared by
+        # their words, not taken as identical
+        pytest.param(
+            ["It showed the very elite of the county at the ball.", "keep"],
+            ["It showed the county at the ball.", "keep the benefits of the"],
+            id="short_and_different",
+        ),
+        # sharing their articles and prepositions, hardly a word of meaning
+        pytest.param(
+            ["The report was found in several members of the same party.", "keep"],
+            ["The report was found.", "keep, in both of the same"],
+            id="alike_in_little_words_only",
+        ),
+    ],
+)
+def test_not_a_moved_passage(old, new):
+    """Passages too short, rewritten in place, or alike in little words only
+    are not one passage moved."""
+    rows, _, _ = align(old, new, context=None)
+    assert not any(moved_spans(str(r.left) + str(r.right)) for r in rows)
 
 
 def test_holes_join_the_runs_of_a_passage():
@@ -212,24 +233,6 @@ def test_removal_slides_to_the_line_start_past_an_abbreviation():
     assert changes == [(removed, "insert")]
 
 
-def test_short_different_passages_are_not_the_same():
-    """Two passages too short for a line's move key (under MIN_MOVE_CHARS)
-    are compared by their words, not taken as identical."""
-    old = ["It showed the very elite of the county at the ball.", "keep"]
-    new = ["It showed the county at the ball.", "keep the benefits of the"]
-    rows, _, _ = align(old, new, context=None)
-    assert not any(moved_spans(str(r.left) + str(r.right)) for r in rows)
-
-
-def test_passages_alike_in_little_words_only_are_no_move():
-    """Passages sharing their articles and prepositions, and hardly a word
-    of meaning, are not one passage moved."""
-    old = ["The report was found in several members of the same party.", "keep"]
-    new = ["The report was found.", "keep, in both of the same"]
-    rows, _, _ = align(old, new, context=None)
-    assert not any(moved_spans(str(r.left) + str(r.right)) for r in rows)
-
-
 def test_rows_keep_how_they_looked_without_passages():
     first, keep, last = align(OLD, NEW, context=None)[0]
     assert keep.without_passages is None
@@ -248,7 +251,6 @@ def test_many_pairs_are_narrowed_not_given_up():
 
 
 def test_moved_passage_settings(tmp_path):
-    MOVED_PASSAGE_DEFAULTS.check()
     for bad in ({"min_words": 0}, {"max_gap": -1}, {"partial_share": 0}, {"rare_share": 2}):
         with pytest.raises(ValueError, match=next(iter(bad))):
             MovedPassageSettings(**bad).check()

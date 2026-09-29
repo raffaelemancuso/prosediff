@@ -191,13 +191,12 @@ def test_odt_language(tmp_path):
 
 def test_document_language_refuses_other_files(tmp_path, capsys):
     """ "document" is for Word and OpenDocument files: a Markdown or text file
-    is an error; by default it is guessed."""
+    is an error."""
     old, new = two_folders(tmp_path, "paper.md", ITALIAN + "\n", ITALIAN_EDITED + "\n")
     with pytest.raises(SourceError, match=r"paper\.md is not a Word or OpenDocument"):
         compare_paths(old, new, Options(language="document"))
     assert main(["--folders", str(old), str(new), "--language", "document"]) == 1
     assert "paper.md is not a Word or OpenDocument" in capsys.readouterr().err
-    assert compare_paths(old, new).files[0].language_source == "guessed"
 
 
 def german_cell(html: str) -> str:

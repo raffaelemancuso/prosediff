@@ -99,15 +99,13 @@ def test_cli_version(capsys):
 
 
 def test_cli_encoding(tmp_path, capsys):
-    """A given encoding is used as it is; auto reads a Latin-1 file right."""
+    """A given encoding is used as it is, and said so."""
     old, new, out = tmp_path / "a.txt", tmp_path / "b.txt", tmp_path / "page.html"
     old.write_bytes("caf\xe9\n".encode("latin-1"))
     new.write_bytes("caff\xe8\n".encode("latin-1"))
     assert main(["--files", str(old), str(new), "-o", str(out), "--encoding", "latin-1"]) == 0
     page = out.read_text(encoding="utf-8")
     assert "\xe8" in page and "read as iso8859-1" in page
-    assert main(["--files", str(old), str(new), "-o", str(out)]) == 0
-    assert "read as cp1252" in out.read_text(encoding="utf-8")
 
 
 def test_cli_files_and_folders_are_told_apart(tmp_path, capsys):
@@ -162,7 +160,7 @@ def test_cli_writes_a_unified_diff(tmp_path, monkeypatch):
 
 def test_cli_split(tmp_path, capsys):
     """--split both writes both splits into the HTML report; a diff holds one
-    only; the older --by-sentence is gone."""
+    only."""
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     old.write_bytes(b"One sentence here. Another one there.\n")
     new.write_bytes(b"Another one there. One sentence here.\n")

@@ -51,8 +51,8 @@ def page(tmp_path_factory):
 
 def test_render_side_by_side(page):
     """A self-contained page, its content and commit subjects escaped, the
-    changes without tooltips (the highlighting says it), and a footer that
-    names the program."""
+    changes without tooltips (the highlighting says it), counts with
+    thousand separators, and a footer that names the program."""
     html = page[4]
     assert html.startswith("<!DOCTYPE html>")
     assert '<tr class="replace' in html
@@ -65,6 +65,7 @@ def test_render_side_by_side(page):
     assert "<script>x</script>" not in html
     assert "&lt;script&gt;x&lt;/script&gt;" in html
     assert "first &lt;draft&gt;" in html
+    assert "+1,500" in html
     footer = re.search(r"<footer>(.*?)</footer>", html, re.S).group(1)
     assert 'by <a href="https://github.com/raffaelemancuso/prosediff">prosediff</a>' in footer
 
@@ -94,10 +95,6 @@ def test_view_label_only_for_prose(page, tmp_path):
         '<span class="view-label" title="The prose compared paragraph by paragraph">'
         "<b>Paragraph view</b></span>"
     ) in html
-
-
-def test_render_thousand_separators(page):
-    assert "+1,500" in page[4]
 
 
 def test_moved_rendered(page):

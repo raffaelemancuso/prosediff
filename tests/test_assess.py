@@ -293,14 +293,19 @@ def test_cli_assess_writes_the_report(tmp_path, monkeypatch, capsys):
     assert "--assess goes in the HTML report" in capsys.readouterr().err
 
 
-def test_cli_refuses_what_makes_no_sense(tmp_path, capsys):
+@pytest.mark.parametrize(
+    "args,message",
+    [
+        (["--assess", "ollama"], "--assess: 'ollama': give the model too"),
+        (["--assess-effort", "high"], "go with --assess"),
+        (["--assess-ai-writing"], "go with --assess"),
+    ],
+)
+def test_cli_refuses_what_makes_no_sense(tmp_path, capsys, args, message):
     old, new = two_files(tmp_path, "a\n", "b\n")
     with pytest.raises(SystemExit):
-        main(["--files", str(old), str(new), "--assess", "ollama"])
-    assert "--assess: 'ollama': give the model too" in capsys.readouterr().err
-    with pytest.raises(SystemExit):
-        main(["--files", str(old), str(new), "--assess-effort", "high"])
-    assert "go with --assess" in capsys.readouterr().err
+        main(["--files", str(old), str(new), *args])
+    assert message in capsys.readouterr().err
 
 
 def test_cli_lists_the_models_an_ai_reports(monkeypatch, capsys):
@@ -401,10 +406,3 @@ def test_the_ai_is_asked_apart_whether_the_new_text_reads_as_ai_written(tmp_path
     assert 'data-drawer="writing"' in html and '<aside class="drawer" id="writing"' in html
     assert '<span class="verdict verdict-possibly">Possibly</span>' in html
     assert "an indication, not a proof" in html
-
-
-def test_cli_ai_writing_goes_with_assess(tmp_path, capsys):
-    old, new = two_files(tmp_path, "One line.\n", "Two lines.\n")
-    with pytest.raises(SystemExit):
-        main(["--files", str(old), str(new), "--assess-ai-writing"])
-    assert "go with --assess" in capsys.readouterr().err

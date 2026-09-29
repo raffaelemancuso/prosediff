@@ -1,9 +1,9 @@
 """Footnote numbers set aside: a renumbered footnote is no change."""
 
-from helpers import strip_tags
+from helpers import NOTE, strip_tags
 
 from prosediff import Options, compare_paths, render
-from prosediff.diff import footnote_similarity
+from prosediff.diff import PLACEHOLDER, footnote_similarity
 from prosediff.footnotes import STAND_IN, match_footnotes, set_aside
 
 NOTES = {
@@ -87,11 +87,12 @@ def test_reference_without_definition_keeps_its_label():
 
 def test_no_stand_in_left_where_moved_passages_are_hidden(tmp_path):
     """A row with a moved passage keeps how it looked without it, shown when
-    moved passages are hidden: its footnotes get their numbers back too."""
+    moved passages are hidden: its footnotes get their numbers back too, and
+    its comments become markers."""
     sentence = "The committee met twice in March to review the draft budget.[^1]"
     rest = "\n\nkeep\n\nNumbers came."
     old = f"Opening remarks were brief. {sentence} Then everyone left.[^2]{rest}\n"
-    new = f"Opening remarks were brief. Then everyone left.[^2]{rest} {sentence}\n"
+    new = f"Opening remarks{NOTE} were brief. Then everyone left.[^2]{rest} {sentence}\n"
     notes = "\n[^1]: The first note.\n\n[^2]: The second note.\n"
     (tmp_path / "old.md").write_text(old + notes)
     (tmp_path / "new.md").write_text(new + notes)
@@ -100,4 +101,4 @@ def test_no_stand_in_left_where_moved_passages_are_hidden(tmp_path):
     assert any(r.without_passages for r in f.rows)
     html = render(c)
     assert 'class="pv-off"' in html
-    assert not STAND_IN.search(html)
+    assert not STAND_IN.search(html) and not PLACEHOLDER.search(html)
