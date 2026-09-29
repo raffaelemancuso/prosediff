@@ -4,9 +4,13 @@
 
 The page is photographed by Playwright's Chromium (uv run playwright
 install chromium, once); the window by Pillow, which needs a desktop: the window
-shows on screen for a moment. The demo text and its authors are made up.
+shows on screen for a moment. The demo text is part of the introduction of
+the lme4 paper (CC BY 3.0), revised with made-up changes, authors and
+comments.
 With --assess (e.g. claude), the AI named really assesses the demo's changes,
-once: the report photographed whole (screenshot_page.png) then holds its
+once, its assessment kept in screenshot_assessment.json and used again, the AI
+not asked, until the demo text changes (or with --reassess): the report
+photographed whole (screenshot_page.png) then holds its
 verdict and the problems it marked, one pinned; its assessment, opened in
 its drawer, and a paragraph with its marks are photographed apart too
 (screenshot_assessment.png, screenshot_marks.png). Without it, the report
@@ -16,10 +20,13 @@ are.
 
 import argparse
 import ctypes
+import hashlib
+import json
 import sys
 import tempfile
 import time
 import tkinter as tk
+from dataclasses import asdict
 from pathlib import Path
 
 import git
@@ -27,71 +34,98 @@ from PIL import ImageGrab
 from playwright.sync_api import sync_playwright
 
 from prosediff import compare, render
-from prosediff.assess import AssessRequest
+from prosediff.assess import Annotation, Assessment, AssessRequest
 from prosediff.gui import App, Settings
 from prosediff.render import assess_comparison
 
 DOCS = Path(__file__).parent
 # The demo sits in a temporary folder, whose path names the user: the report
 # and the window show this one instead.
-SHOWN_PATH = r"C:\Users\me\books\wonderland"
+SHOWN_PATH = r"C:\Users\me\papers\lme4"
+# The AI's assessment of the demo, kept so the screenshots can be taken again
+# without asking it: the demo it assessed named by a hash of its text.
+CACHE = DOCS / "screenshot_assessment.json"
 
 
 def note(text: str, author: str, date: str, cid: int) -> str:
     return f'[{text}]{{.comment-start id="{cid}" author="{author}" date="{date}T10:15:00Z"}}'
 
 
-# From Lewis Carroll, Alice's Adventures in Wonderland (1865, public domain):
-# the opening of Chapter I and a line of Chapter II, lightly edited on the
-# second side.
-OLD = f"""# Alice's Adventures in Wonderland
+# From Bates, Mächler, Bolker and Walker, "Fitting Linear Mixed-Effects Models
+# Using lme4", Journal of Statistical Software 67(1), 2015,
+# doi:10.18637/jss.v067.i01, CC BY 3.0: part of Section 1, shortened. The second
+# side is a made-up revision whose changes alter the meaning and bring in
+# errors (a claim the paper contradicts, the two packages' roles swapped, the
+# sleep restriction and the unit of time changed, an overclaim, a typo), for
+# the AI to find; its authors and comments are made up too.
+OLD = f"""# Fitting Linear Mixed-Effects Models Using lme4
 
-## Down the Rabbit-Hole
+## Introduction
 
-Alice was beginning to get very tired of sitting by her sister on the bank, and of \
-having nothing to do: once or twice she had peeped into the book her sister was reading, \
-but it had no pictures or conversations in it, "and what is the use of a book," thought \
-Alice "without pictures or conversations?"\
-{note("Keep the original punctuation here.", "Anna Keller", "2026-09-10", 1)}
+The lme4 package (Bates, Maechler, Bolker, and Walker 2015) for R (R Core Team 2015) \
+provides functions to fit and analyze linear mixed models, generalized linear mixed \
+models and nonlinear mixed models. In each of these names, the term "mixed" or, more \
+fully, "mixed effects", denotes a model that incorporates both fixed- and random-effects \
+terms in a linear predictor expression from which the conditional mean of the response \
+can be evaluated. In this paper we describe the formulation and representation of \
+linear mixed models. The techniques used for generalized linear and nonlinear mixed \
+models will be described separately, in a future paper.\
+{note("Say which version of lme4 this describes.", "Anna Keller", "2026-09-10", 1)}
 
-So she was considering in her own mind (as well as she could, for the hot day made her \
-feel very sleepy and stupid), whether the pleasure of making a daisy-chain would be worth \
-the trouble of getting up and picking the daisies, when suddenly a White Rabbit with pink \
-eyes ran close by her.
+At present, the main alternative to lme4 for mixed modeling in R is the nlme package \
+(Pinheiro, Bates, DebRoy, Sarkar, and R Core Team 2015). The main features \
+distinguishing lme4 from nlme are (1) more efficient linear algebra tools, giving \
+improved performance on large problems; (2) simpler syntax and more efficient \
+implementation for fitting models with crossed random effects; (3) the implementation \
+of profile likelihood confidence intervals on random-effects parameters; and (4) the \
+ability to fit generalized linear mixed models. The main advantage of nlme relative to \
+lme4 is a user interface for fitting models with structure in the residuals (various \
+forms of heteroscedasticity and autocorrelation) and in the random-effects covariance \
+matrices (e.g., compound symmetric models).
 
-There was nothing so very remarkable in that; nor did Alice think it so very much out of \
-the way to hear the Rabbit say to itself, "Oh dear! Oh dear! I shall be late!"
+## Example
 
-## The Pool of Tears
-
-"Curiouser and curiouser!" cried Alice (she was so much surprised, that for the moment \
-she quite forgot how to speak good English).
+Throughout our discussion of lme4, we will work with a data set on the average reaction \
+time per day for subjects in a sleep deprivation study (Belenky et al. 2003). On day 0 \
+the subjects had their normal amount of sleep. Starting that night they were restricted \
+to 3 hours of sleep per night. The response variable, Reaction, represents average \
+reaction times in milliseconds (ms) on a series of tests given each Day to each Subject.
 """
 
-NEW = f"""# Alice's Adventures in Wonderland
+NEW = f"""# Fitting Linear Mixed-Effects Models Using lme4
 
-## Down the Rabbit-Hole
+## Introduction
 
-Alice was beginning to get rather tired of sitting by her sister on the bank, and of \
-having nothing to do: once or twice she had peeped into the book her sister was reading, \
-but it had no pictures or conversations in it, "and what is the use of a book," thought \
-Alice "without pictures or conversations?"\
-{note("Keep the original punctuation here.", "Anna Keller", "2026-09-10", 7)}
+The lme4 package (Bates, Maechler, Bolker, and Walker 2015) for R (R Core Team 2015) \
+provides functions to fit and analyze linear mixed models, generalized linear mixed \
+models and nonlinear mixed models. In each of these names, the term "mixed" or, more \
+fully, "mixed effects", denotes a model that incorporates both fixed- and random-effects \
+terms in a linear predictor expression from which the conditional mean of the respones \
+can be evaluated. In this paper we describe the formulation and representation of \
+linear, generalized linear and nonlinear mixed models.\
+{note("Say which version of lme4 this describes.", "Anna Keller", "2026-09-10", 7)}
 
-So she was considering in her own mind (as well as she could, for the warm day made her \
-feel very sleepy and stupid), whether the pleasure of making a daisy-chain would be worth \
-the trouble of getting up and picking the daisies, when suddenly a White Rabbit with pink \
-eyes ran close by her.{note("Mention the waistcoat-pocket here?", "Tom Weber", "2026-09-24", 8)}
+At present, the main alternative to lme4 for mixed modeling in R is the nlme package \
+(Pinheiro, Bates, DebRoy, Sarkar, and R Core Team 2015). The main features \
+distinguishing lme4 from nlme are (1) less efficient linear algebra tools, giving \
+improved performance on large problems; (2) simpler syntax and more efficient \
+implementation for fitting models with crossed random effects, which lme4 is now the \
+only package able to fit; (3) the implementation of profile likelihood confidence \
+intervals on random-effects parameters; and (4) the ability to fit generalized linear \
+mixed models. The main advantage of lme4 relative to nlme is a user interface for \
+fitting models with structure in the residuals (various forms of heteroscedasticity and \
+autocorrelation) and in the random-effects covariance matrices (e.g., compound symmetric \
+models). The techniques used for generalized linear and nonlinear mixed models will be \
+described separately, in a future paper.
 
-There was nothing so very remarkable in that; nor did Alice think it so very much out of \
-the way to hear the Rabbit say to itself, "Oh dear! Oh dear! I shall be too late!"
+## Example
 
-Burning with curiosity, she ran across the field after it.
-
-## The Pool of Tears
-
-"Curiouser and curiouser!" cried Alice (she was so much surprised, that for the moment \
-she quite forgot how to speak good English).
+Throughout our discussion of lme4, we will work with a data set on the average reaction \
+time per day for subjects in a sleep deprivation study (Belenky et al. 2003). On day 0 \
+the subjects had their normal amount of sleep. Starting that night they were restricted \
+to 8 hours of sleep per night. The response variable, Reaction, represents average \
+reaction times in seconds (ms) on a series of tests given each Day to each \
+Subject.{note("Should we cite where the data can be found?", "Tom Weber", "2026-09-24", 8)}
 """
 
 
@@ -101,22 +135,43 @@ def demo_repo(root: Path) -> tuple[Path, str]:
         cw.set_value("user", "name", "Anna Keller")
         cw.set_value("user", "email", "anna@example.org")
     for text, message in ((OLD, "First draft"), (NEW, "Revision after Tom's review")):
-        (root / "wonderland.md").write_text(text, encoding="utf-8", newline="\n")
-        repo.index.add(["wonderland.md"])
+        (root / "lme4_paper.md").write_text(text, encoding="utf-8", newline="\n")
+        repo.index.add(["lme4_paper.md"])
         repo.index.commit(message)
     return root, repo.head.commit.hexsha
 
 
-def report(repo: Path, ai: str | None) -> Path:
-    """The demo's HTML report, with the assessment of the AI named, made now
-    (none without one); where it is written."""
+def demo_key(ai: str) -> str:
+    """What an assessment was of: the AI and the demo's two versions."""
+    return hashlib.sha256(f"{ai}\0{OLD}\0{NEW}".encode()).hexdigest()
+
+
+def assessment_of(c, ai: str, again: bool) -> Assessment:
+    """The AI's assessment of the demo: the one kept, when it is of this
+    demo by this AI and not asked again; else asked now, and kept."""
+    if not again and CACHE.is_file():
+        kept = json.loads(CACHE.read_text(encoding="utf-8"))
+        if kept.get("demo") == demo_key(ai):
+            a = kept["assessment"]
+            a["annotations"] = [Annotation(**n) for n in a["annotations"]]
+            print(f"the assessment kept in {CACHE.name}: {ai} not asked")
+            return Assessment(**a)
+    assessment = assess_comparison(c, AssessRequest(ai))
+    if assessment.error:
+        sys.exit(f"the assessment failed: {assessment.error}")
+    kept = {"demo": demo_key(ai), "assessment": asdict(assessment)}
+    CACHE.write_text(
+        json.dumps(kept, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
+    return assessment
+
+
+def report(repo: Path, ai: str | None, again: bool = False) -> Path:
+    """The demo's HTML report, with the assessment of the AI named (the one
+    kept, unless again; none without an AI); where it is written."""
     c = compare(repo, "HEAD~1", "HEAD")
     c.location = SHOWN_PATH
-    assessment = None
-    if ai:
-        assessment = assess_comparison(c, AssessRequest(ai))
-        if assessment.error:
-            sys.exit(f"the assessment failed: {assessment.error}")
+    assessment = assessment_of(c, ai, again) if ai else None
     page_file = repo.parent / "page.html"
     page_file.write_text(render(c, align="justify", assessment=assessment), encoding="utf-8")
     return page_file
@@ -129,10 +184,10 @@ def shoot_page(page_file: Path, out: Path) -> None:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 900}, device_scale_factor=1)
         page.goto(page_file.as_uri())
-        if page.locator(".ai-mark").count():
-            page.locator(".ai-mark").first.click()
+        if page.locator(".ai-mark:visible").count():
+            page.locator(".ai-mark:visible").first.click()
         else:
-            page.locator(".card").first.click()
+            page.locator(".card:visible").first.click()
         # as tall as the page, so the whole of it is in view, margin included
         height = page.evaluate("document.documentElement.scrollHeight")
         page.set_viewport_size({"width": 1280, "height": height + 20})
@@ -162,13 +217,13 @@ def shoot_assessment(page_file: Path, out: Path, marks: Path) -> bool:
         page.screenshot(
             path=str(out), clip={"x": 0, "y": 0, "width": 1280, "height": box["y"] + box["height"]}
         )
-        if not page.locator(".ai-mark").count():
+        if not page.locator(".ai-mark:visible").count():
             print("the AI marked no problem in the text: no screenshot of the marks")
             browser.close()
             return False
         page.keyboard.press("Escape")  # the drawer closed
         page.set_viewport_size({"width": 1280, "height": 2400})
-        mark = page.locator(".ai-mark").first
+        mark = page.locator(".ai-mark:visible").first
         mark.click()
         row = mark.locator("xpath=ancestor::tr").bounding_box()
         stack = mark.locator("xpath=ancestor::tr").locator(".stack").bounding_box()
@@ -211,12 +266,15 @@ def shoot_window(repo: Path, out: Path) -> None:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Remake the README screenshots.")
     ap.add_argument("--assess", metavar="AI", help="photograph a real AI assessment by AI too")
+    ap.add_argument(
+        "--reassess", action="store_true", help=f"ask the AI again, not using {CACHE.name}"
+    )
     args = ap.parse_args()
     written = [DOCS / "screenshot_page.png", DOCS / "screenshot_window.png"]
     # a helper process of the window may still hold the demo folder: left behind
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        repo, _ = demo_repo(Path(tmp) / "wonderland")
-        page_file = report(repo, args.assess)  # the AI asked once, for every shot
+        repo, _ = demo_repo(Path(tmp) / "lme4")
+        page_file = report(repo, args.assess, args.reassess)  # one for every shot
         shoot_page(page_file, written[0])
         shoot_window(repo, written[1])
         if args.assess:

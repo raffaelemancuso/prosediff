@@ -40,9 +40,14 @@ documents are shown and listed.
 compares the two saved versions themselves, so it shows what changed between
 a draft and the one returned whether or not the co-author tracked their
 edits. When they did, the tracked changes are accepted (or rejected, or kept
-as markup) as `--docx-changes` says.
+as markup) as `--docx-changes` says. More than that, **prosediff can put the
+tracked changes back**: from a draft and a version returned without them, it
+writes a copy of the returned Word document (or OpenDocument text) with each
+change a tracked change, to accept or reject one by one in Word or
+LibreOffice, as if Track Changes had been on all along ([Tracked
+changes](#tracked-changes)).
 
-![An HTML report made by prosediff: the AI's verdict in the top bar; below, two versions of the opening of Alice's Adventures in Wonderland side by side, changed words highlighted, and beside them a margin of cards for the comments and the problems the AI marked, one of them pinned, its passage highlighted in the text](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
+![An HTML report made by prosediff: the AI's verdict in the top bar; below, two versions of the introduction of the lme4 paper side by side, the second a revision with errors in it, changed words highlighted, and beside them a margin of cards for the comments and the problems the AI marked, one of them pinned, its passage highlighted in the text](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
 ## Why prosediff
 
@@ -206,7 +211,9 @@ commit's author (else `prosediff`); `--format odt` ("OpenDocument,
 tracked") does the same for two OpenDocument texts, for LibreOffice
 Writer. It is what Word's *Compare* and LibreOffice's *Compare Document*
 make, from prosediff's own pairing of paragraphs and words; neither file
-needs tracked changes of its own. In the window, comparing two files, the two
+needs tracked changes of its own. So a version edited with Track Changes
+off gets its tracked changes back, the draft it came from being all that is
+needed. In the window, comparing two files, the two
 formats are greyed out unless both files are of their kind.
 
 Everything the new file holds is kept as it is: its styles, page setup,
@@ -428,7 +435,8 @@ file in the temporary folder; a file you choose stays).
 Under **AI assessment** (see [AI assessment](#ai-assessment)), the **AI**
 (none, `claude`, `codex`, `ollama`, or another provider any-llm reaches),
 its **Model** and its **Effort**, each list as the AI reports it and its
-own defaults chosen (any name can be typed); what it **Reads**, the changes
+own defaults chosen (any name can be typed; a model that names no default
+effort shows `default`, its own); what it **Reads**, the changes
 and the new version or the changes only; your **Instructions**, typed or
 from a text file; whether the AI marks the problems in the text (on by
 default); and whether the text sent to the AI is put at the end of the
@@ -799,3 +807,12 @@ side-by-side HTML view of a diff it carries over from code to prose.
 
 prosediff was written with the help of [Claude Code](https://claude.com/claude-code),
 Anthropic's AI coding assistant.
+
+The screenshots show part of the introduction of Douglas Bates, Martin
+Mächler, Benjamin M. Bolker and Steven C. Walker, "Fitting Linear
+Mixed-Effects Models Using lme4", *Journal of Statistical Software* 67(1),
+2015, [doi:10.18637/jss.v067.i01](https://doi.org/10.18637/jss.v067.i01),
+licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+The text is shortened, and its second version is a revision made up for the
+demo: its changes, the errors they bring in, and the comments and their
+authors are not the paper's, nor its authors'.
