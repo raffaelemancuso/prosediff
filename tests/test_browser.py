@@ -807,7 +807,7 @@ def test_cards_run_on_down_the_margin(browser, tmp_path):
 def test_a_fold_moves_down_below_the_cards(browser, tmp_path):
     """Cards that run past their row's end never cross the fold of
     unchanged lines below it: the fold moves down, also when a long comment
-    is shown whole."""
+    is shown whole, sliding open and shut, the page staying where it was."""
     lines = [f"Line {k} of the text." for k in range(1, 31)]
     old, new = tmp_path / "a.md", tmp_path / "b.md"
     old.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -822,10 +822,23 @@ def test_a_fold_moves_down_below_the_cards(browser, tmp_path):
         box = card.bounding_box()
         return box["y"] + box["height"] <= fold.bounding_box()["y"]
 
-    assert clear()
+    body = card.locator(".body")
+    assert clear() and "clamped" in body.get_attribute("class")
+    page.set_viewport_size({"width": 1400, "height": 500})
+    page.evaluate("scrollTo(0, document.documentElement.scrollHeight)")  # its end
+    at = page.evaluate("scrollY")
     card.get_by_text("Show all").click()
-    page.wait_for_timeout(100)
+    assert "sliding" in body.get_attribute("class")  # it slides open
+    page.wait_for_function(
+        "!document.querySelector('.card .body').classList.contains('sliding')", timeout=2_000
+    )
     assert card.get_by_text("Show less").is_visible() and clear()
+    assert "clamped" not in body.get_attribute("class") and page.evaluate("scrollY") == at
+    card.get_by_text("Show less").click()
+    page.wait_for_function(
+        "document.querySelector('.card .body').classList.contains('clamped')", timeout=2_000
+    )
+    assert card.get_by_text("Show all").is_visible() and clear()
     page.context.close()
 
 

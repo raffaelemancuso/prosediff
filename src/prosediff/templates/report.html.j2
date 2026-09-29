@@ -105,6 +105,7 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
 .card .body { margin-top: 3px; overflow-wrap: anywhere; }
 .card .body.clamped { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
   overflow: hidden; }
+.card .body.sliding { overflow: hidden; transition: height 0.18s ease; }
 .card .line { display: block; }
 .card .line:empty { height: 0.7em; }
 .card .solution b { font-weight: 600; }
@@ -1501,6 +1502,46 @@ thead.print, .print-note { display: none; }
     }
     return c;
   }
+  // A card's text shown whole (opening) or cut to its first lines again,
+  // its height sliding from one to the other; cut only once it has slid,
+  // the margin laid out anew as it goes.
+  function slide(body, opening) {
+    var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var from = body.offsetHeight;
+    body.classList.remove("clamped");
+    var to = opening ? body.offsetHeight : clampedHeight(body);
+    function done() {
+      body.classList.remove("sliding");
+      body.style.height = "";
+      if (!opening) body.classList.add("clamped");
+      drawAllLinks();
+    }
+    if (still || from === to) { done(); return; }
+    body.style.height = from + "px";
+    body.classList.add("sliding");
+    body.offsetHeight;  // the start height laid out, so the change slides
+    body.style.height = to + "px";
+    var ended = false, t0 = performance.now();
+    body.addEventListener("transitionend", function end(e) {
+      if (e.target !== body) return;
+      body.removeEventListener("transitionend", end);
+      ended = true;
+      done();
+    });
+    (function follow() {  // the cards and folds below moving with it
+      drawAllLinks();
+      if (ended) return;
+      if (performance.now() - t0 > 600) { ended = true; done(); return; }  // no transitionend
+      requestAnimationFrame(follow);
+    })();
+  }
+  // The height of a card's text cut to its first lines.
+  function clampedHeight(body) {
+    body.classList.add("clamped");
+    var h = body.offsetHeight;
+    body.classList.remove("clamped");
+    return h;
+  }
   // The mark of a card, in the version of its row shown.
   function markOf(c) {
     var row = c.closest("tr");
@@ -1541,9 +1582,10 @@ thead.print, .print-note { display: none; }
     var more = e.target.closest(".card .more");
     if (more) {
       var body = more.parentElement.querySelector(".body");
-      var open = body.classList.toggle("clamped");
-      more.textContent = open ? "Show all" : "Show less";
-      more.setAttribute("aria-expanded", open ? "false" : "true");
+      var opening = body.classList.contains("clamped");
+      more.textContent = opening ? "Show less" : "Show all";
+      more.setAttribute("aria-expanded", opening ? "true" : "false");
+      slide(body, opening);
       return;
     }
     var c = e.target.closest(".card");
@@ -2126,6 +2168,10 @@ thead.print, .print-note { display: none; }
     linksPending = true;
     requestAnimationFrame(function () {
       linksPending = false;
+      // laid out anew, the files are shorter for a moment (layoutNotes takes
+      // their room away first), which would pull the page up to their end:
+      // it is put back where it was, before anything is painted
+      var x = window.scrollX, y = window.scrollY;
       document.querySelectorAll("details.file").forEach(function (file) {
         var table = file.querySelector("table");
         if (table) applyWidths(table);
@@ -2133,6 +2179,7 @@ thead.print, .print-note { display: none; }
         drawLinks(file);
         if (!dragging) placeResizers(file);  // not the one held
       });
+      if (window.scrollY !== y || window.scrollX !== x) window.scrollTo(x, y);
     });
   }
   drawAllLinks();
