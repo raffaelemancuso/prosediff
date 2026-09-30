@@ -149,13 +149,39 @@ def fix_of(line: str, place: Place, note: Annotation) -> list | None:
         return keep[i - 1] + 1 if i > 0 else place.o1
 
     edits = []
-    for op, a1, a2, b1, b2 in word_ops(passage, note.replacement):
-        if op == "equal":
-            continue
+    for a1, a2, b1, b2 in whole_words(passage, note.replacement):
         start = at(a1)
         end = after(a2) if a2 > a1 else start
         edits.append((start, end, note.replacement[b1:b2]))
     return edits[::-1] or None
+
+
+def whole_words(a: str, b: str) -> list[tuple[int, int, int, int]]:
+    """The changes from a to b (word_ops), each widened to the whole words it
+    touches, those that then meet made one: (a1, a2, b1, b2). A number is
+    several of word_ops' words ("39", ".", "2"): 39.2 made 19.6 is then one
+    change, not "39" to "19" and "2" to "6"."""
+
+    def word(c: str) -> bool:
+        return not c.isspace()
+
+    out: list[list[int]] = []
+    for op, a1, a2, b1, b2 in word_ops(a, b):
+        if op == "equal":
+            continue
+        # a change starting (ending) inside a word takes the rest of it; the
+        # words before and after are alike on both sides, so both widen alike
+        first = a[a1] if a2 > a1 else b[b1]
+        last = a[a2 - 1] if a2 > a1 else b[b2 - 1]
+        while a1 > 0 and b1 > 0 and word(first) and word(a[a1 - 1]):
+            a1, b1 = a1 - 1, b1 - 1
+        while a2 < len(a) and b2 < len(b) and word(last) and word(a[a2]):
+            a2, b2 = a2 + 1, b2 + 1
+        if out and a1 <= out[-1][1]:
+            out[-1][1], out[-1][3] = max(out[-1][1], a2), max(out[-1][3], b2)
+        else:
+            out.append([a1, a2, b1, b2])
+    return [tuple(c) for c in out]
 
 
 # Word ---------------------------------------------------------------------------

@@ -56,12 +56,18 @@ def test_passages_found_as_the_report_finds_them():
 
 
 def test_a_fix_is_its_words_changed():
-    """A fix is the words the replacement changes, from the last; none over
-    two paragraphs, or when nothing changes."""
+    """A fix is the words the replacement changes, whole, from the last;
+    none over two paragraphs, or when nothing changes."""
     line = "We find a large and significant effect."
     place = locate([line], FIXED)
     assert fix_of(line, place, FIXED) == [(10, 15, "small")]
     assert fix_of(line, Place(0, 8, 1, 3), FIXED) is None
+    number = Annotation("new", "fallen about", "", "p", "", "fallen about 19.6 m")
+    line2 = "It has fallen about 39.2 m by then."
+    assert fix_of(line2, Place(0, 7, 0, 26), number) == [(20, 24, "19.6")]
+    unit = Annotation("new", "9.81", "", "p", "", "9.81 m/s², whatever")
+    line3 = "about 9.81 m/s, and more"
+    assert fix_of(line3, Place(0, 6, 0, 24), unit) == [(16, 24, "whatever"), (11, 15, "m/s²,")]
     same = Annotation("new", "a large", "", "p", "", "a large")
     assert fix_of(line, locate([line], same), same) is None
 
