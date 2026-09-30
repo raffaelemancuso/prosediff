@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>prosediff</title>
+<meta name="description" content="Side-by-side comparison of Word, OpenDocument and Markdown documents: each paragraph facing the one it came from, moved passages followed even when rewritten, and an AI that reads the changes and marks what the revision got wrong.">
+<meta property="og:title" content="prosediff: a diff for prose, not code">
+<meta property="og:description" content="Compare two versions of a Word document side by side, follow the passages that moved, and have an AI assess the changes.">
+<meta property="og:image" content="https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a manuscript desk. Headings set like a journal, the product's own
+   red/green redline colours as the only accents, one live two-column diff
+   as the hero. */
+:root {
+  --paper: #fbfcfd;
+  --sheet: #ffffff;
+  --ink: #1f2937;
+  --ink-soft: #4b5565;
+  --rule: #dde2ea;
+  --slate: #1f2937;
+  --del: #c0392b;
+  --del-bg: #fde4e1;
+  --del-mark: #f7b8b0;
+  --ins: #16794a;
+  --ins-bg: #ddf5e7;
+  --ins-mark: #a6e3be;
+  --note: #b7791f;
+  --note-bg: #fdf3dc;
+  --link: #1d5bbf;
+  --code-bg: #eef1f5;
+
+  --f-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --f-body: "Public Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+
+  --step-0: 1rem;
+  --step-1: 1.2rem;
+  --step-2: 1.6rem;
+  --step-3: clamp(1.9rem, 1.4rem + 2vw, 2.6rem);
+  --step-4: clamp(2.5rem, 1.6rem + 4vw, 4.2rem);
+  --wrap: 72rem;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12161c; --sheet: #1a2029; --ink: #e6e9ee; --ink-soft: #a8b1bf;
+    --rule: #2d3542; --slate: #0c0f14;
+    --del: #ff8a7d; --del-bg: #3d1f1d; --del-mark: #6b2c27;
+    --ins: #6fdc9f; --ins-bg: #173326; --ins-mark: #1f5a3c;
+    --note: #f2c26b; --note-bg: #3a2e14; --link: #8ab4ff; --code-bg: #222a35;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12161c; --sheet: #1a2029; --ink: #e6e9ee; --ink-soft: #a8b1bf;
+  --rule: #2d3542; --slate: #0c0f14;
+  --del: #ff8a7d; --del-bg: #3d1f1d; --del-mark: #6b2c27;
+  --ins: #6fdc9f; --ins-bg: #173326; --ins-mark: #1f5a3c;
+  --note: #f2c26b; --note-bg: #3a2e14; --link: #8ab4ff; --code-bg: #222a35;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 var(--step-0)/1.6 var(--f-body);
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: var(--link); text-underline-offset: 0.18em; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; border-radius: 4px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; line-height: 1.12; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+code, kbd { font-family: var(--f-mono); font-size: 0.88em; }
+
+.wrap { max-width: var(--wrap); margin-inline: auto; padding-inline: 1.25rem; }
+
+/* Header */
+.top { border-bottom: 1px solid var(--rule); }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 0.9rem; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 0.6rem; color: var(--ink); text-decoration: none; font: 600 1.25rem/1 var(--f-display); }
+.brand img { width: 32px; height: 32px; }
+.top nav { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.95rem; }
+.top nav a { color: var(--ink-soft); text-decoration: none; }
+.top nav a:hover { color: var(--ink); text-decoration: underline; }
+
+/* Hero */
+.hero { padding-block: clamp(2.5rem, 6vw, 4.5rem) clamp(2rem, 5vw, 3.5rem); }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2.5rem; align-items: start; }
+@media (min-width: 60rem) { .hero-grid { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 3.5rem; } }
+.hero h1 { font-size: var(--step-4); letter-spacing: -0.015em; }
+.hero h1 del { color: var(--del); text-decoration-thickness: 0.07em; font-weight: 400; background: var(--del-bg); padding-inline: 0.08em; border-radius: 0.08em; }
+.hero h1 ins { color: var(--ins); text-decoration: none; background: var(--ins-bg); padding-inline: 0.08em; border-radius: 0.08em; }
+.lede { margin-top: 1.25rem; font-size: var(--step-1); color: var(--ink-soft); max-width: 34rem; }
+.lede strong { color: var(--ink); font-weight: 600; }
+
+.install { margin-top: 1.75rem; display: flex; align-items: stretch; max-width: 30rem; border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); overflow: hidden; }
+.install code { flex: 1; min-width: 0; padding: 0.8rem 1rem; font-size: 0.95rem; white-space: nowrap; overflow-x: auto; }
+.install code::before { content: "$ "; color: var(--ink-soft); }
+.install button { border: 0; border-left: 1px solid var(--rule); background: var(--code-bg); color: var(--ink); font: 500 0.88rem var(--f-body); padding-inline: 1rem; cursor: pointer; }
+.install button:hover { background: var(--rule); }
+.hero-links { margin-top: 1rem; display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.95rem; color: var(--ink-soft); }
+
+/* The live diff in the hero */
+.demo { background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; box-shadow: 0 18px 40px -24px rgb(15 23 42 / 0.35); overflow: hidden; }
+.demo-bar { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--rule); font-size: 0.82rem; color: var(--ink-soft); }
+.demo-bar b { font-family: var(--f-mono); font-weight: 500; color: var(--ink); }
+.demo-bar .plus { color: var(--ins); } .demo-bar .minus { color: var(--del); }
+.demo-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.side { padding: 0.9rem 1rem 1rem; min-width: 0; }
+.side + .side { border-left: 1px solid var(--rule); }
+.side-head { font: 600 0.72rem/1 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 0.6rem; }
+.side p { font: 400 1.02rem/1.55 var(--f-display); hyphens: auto; text-align: left; }
+.side p + p { margin-top: 0.7rem; }
+.side .num { font: 400 0.72rem var(--f-mono); color: var(--ink-soft); margin-right: 0.35rem; }
+.d { background: var(--del-mark); border-radius: 2px; }
+.a { background: var(--ins-mark); border-radius: 2px; }
+.mv-from, .mv-to { background: var(--note-bg); box-shadow: inset 0 -2px 0 var(--note); border-radius: 2px; }
+.flag { display: inline-block; min-width: 1.2em; margin-right: 0.15em; font: 700 0.68rem/1.25 var(--f-body); text-align: center; color: var(--sheet); background: var(--note); border-radius: 999px; padding-inline: 0.3em; vertical-align: 0.15em; }
+.verdict { display: inline-flex; align-items: center; gap: 0.45rem; }
+.badge { font: 600 0.75rem/1 var(--f-body); padding: 0.22rem 0.5rem; border-radius: 999px; }
+.badge-mixed { color: var(--note); background: var(--note-bg); border: 1px solid var(--note); }
+.tag-problem { color: var(--note); background: var(--note-bg); }
+.card-ai { border-color: var(--note); }
+.card { margin: 0 1rem 1rem; padding: 0.7rem 0.85rem; border: 1px solid var(--rule); border-radius: 8px; font-size: 0.86rem; line-height: 1.45; }
+.card-head { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; margin-bottom: 0.25rem; }
+.tag { font-size: 0.72rem; font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 999px; }
+.tag-move { color: var(--note); background: var(--note-bg); }
+.who { font-weight: 600; }
+.demo-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+@media (min-width: 40rem) { .demo-cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .demo-cards .card:first-child { margin-right: 0.5rem; } .demo-cards .card:last-child { margin-left: 0.5rem; } }
+@media (max-width: 30rem) { .demo-cols { grid-template-columns: minmax(0, 1fr); } .side + .side { border-left: 0; border-top: 1px solid var(--rule); } }
+
+/* Sections */
+section { padding-block: clamp(3rem, 7vw, 5rem); }
+section + section { border-top: 1px solid var(--rule); }
+.eyebrow { font: 600 0.78rem/1 var(--f-body); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 0.9rem; }
+h2 { font-size: var(--step-3); max-width: 40rem; }
+.intro { margin-top: 1rem; max-width: 42rem; font-size: 1.08rem; color: var(--ink-soft); }
+
+/* Spotlights */
+.spot-alt { background: var(--sheet); }
+.spot-grid { display: grid; gap: 2.5rem; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 60rem) {
+  .spot-grid { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 3.5rem; }
+  .spot-flip > .spot-text { order: 2; }
+}
+.spot-text { min-width: 0; }
+.points { margin: 1.5rem 0 0; padding: 0; list-style: none; display: grid; gap: 0.7rem; max-width: 36rem; }
+.points li { position: relative; padding-left: 1.3rem; }
+.points li::before { content: ""; position: absolute; left: 0; top: 0.62em; width: 0.5rem; height: 0.5rem; border-radius: 2px; background: var(--ins); }
+.spot-figs { display: grid; gap: 2rem; min-width: 0; }
+.spot-fig { min-width: 0; }
+.spot-narrow { max-width: 30rem; }
+
+/* The moved-paragraph example */
+.movedemo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+.md-col { padding: 0.9rem 1rem 1rem; min-width: 0; display: grid; gap: 0.55rem; align-content: start; }
+.md-col + .md-col { border-left: 1px solid var(--rule); }
+.md-head { font: 600 0.72rem/1 var(--f-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+.md-par { font: 400 0.98rem/1.5 var(--f-display); padding: 0.35rem 0.5rem; border-radius: 4px; }
+.md-from, .md-to { background: var(--note-bg); box-shadow: inset 3px 0 0 var(--note); }
+.md-label { display: block; margin-top: 0.3rem; font: 600 0.72rem/1.2 var(--f-body); color: var(--note); }
+@media (max-width: 30rem) { .movedemo { grid-template-columns: minmax(0, 1fr); } .md-col + .md-col { border-left: 0; border-top: 1px solid var(--rule); } }
+
+/* Features */
+.features { margin-top: 2.5rem; display: grid; gap: 2rem 2.5rem; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 44rem) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 64rem) { .features { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.feature { min-width: 0; }
+.feature h3 { font-size: var(--step-1); margin-bottom: 0.45rem; }
+.feature p { color: var(--ink-soft); }
+
+/* Screenshots */
+figure { margin: 0; min-width: 0; }
+figure img { border: 1px solid var(--rule); border-radius: 8px; background: #fff; }
+figcaption { margin-top: 0.7rem; font-size: 0.92rem; color: var(--ink-soft); max-width: 46rem; }
+
+/* Comparison table */
+.table-scroll { margin-top: 2rem; overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); }
+table { border-collapse: collapse; width: 100%; min-width: 40rem; font-size: 0.95rem; }
+th, td { text-align: left; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+thead th { font-weight: 600; background: var(--paper); }
+thead th:last-child, td:last-child { background: var(--ins-bg); }
+td:first-child { font-weight: 500; }
+.yes { color: var(--ins); font-weight: 600; } .no { color: var(--del); } .part { color: var(--note); }
+
+/* Install */
+.install-grid { margin-top: 2rem; display: grid; gap: 2rem; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 52rem) { .install-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.install-grid > div { min-width: 0; }
+.install-grid h3 { font-size: var(--step-1); margin-bottom: 0.6rem; }
+.install-grid p { color: var(--ink-soft); }
+pre { margin: 0.8rem 0 0; padding: 0.9rem 1rem; background: var(--code-bg); border-radius: 6px; overflow-x: auto; font: 400 0.88rem/1.6 var(--f-mono); }
+pre .c { color: var(--ink-soft); }
+
+footer { border-top: 1px solid var(--rule); padding-block: 2rem 3rem; color: var(--ink-soft); font-size: 0.92rem; }
+footer .wrap { display: flex; gap: 1rem 2rem; justify-content: space-between; flex-wrap: wrap; }
+footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero h1 del, .hero h1 ins { transition: background-color 0.2s; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="logo.svg" alt="" width="32" height="32">prosediff</a>
+    <nav aria-label="Main">
+      <a href="#side-by-side">Side by side</a>
+      <a href="#moved">Moved text</a>
+      <a href="#ai">AI assessment</a>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/raffaelemancuso/prosediff#readme">Documentation</a>
+      <a href="https://github.com/raffaelemancuso/prosediff">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <h1>A diff for <del>code</del> <ins>prose</ins>.</h1>
+        <p class="lede">Put two versions of a <strong>Word</strong>, <strong>LibreOffice</strong> or <strong>Markdown</strong> document side by side, each paragraph facing the one it came from. <strong>Passages that moved are followed</strong>, even when they were rewritten on the way. Then <strong>let an AI read the changes</strong> and mark what the revision got wrong.</p>
+        <div class="install">
+          <code id="install-cmd">uv tool install prosediff</code>
+          <button type="button" id="copy-btn" aria-label="Copy the install command">Copy</button>
+        </div>
+        <p class="hero-links">
+          <a href="#install">Other ways to install</a>
+          <a href="https://github.com/raffaelemancuso/prosediff">Source on GitHub</a>
+          <span>Free and open source, MIT licence</span>
+        </p>
+      </div>
+
+      <div class="demo" role="figure" aria-label="Example: two versions of a methods paragraph compared by prosediff">
+        <div class="demo-bar">
+          <span><b>methods.docx</b> <span class="plus">+14</span> <span class="minus">&minus;6</span> words · 1 moved sentence</span>
+          <span class="verdict"><span class="badge badge-mixed">Mixed</span> AI assessment</span>
+        </div>
+        <div class="demo-cols">
+          <div class="side">
+            <div class="side-head">Your draft</div>
+            <p><span class="num">12</span>We recruited <span class="d">120</span> participants from <span class="d">three</span> hospitals and followed them for <span class="d">six</span> months. <span class="mv-from" title="Moved to line 13">Consent was obtained from all participants.</span></p>
+            <p><span class="num">13</span>Outcomes were assessed by two blinded raters.</p>
+          </div>
+          <div class="side">
+            <div class="side-head">Returned by your co-author</div>
+            <p><span class="num">12</span>We recruited <span class="a">124</span> participants from <span class="a">four</span> hospitals <span class="a">in northern Italy</span> and followed them for <span class="flag" title="Problem 1">1</span><span class="a">twelve</span> months.</p>
+            <p><span class="num">13</span>Outcomes were assessed by two blinded raters. <span class="mv-to" title="Moved from line 12"><span class="a">All</span> participants <span class="a">gave written</span> consent.</span></p>
+          </div>
+        </div>
+        <div class="demo-cards">
+          <div class="card">
+            <div class="card-head"><span class="tag tag-move">moved</span><span class="who">Line 12 &rarr; 13</span></div>
+            The consent sentence moved to the next paragraph and was reworded on the way.
+          </div>
+          <div class="card card-ai">
+            <div class="card-head"><span class="tag tag-problem">&#9888; Problem 1</span><span class="who">AI</span></div>
+            Follow-up is now twelve months, but the abstract still says six.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="spot" id="side-by-side">
+    <div class="wrap spot-grid">
+      <div class="spot-text">
+        <p class="eyebrow">Side by side</p>
+        <h2>Read both versions as prose, not as a list of lines</h2>
+        <p class="intro">The older version is on the left, the newer on the right. Paragraphs wrap and are numbered, and each edited paragraph faces the paragraph it came from, however much it was rewritten. Adding, deleting or splitting a paragraph doesn't push the ones below onto the wrong partners.</p>
+        <ul class="points">
+          <li>Changed words are highlighted inside the paragraph.</li>
+          <li>Comments added or removed in Word or LibreOffice appear where they sit, with author and date. Old comments are left out.</li>
+          <li>Switch between paragraph and sentence view with one key.</li>
+          <li>Track Changes doesn't need to be on: prosediff compares the two saved files.</li>
+        </ul>
+      </div>
+      <figure class="spot-fig">
+        <img src="screenshot_page.png" width="1280" height="1312" loading="lazy" alt="An HTML report from prosediff: two versions of a text on free fall side by side, changed words highlighted, with a margin of cards for comments and for the problems the AI found.">
+        <figcaption>A report: three paragraphs changed, two comments, and six problems marked by the AI in the margin.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="spot spot-alt" id="moved">
+    <div class="wrap spot-grid spot-flip">
+      <div class="spot-text">
+        <p class="eyebrow">Moved passages</p>
+        <h2>Text that moved is followed, even when it was rewritten</h2>
+        <p class="intro">Co-authors reorder. A diff tool shows a moved paragraph as one deletion and one unrelated addition, and you have to work out yourself that it is the same text. prosediff shows it at both ends, tinted as a move, with "moved to" and "moved from" labels and the words edited along the way highlighted.</p>
+        <ul class="points">
+          <li>Whole paragraphs, and single sentences taken from one paragraph and put into another.</li>
+          <li>You choose how similar a passage must stay to count as moved.</li>
+        </ul>
+      </div>
+      <div class="movedemo" role="figure" aria-label="Example: a paragraph moved from line 3 to line 6 and edited on the way">
+        <div class="md-col">
+          <div class="md-head">Before</div>
+          <div class="md-par"><span class="num">2</span>Previous trials enrolled only adults under 65.</div>
+          <div class="md-par md-from"><span class="num">3</span>Frailty was measured with the Clinical Frailty Scale at admission. <span class="md-label">moved to line 6</span></div>
+          <div class="md-par"><span class="num">4</span>We included patients of every age.</div>
+          <div class="md-par"><span class="num">5</span>The primary outcome was readmission within 90 days.</div>
+        </div>
+        <div class="md-col">
+          <div class="md-head">After</div>
+          <div class="md-par"><span class="num">2</span>Previous trials enrolled only adults under 65.</div>
+          <div class="md-par"><span class="num">3</span>We included patients of every age.</div>
+          <div class="md-par"><span class="num">4</span>The primary outcome was readmission within 90 days.</div>
+          <div class="md-par md-to"><span class="num">6</span>Frailty was measured with the <span class="a">Rockwood</span> Clinical Frailty Scale at admission <span class="a">and discharge</span>. <span class="md-label">moved from line 3</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="spot" id="ai">
+    <div class="wrap spot-grid">
+      <div class="spot-text">
+        <p class="eyebrow">AI assessment</p>
+        <h2>An AI reads the changes like a careful co-author</h2>
+        <p class="intro">Optionally, an AI reads what changed and judges the revision as a whole. Its verdict, <em>Improves</em>, <em>Mixed</em> or <em>Worsens</em>, sits at the top of the report, and each problem it finds is marked in the text with a card in the margin quoting the words concerned and proposing a fix.</p>
+        <ul class="points">
+          <li>Claims no longer supported, results misstated, broken sentences.</li>
+          <li>Placeholders left in, dangling citations, inconsistent terms or spelling.</li>
+          <li>Reviewers' comments left unanswered.</li>
+          <li>Runs with Claude, ChatGPT through Codex, a local model through Ollama, or any provider any-llm supports. You can preview the prompt before anything is sent.</li>
+        </ul>
+      </div>
+      <div class="spot-figs">
+        <figure class="spot-fig">
+          <img src="screenshot_marks.png" width="1280" height="291" loading="lazy" alt="Two problems marked by the AI in a prosediff report: a numbered warning sign in the text and, in the margin, a card explaining each problem and proposing a correction.">
+          <figcaption>Problems are marked in the text, with an explanation and a proposed fix beside them.</figcaption>
+        </figure>
+        <figure class="spot-fig">
+          <img src="screenshot_assessment.png" width="1280" height="1125" loading="lazy" alt="The AI assessment drawer of a prosediff report, with a verdict, a summary of what changed, improvements, and a numbered list of problems to fix.">
+          <figcaption>The full assessment: verdict, what changed section by section, what improved, and the problems to fix, most serious first.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <p class="eyebrow">What it does</p>
+      <h2>Also included</h2>
+      <p class="intro">For papers, reports and books written with other people, where a line is a whole paragraph and an edit is a few words inside it.</p>
+      <div class="features">
+        <div class="feature">
+          <h3>Word, LibreOffice and Markdown</h3>
+          <p>.docx and .odt files are read directly, with their formatting, languages and comments. Markdown and plain text work too.</p>
+        </div>
+        <div class="feature">
+          <h3>Tracked changes handled</h3>
+          <p>If your co-author did track their edits, they are accepted (or rejected, or kept as markup) exactly as Word would, before comparing.</p>
+        </div>
+        <div class="feature">
+          <h3>Tracked changes put back</h3>
+          <p>If they didn't, prosediff can also write a copy of their version with each edit as a tracked change, to accept or reject in Word or LibreOffice.</p>
+        </div>
+        <div class="feature">
+          <h3>Files, folders or git</h3>
+          <p>Compare two files, two folders file by file, or two commits of a git repository. <code>prosediff --setup-git</code> also makes <code>git diff</code> show Word files as text.</p>
+        </div>
+        <div class="feature">
+          <h3>A report you can send</h3>
+          <p>The result is a single HTML file that opens in any browser, with changes described in plain English. Unified diffs and word diffs are available too.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="window">
+    <div class="wrap spot-grid spot-flip">
+      <div class="spot-text">
+        <p class="eyebrow">No command line needed</p>
+        <h2>A window for choosing what to compare</h2>
+        <p class="intro">Run <code>prosediff-gui</code>, pick two files, two folders or two commits, choose whether an AI should assess the changes, and press Compare. The report opens in your browser.</p>
+      </div>
+      <figure class="spot-fig spot-narrow">
+        <img src="screenshot_window.png" width="780" height="815" loading="lazy" alt="The prosediff window, with tabs for Git repository, Files and Folders, and options for tracked changes, comments, output format and AI assessment.">
+      </figure>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="wrap">
+      <p class="eyebrow">Compared with</p>
+      <h2>How it differs from the tools you have</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th scope="col"></th><th scope="col">Code diff tools<br><small>git diff, Meld, GitHub</small></th><th scope="col">Word's Compare Documents</th><th scope="col">prosediff</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Shows the versions side by side</td><td class="part">Line by line</td><td class="part">A third document of revision marks</td><td class="yes">Paragraph by paragraph</td></tr>
+            <tr><td>Follows edited text that moved</td><td class="no">No</td><td class="part">Only unedited moves</td><td class="yes">Yes</td></tr>
+            <tr><td>AI review of the revision</td><td class="no">No</td><td class="no">No</td><td class="yes">Optional</td></tr>
+            <tr><td>Reads Word files</td><td class="no">No, shown as binary</td><td class="yes">Yes</td><td class="yes">Yes, and .odt and Markdown</td></tr>
+            <tr><td>Lists new and removed comments</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td></tr>
+            <tr><td>Compares folders and git history</td><td class="yes">Yes</td><td class="no">No</td><td class="yes">Yes</td></tr>
+            <tr><td>Writes a copy with tracked changes</td><td class="no">No</td><td class="yes">Yes</td><td class="yes">Yes, for Word and LibreOffice</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <p class="eyebrow">Install</p>
+      <h2>Get started</h2>
+      <p class="intro">prosediff runs on Windows, macOS and Linux. It needs Python 3.11 or later and <a href="https://git-scm.com/">git</a>, which it uses to line the two versions up, even when you're comparing files that aren't in a repository.</p>
+      <div class="install-grid">
+        <div>
+          <h3>With uv (recommended)</h3>
+          <p>Install <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>, then:</p>
+<pre><code>uv tool install prosediff
+<span class="c"># with AI assessment through Claude</span>
+uv tool install "prosediff[claude]"</code></pre>
+        </div>
+        <div>
+          <h3>Then compare</h3>
+          <p>Open the window, or use the command line:</p>
+<pre><code>prosediff-gui
+prosediff --files draft.docx returned.docx
+prosediff --git . HEAD~1</code></pre>
+        </div>
+      </div>
+      <p class="intro">pip and pipx work too: <code>pipx install prosediff</code>. Every option is described in the <a href="https://github.com/raffaelemancuso/prosediff#readme">documentation</a>.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>prosediff by Raffaele Mancuso · MIT licence</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/raffaelemancuso/prosediff">GitHub</a>
+      <a href="https://pypi.org/project/prosediff/">PyPI</a>
+      <a href="https://github.com/raffaelemancuso/prosediff/issues">Report a problem</a>
+      <a href="https://github.com/raffaelemancuso/prosediff/blob/master/CITATION.cff">Cite</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+document.getElementById("copy-btn").addEventListener("click", function () {
+  var btn = this;
+  var text = document.getElementById("install-cmd").textContent;
+  function done(label) { btn.textContent = label; setTimeout(function () { btn.textContent = "Copy"; }, 1600); }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function () { done("Copied"); }, function () { selectCmd(); done("Press Ctrl+C"); });
+  } else { selectCmd(); done("Press Ctrl+C"); }
+  function selectCmd() {
+    var range = document.createRange();
+    range.selectNodeContents(document.getElementById("install-cmd"));
+    var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+  }
+});
+</script>
+</body>
+</html>
