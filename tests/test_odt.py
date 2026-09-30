@@ -179,3 +179,54 @@ def test_rows_tracked_whole(tmp_path):
         "|---|",
         "| Gone |",
     ]
+
+
+def test_a_comment_in_a_table_cell_is_not_its_text(tmp_path):
+    """A comment in a table cell is a comment: its paragraphs are not read
+    as the cell's text."""
+    from helpers import odt_xml
+
+    from prosediff.document import lines
+    from prosediff.sources import read_document
+
+    cell = (
+        '<table:table-cell><text:p><office:annotation office:name="c1">'
+        "<dc:creator>Anna</dc:creator><text:p>Check the unit.</text:p>"
+        '</office:annotation>watt<office:annotation-end office:name="c1"/></text:p>'
+        "</table:table-cell>"
+    )
+    path = odt_xml(
+        tmp_path / "t.odt",
+        "<table:table><table:table-row><table:table-cell><text:p>Energy</text:p>"
+        f"</table:table-cell>{cell}</table:table-row></table:table>",
+    )
+    doc = read_document(path.read_bytes(), path.name, "accept-all")
+    assert [str(line) for line in lines(doc, lambda mark: "")] == ["Energy | watt"]
+
+
+def test_an_insertion_in_a_link_is_settled(tmp_path):
+    """Words inserted as a tracked change within a link are kept when the
+    changes are accepted and dropped when they are rejected."""
+    from helpers import odt_xml
+
+    from prosediff.document import lines
+    from prosediff.sources import read_document
+
+    region = (
+        '<text:tracked-changes><text:changed-region text:id="c1" xml:id="c1"><text:insertion>'
+        "<office:change-info><dc:creator>Anna</dc:creator><dc:date>2026-01-01T00:00:00"
+        "</dc:date></office:change-info></text:insertion></text:changed-region>"
+        "</text:tracked-changes>"
+    )
+    path = odt_xml(
+        tmp_path / "l.odt",
+        f'{region}<text:p>See <text:a xlink:href="https://example.org">the '
+        '<text:change-start text:change-id="c1"/>original <text:change-end text:change-id="c1"/>'
+        "paper</text:a>.</text:p>",
+    )
+    for changes, text in (
+        ("accept-all", "See the original paper."),
+        ("reject-all", "See the paper."),
+    ):
+        doc = read_document(path.read_bytes(), path.name, changes)
+        assert [str(line) for line in lines(doc, lambda mark: "")] == [text]

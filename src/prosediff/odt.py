@@ -103,6 +103,12 @@ def position(value: str) -> set[str]:
     return set()
 
 
+# A table cell's own paragraphs: not those of a comment or a note in it, which
+# are read as the comment's (the note's) text.
+_OWN = "[not(ancestor::office:annotation) and not(ancestor::text:note)]"
+CELL_PARAGRAPHS = f".//text:p{_OWN}|.//text:h{_OWN}"
+
+
 class OdtError(RuntimeError):
     """The file is not an OpenDocument text odfdo can read."""
 
@@ -313,7 +319,8 @@ class Reader(DocumentReader):
                 own = self.text_style(child.get_attribute_string("text:style-name"))
                 out += self.inline(child, styles | own)
             elif tag == "text:a":
-                inner = [i for i, _ in self.inline(child, styles)]
+                # its words' insertions settled within it, as a paragraph's
+                inner = self.settle(self.inline(child, styles))
                 target = child.get_attribute_string("xlink:href") or ""
                 out.append((Span("link", inner, target=target), where))
             elif tag == "text:s":
@@ -450,14 +457,14 @@ class Reader(DocumentReader):
             "|table:table-rows/table:table-row"
         ):
             cells = [
-                self.cell(tc.get_elements(".//text:p|.//text:h"))
+                self.cell(tc.get_elements(CELL_PARAGRAPHS))
                 for tc in tr.get_elements("table:table-cell")
             ]
             # a row deleted whole, accepted (inserted whole, rejected): gone
             if self.tracked_whole(tr) and not any(markdown(c).strip() for c in cells):
                 continue
             rows.append(cells)
-            row_sources.append(tuple(source_of(p) for p in tr.get_elements(".//text:p|.//text:h")))
+            row_sources.append(tuple(source_of(p) for p in tr.get_elements(CELL_PARAGRAPHS)))
         paragraphs = el.get_elements(".//text:p|.//text:h")
         return Block(
             "table", rows=rows, language=self.language_of(paragraphs), row_sources=row_sources
