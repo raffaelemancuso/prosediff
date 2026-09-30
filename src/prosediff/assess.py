@@ -145,7 +145,9 @@ the tool that compares them, which is not in the documents: # to ###### \
 before a paragraph for a Heading 1 to Heading 6 style, • for a list item, | \
 between the cells of a table row, **bold**, *italic*, [text]{.underline}, \
 ~~struck through~~, ^superscript^, ~subscript~, [^1] for a footnote \
-reference and [^1]: before the footnote's text. Never report these marks \
+reference and [^1]: before the footnote's text. An equation is written in a \
+linear notation of its own (E = mc^(2), x_(i)): that is its text, not \
+formatting. Never report these marks \
 themselves as added, removed or misplaced: say what changed in the word \
 processor's terms (a paragraph that lost its Heading 2 style, words no longer \
 bold, a list item become a paragraph), and quote the words without them."""
@@ -170,9 +172,17 @@ it keeps copied exactly, only what must change changed; "" when the fix is \
 anything else (text to add elsewhere, a question to answer, a figure to \
 make, a passage of the old version) or the passage runs over more than one \
 paragraph.
-Copy the words from the text itself, never with the diff's markers ([- -], \
-{+ +}, {>> <<}) nor the notation of a document's formatting, in \
-"replacement" too. Write [] when nothing is to be marked."""
+A program uses these words to change the document: it searches the text \
+for "start" and "end" character for character, and puts "replacement" in \
+the passage's place as a tracked change. So quote back exactly the text \
+you are sent in the message: copy "start", "end" and every word "replacement" \
+keeps character for character from that version as it is written here \
+(the same spelling, capitals, spacing, punctuation, quotes, dashes, \
+symbols and equations), never retyped, corrected, translated or tidied, \
+and change in "replacement" only what must change. Never copy the diff's markers \
+([- -], {+ +}, {>> <<}) nor the notation of a document's formatting (# for \
+a heading, • for a list item, **bold**, *italic*, [^1] for a footnote \
+reference). Write [] when nothing is to be marked."""
 
 
 @dataclass(frozen=True)
