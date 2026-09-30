@@ -417,6 +417,10 @@ class Comparison:
     # The absolute path of the repository compared; "" for files and folders
     # outside git, whose absolute paths are base.hexsha and target.hexsha.
     location: str = ""
+    # One file alone, to review, not two versions compared (review_file):
+    # its lines are all unchanged rows of the new side, base and target the
+    # same file.
+    single: bool = False
 
     @property
     def counts(self) -> Counts:
@@ -2508,15 +2512,33 @@ def _check_documents(entries: list[tuple[FileDiff, bytes, bytes]]) -> None:
             )
 
 
+def single_row(row: Row) -> Row:
+    """A row of a file reviewed alone: the new side of an added line, shown
+    as unchanged."""
+    return Row(
+        "equal",
+        right_no=row.right_no,
+        right=row.right,
+        right_label=row.right_label,
+        right_lang=row.right_lang,
+        text=row.text,
+        anchor=row.anchor,
+    )
+
+
 def build_files(
-    entries: list[tuple[FileDiff, bytes, bytes]], options: Options = DEFAULT_OPTIONS
+    entries: list[tuple[FileDiff, bytes, bytes]],
+    options: Options = DEFAULT_OPTIONS,
+    single: bool = False,
 ) -> list[CommentEntry]:
     """Fill in the rows of every file; returns the comments for the panel.
 
     Word and OpenDocument texts are read into paragraphs of styled text
     (prosediff.word, prosediff.odt, prosediff.document), compared as lines
     that carry their styles, languages and kinds; a document that cannot be
-    read is listed as a binary file, with the reason.
+    read is listed as a binary file, with the reason. single: each file is
+    reviewed alone, its old side empty: its lines are unchanged rows and
+    its comments neither added nor removed (review_file).
     """
     if options.language == DOCUMENT:
         _check_documents(entries)
@@ -2686,6 +2708,9 @@ def build_files(
         )
         footnotes.reset_tooltips(token)
         fd.mixed_languages = set_row_languages(fd.rows, old, new, fd.language)
+        if single:
+            fd.rows = [single_row(r) for r in fd.rows]
+            fd.additions = fd.deletions = 0
         if fn is not None and (fn.old or fn.new):
             for view in row_views(fd.rows):
                 view.left = footnotes.restore(view.left, fn.old)
@@ -2694,6 +2719,11 @@ def build_files(
     panel: list[CommentEntry] = []
     if len(comments):
         for fd, old, new, *_ in texts:
+            if single:  # the file's own comments: neither added nor removed
+                panel += comment_entries(fd, new, new, comments)
+                for view in row_views(fd.rows):
+                    view.right = show_comments(view.right, comments)
+                continue
             panel += comment_entries(fd, old, new, comments)
             # added since the base: only the new side has them
             added = frozenset(placeholders_of(new) - placeholders_of(old))
@@ -2954,4 +2984,26 @@ def compare_paths(
         target=_side_revision(new),
         files=sorted((fd for fd, _, _ in entries), key=lambda f: f.path),
         comments=panel,
+    )
+
+
+def review_file(path: str | Path, options: Options = DEFAULT_OPTIONS) -> Comparison:
+    """One file alone, read as a comparison reads it, for an AI to review
+    (prosediff.assess): its lines, paragraph by paragraph, all shown, its
+    comments its own. A Comparison whose one file has no old side (single),
+    base and target both the file."""
+    options = replace(options.checked(), by_sentence=False, context=None)
+    path = Path(path)
+    if not path.is_file():
+        raise SourceError(f"no such file: {path}")
+    fd = FileDiff("reviewed", None, path.name)
+    panel = build_files([(fd, b"", path.read_bytes())], options, single=True)
+    side = _side_revision(path)
+    return Comparison(
+        repo_name=path.name,
+        base=side,
+        target=side,
+        files=[fd],
+        comments=panel,
+        single=True,
     )

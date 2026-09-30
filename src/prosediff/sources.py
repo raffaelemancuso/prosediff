@@ -28,6 +28,7 @@ __all__ = [
     "patterns",
     "read_document",
     "read_side",
+    "review_page",
 ]
 
 # The word-processor documents prosediff reads, and what the HTML report calls them.
@@ -123,6 +124,12 @@ def default_page(old: Path, new: Path) -> Path | None:
     if old.is_file() and new.is_file():
         return new.parent / f"{old.stem}_vs_{new.stem}.html"
     return None
+
+
+def review_page(path: Path) -> Path:
+    """Where the HTML report reviewing a file alone goes when no output is
+    given: next to it, as NAME_review.html."""
+    return path.parent / f"{path.stem}_review.html"
 
 
 def describe_side(path: Path) -> tuple[str, str, str, str]:

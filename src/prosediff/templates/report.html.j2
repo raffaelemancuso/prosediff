@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ c.repo_name }}: {{ c.base.short }}..{{ c.target.short }}</title>
+<title>{% if c.single %}{{ c.repo_name }}: review{% else %}{{ c.repo_name }}: {{ c.base.short }}..{{ c.target.short }}{% endif %}</title>
 <style>
 :root {
   --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
@@ -175,6 +175,9 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
 .verdict-likely { color: var(--rem); background: var(--del-line); }
 .verdict-possibly { color: var(--fmt); background: var(--fmt-bg); }
 .verdict-unlikely { color: var(--add); background: var(--ins-line); }
+.verdict-good { color: var(--add); background: var(--ins-line); }
+.verdict-fair { color: var(--fmt); background: var(--fmt-bg); }
+.verdict-poor { color: var(--rem); background: var(--del-line); }
 .assess-body { max-width: 80em; }
 .assess-body h1, .assess-body h2, .assess-body h3 { font-size: 14px; margin: 14px 0 4px; }
 .assess-body p, .assess-body ul, .assess-body ol { margin: 4px 0; }
@@ -421,6 +424,7 @@ footer a { color: inherit; }
   text-overflow: ellipsis; white-space: nowrap; }
 .toolbar .spacer { flex: 1; }
 .toolbar .group { display: inline-flex; align-items: center; gap: 2px; }
+.toolbar .group[hidden], .toolbar .comment-nav[hidden] { display: none; }
 .toolbar .verdict-button { display: inline-flex; align-items: center; gap: 8px; padding: 3px 8px;
   border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
 .toolbar .verdict-button:hover, .toolbar .verdict-button[aria-expanded="true"] {
@@ -552,7 +556,7 @@ body.unified tr.skip td { grid-column: 1 / -1; }
   .stack { position: static; margin: 4px 8px 8px; }
   table.notes-on td.notes:empty { display: none; }
   table.notes-on tr.skip td { grid-column: 1 / -1; }
-  body.unified table.notes-on tr { grid-template-columns: 4em 1fr; }
+  body.unified table.notes-on tr, table.single.notes-on tr { grid-template-columns: 4em 1fr; }
   body.unified table.notes-on td.notes { grid-column: 1 / -1; grid-row: auto; }
   :root { --review-w: 240px; }
 }
@@ -620,14 +624,15 @@ thead.print, .print-note { display: none; }
 {{ flag_css }}
 </style>
 </head>
-<body>
+<body{% if c.single %} class="single"{% endif %}>
 {% set marks = assessment and assessment.annotations and not assessment.error %}
 <div class="toolbar" role="toolbar" aria-label="Changes and views">
-  <span class="bar-title" title="{{ c.base.short }} → {{ c.target.short }}">{{ c.base.short }} → {{ c.target.short }}</span>
-  {% if assessment %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="AI assessment: what the AI made of the changes as a whole">{% if assessment.error %}<span class="verdict verdict-worsens">failed</span>{% elif assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}<span class="role">AI assessment</span></button>{% endif %}
+  {% if c.single %}<span class="bar-title" title="{{ c.target.hexsha }}">{{ c.target.short }}</span>
+  {% else %}<span class="bar-title" title="{{ c.base.short }} → {{ c.target.short }}">{{ c.base.short }} → {{ c.target.short }}</span>{% endif %}
+  {% if assessment %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="AI assessment: what the AI made of the {{ "document" if c.single else "changes" }} as a whole">{% if assessment.error %}<span class="verdict verdict-worsens">failed</span>{% elif assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}<span class="role">AI assessment</span></button>{% endif %}
   {% if writing %}<button type="button" class="verdict-button" data-drawer="writing" aria-expanded="false" aria-controls="writing" title="AI writing: whether the new text reads as written by an AI, an indication, not a proof">{% if writing.error %}<span class="verdict verdict-likely">failed</span>{% elif writing.verdict %}<span class="verdict verdict-{{ writing.verdict }}">{{ writing.verdict | capitalize }}</span>{% endif %}<span class="role">AI writing</span></button>{% endif %}
   <span class="spacer"></span>
-  <span class="group" role="group" aria-label="Changes">
+  <span class="group" role="group" aria-label="Changes"{% if c.single %} hidden{% endif %}>
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
   <span class="counter" aria-live="polite" title="{{ c.change_count | counted("change") }}">{{ c.change_count | comma }}</span>
   <button type="button" data-nav="1" title="Next change (n)" aria-label="Next change">▶</button></span>
@@ -642,9 +647,9 @@ thead.print, .print-note { display: none; }
   {% if marks or c.comments or (alt and alt.comments) %}<button type="button" class="margin-button" data-toggle="margin" aria-pressed="true" title="Margin: the cards of the comments and the problems beside the text; off, the two versions take its width (g)">Margin</button>{% endif %}
   <button type="button" class="review-button" data-review aria-pressed="false" title="Review: the changes, the comments and the problems listed, to go through one by one (r)">Review</button>
   {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
-  <button type="button" class="icon" data-toggle="movelinks" aria-pressed="false" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
+  {% if not c.single %}<button type="button" class="icon" data-toggle="movelinks" aria-pressed="false" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
   {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="false" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
-  <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>
+  <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>{% endif %}
   <span class="menu">
     <button type="button" class="menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="view-menu">View<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
     <div class="menu-panel" id="view-menu" role="group" aria-label="More views" hidden>
@@ -675,7 +680,7 @@ thead.print, .print-note { display: none; }
 {{ r.subject }}{% if r.author or r.date %} <span class="role">— {{ r.author }}{% if r.author and r.date %}, {% endif %}{{ r.date }}</span>{% endif %}
 {%- endmacro %}
 <div class="revisions">
-  {% for label, r in (("Base (older)", c.base), ("Target (newer)", c.target)) %}
+  {% for label, r in ((("Reviewed", c.target),) if c.single else (("Base (older)", c.base), ("Target (newer)", c.target))) %}
   <span class="role">{{ label }}</span>
   <code title="{{ r.hexsha }}">{{ r.short }}</code>
   <span>{{ side(r) }}</span>
@@ -763,6 +768,11 @@ thead.print, .print-note { display: none; }
 {% else %}
 {% set n, y = c.counts, c.without_passages %}
 {% set prose = unit_of(c.files, split) != "line" %}
+{% if c.single %}
+<div class="summary">
+  <p class="units"><span><b>Reviewed whole:</b> {{ c.files[0].rows | length | counted(unit_of(c.files, split) | string) }}, no other version compared</span></p>
+</div>
+{% else %}
 <div class="summary">
   {% if prose or n.changed_lines or n.inserted_lines or n.deleted_lines or n.moved or n.moved_passages %}
   <p class="units">{% if prose %}{{ view_label(split, other) }}{% endif %}
@@ -781,6 +791,7 @@ thead.print, .print-note { display: none; }
   <button type="button" class="btn" data-files="close">Collapse all</button></p>
   {% endif %}
 </div>
+{% endif %}
 {% endif %}
 
 
@@ -803,7 +814,7 @@ thead.print, .print-note { display: none; }
   <summary>
     <span class="path">{% if f.change == "renamed" %}{{ f.old_path }} → {% endif %}{{ f.path }}</span>
     <span class="role">{{ f.change }}</span>
-    {% if not f.binary %}<span>{{ counts(f, u) }}</span>{% endif %}
+    {% if not f.binary and not c.single %}<span>{{ counts(f, u) }}</span>{% endif %}
     {% if f.formatted_rows %}<span class="fmt-count">formatting changed in {{ f.formatted_rows | counted(u) }}</span>{% endif %}
     {% if f.note %}<span class="file-note">{{ f.note }}</span>{% endif %}
     {% if f.language %}<span class="file-note" title="{{ file_language_note(f.language, f.language_source) }}; its sentences are split and its lines hyphenated by it{% if f.mixed_languages %}, where a paragraph is marked with none of its own{% endif %}">{% if not f.mixed_languages %}{{ flag(f.language) }} {% endif %}language: {{ f.language }}{% if f.language_source == "guessed" %} (guessed){% elif f.language_source == "document" %} (from the document){% endif %}</span>{% endif %}
@@ -816,7 +827,21 @@ thead.print, .print-note { display: none; }
   {% elif f.binary %}
   <div class="note">Binary file, not shown.</div>
   {% elif not f.rows %}
-  <div class="note">Content unchanged{% if f.change == "renamed" %} (renamed only){% endif %}.</div>
+  <div class="note">{% if c.single %}No text.{% else %}Content unchanged{% if f.change == "renamed" %} (renamed only){% endif %}.{% endif %}</div>
+  {% elif c.single %}
+  <table class="single{% if f.markdown %} prose{% endif %}{% if notes %} notes-on{% endif %}"{% if f.language %} lang="{{ f.language }}"{% endif %}>
+    <caption class="sr" lang="en">{{ f.path }}{% if notes %}, comments and problems beside it{% endif %}</caption>
+    <colgroup><col class="no"><col>{% if notes %}<col class="notes">{% endif %}</colgroup>
+    <thead class="print" aria-hidden="true" lang="en"><tr>
+      <th colspan="2"><span class="path">{{ f.path }}</span></th>
+      {% if notes %}<th>Comments and problems</th>{% endif %}
+    </tr></thead>
+    <tbody>
+    {% for r in f.rows %}
+    <tr class="equal"{% if r.anchor %} id="{{ r.anchor }}"{% endif %}>{{ cells(f, r, "right") }}{% if notes %}<td class="notes"></td>{% endif %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
   {% else %}
   <table class="{% if f.markdown %}prose{% endif %}{% if notes %} notes-on{% endif %}"{% if f.language %} lang="{{ f.language }}"{% endif %}>
     <caption class="sr" lang="en">Changes in {{ f.path }}: old version on the left, new version on the right{% if notes %}, comments and problems beside them{% endif %}</caption>
@@ -879,7 +904,7 @@ thead.print, .print-note { display: none; }
   {% if id == "assessment" and ai_documents %}
   <section class="ai-documents" aria-labelledby="ai-documents-title">
     <h3 id="ai-documents-title">{{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }} documents</h3>
-    <p class="role">Each problem the AI marked is a comment on its passage; in the new version with its fixes, the fixes it wrote out are its own tracked changes, to accept or reject. <span class="ai-included"></span></p>
+    <p class="role">Each problem the AI marked is a comment on its passage; in the {{ "document" if c.single else "new version" }} with its fixes, the fixes it wrote out are its own tracked changes, to accept or reject. <span class="ai-included"></span></p>
     <ul>
     {% for d in ai_documents %}
       <li><button type="button" class="btn ai-download" data-document="{{ loop.index0 }}">{{ d.label }}</button><span class="role file-name">{{ d.name }}</span>
@@ -2277,9 +2302,10 @@ thead.print, .print-note { display: none; }
   }
   function applyWidths(table) {
     var cols = table.querySelectorAll(":scope > colgroup > col");
-    if (cols.length < 4) return;
     var notes = table.querySelector("col.notes");
     if (notes) notes.style.width = widths.notes ? widths.notes + "px" : "";
+    // a file reviewed alone has one side: nothing to share out
+    if (cols.length < 4) return;
     if (widths.share === null) { cols[1].style.width = ""; return; }
     var text = table.clientWidth - 2 * gutterOf(table) - notesOf(table);
     cols[1].style.width = Math.round(text * widths.share) + "px";

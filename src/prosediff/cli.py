@@ -1,6 +1,7 @@
 """Command line: prosediff --git REPO BASE [TARGET], prosediff --files OLD NEW,
-or prosediff --folders OLD NEW; prosediff --setup-git and --to-markdown for
-git's own commands."""
+or prosediff --folders OLD NEW; prosediff --review FILE, for an AI to review
+one file alone; prosediff --setup-git and --to-markdown for git's own
+commands."""
 
 import argparse
 import sys
@@ -39,6 +40,7 @@ from prosediff.diff import (
     compare,
     compare_paths,
     compare_split,
+    review_file,
     setting_type,
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
@@ -63,6 +65,7 @@ from prosediff.sources import (
     SourceError,
     default_page,
     document_to_markdown,
+    review_page,
 )
 from prosediff.tracked import TRACKED_FORMATS, check_paths
 
@@ -84,14 +87,15 @@ def build_parser() -> argparse.ArgumentParser:
         "unified diff of them (--format diff).",
         epilog="Examples: prosediff --git . HEAD~1 HEAD; prosediff --git . HEAD --untracked; "
         "prosediff --files draft_v1.docx draft_v2.docx --open; "
-        "prosediff --folders submitted revised; prosediff --setup-git",
+        "prosediff --folders submitted revised; prosediff --review paper.docx --assess claude; "
+        "prosediff --setup-git",
     )
     ap.add_argument(
         "repo",
         nargs="?",
         metavar="REPO|OLD",
         help="with --git, the repository (or any folder inside it); with --files or "
-        "--folders, the old file or folder",
+        "--folders, the old file or folder; with --review, the file",
     )
     ap.add_argument(
         "base",
@@ -124,6 +128,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--folders",
         action="store_true",
         help="two folders, OLD and NEW, file by file, outside git",
+    )
+    modes.add_argument(
+        "--review",
+        action="store_true",
+        help="no comparison: one FILE alone, reviewed whole by the AI --assess names, in "
+        "an HTML report of its assessment, the problems it marked in the text and, for a "
+        "Word or OpenDocument file, the file with its comments and fixes to download",
     )
     ap.add_argument(
         "--include",
@@ -441,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     args = ap.parse_args(argv)
 
-    mode = next((m for m in ("git", "files", "folders") if getattr(args, m)), None)
+    mode = next((m for m in ("git", "files", "folders", "review") if getattr(args, m)), None)
     if args.list_models:
         if mode or args.repo:
             ap.error("--list-models takes no other argument")
@@ -464,8 +475,11 @@ def main(argv: list[str] | None = None) -> int:
         return _to_markdown(args.to_markdown, args.docx_changes)
     if mode is None:
         ap.error(
-            "say what to compare: --git REPO BASE [TARGET], --files OLD NEW or --folders OLD NEW"
+            "say what to compare: --git REPO BASE [TARGET], --files OLD NEW or --folders OLD NEW "
+            "(or --review FILE, to review one file)"
         )
+    if mode == "review":
+        return _review(ap, args)
     if not args.base:
         ap.error("--git takes REPO and BASE" if args.git else f"--{mode} takes OLD and NEW")
 
@@ -616,6 +630,84 @@ def main(argv: list[str] | None = None) -> int:
     if writing is not None and not writing.error:
         verdict = f" ({writing.verdict})" if writing.verdict else ""
         print(f"{PROG}: AI-writing assessment{verdict}, beside it")
+    if args.open:
+        open_output(output)
+    return 0
+
+
+def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """--review FILE: one file alone, reviewed whole by the AI --assess
+    names, into an HTML report."""
+    if not args.repo or args.base or args.target:
+        ap.error("--review takes one FILE")
+    if args.assess is None:
+        ap.error("--review has an AI review the file: say which with --assess")
+    try:
+        parse_backend(args.assess)
+    except AssessError as e:
+        ap.error(f"--assess: {e}")
+    if args.assess_timeout <= 0:
+        ap.error("--assess-timeout must be above 0")
+    if args.assess_ai_writing:
+        ap.error("--assess-ai-writing asks about the text changes added: --review compares none")
+    if (args.format or format_of(args.output)) != "html":
+        ap.error("--review writes an HTML report: its output is a .html")
+    if args.split not in (None, "paragraph"):
+        ap.error("--review shows the file paragraph by paragraph: --split takes two versions")
+    for option, given in (
+        ("--path", args.paths),
+        ("--include", args.include is not None),
+        ("--cached", args.cached),
+        ("--untracked", args.untracked),
+    ):
+        if given:
+            ap.error(f"{option} picks what to compare: --review takes one file")
+    try:
+        language = normalize_language(args.language)
+    except ValueError as e:
+        ap.error(f"--language: {e}")
+    try:
+        encoding = check_encoding(args.encoding)
+    except ValueError as e:
+        ap.error(f"--encoding: {e}")
+    path = Path(args.repo)
+    options = Options(
+        md_filter=args.md_filter,
+        comments=args.comments or "markers",
+        empty_comments=args.empty_comments,
+        docx_changes=args.docx_changes,
+        language=language,
+        encoding=encoding,
+    )
+    try:
+        comparison = review_file(path, options)
+    except (FilterError, SourceError) as e:
+        print(f"{PROG}: {e}", file=sys.stderr)
+        return 1
+    print(f"{PROG}: asking {args.assess} to review {path.name}...", file=sys.stderr)
+    request = AssessRequest(
+        args.assess,
+        effort=args.assess_effort or "",
+        instructions=args.assess_instructions or "",
+        timeout=args.assess_timeout,
+        save_prompt=args.assess_save_prompt,
+        annotate=args.assess_annotate,
+    )
+    assessment = assess_comparison(comparison, request)
+    if assessment.error:
+        print(f"{PROG}: the review failed: {assessment.error}", file=sys.stderr)
+    output = args.output or (default_output() if args.open else review_page(path))
+    output = write_output(
+        comparison,
+        output,
+        align=args.align,
+        split="paragraph",
+        assessment=assessment,
+        documents=args.assess_documents,
+    )
+    verdict = f" ({assessment.verdict})" if assessment.verdict else ""
+    marked = counted(len(assessment.annotations), "problem")
+    print(f"{PROG}: {path.name} reviewed{verdict}, {marked} marked -> {output}")
     if args.open:
         open_output(output)
     return 0

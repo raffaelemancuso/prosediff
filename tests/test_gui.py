@@ -15,7 +15,7 @@ import tkinter as tk
 from helpers import two_files
 
 from prosediff import gui
-from prosediff.assess import AssessError, ModelInfo
+from prosediff.assess import AssessError, Assessment, ModelInfo
 from prosediff.diff import MOVED_PASSAGE_DEFAULTS, MovedPassageSettings
 from prosediff.gui import (
     INDEX,
@@ -905,3 +905,57 @@ def test_documents_to_download(tmp_path, monkeypatch, root):
     app.assess_annotate.set(True)
     app.assess_documents.set(False)
     assert app.collect().assess_documents is False
+
+
+def test_one_file_reviewed(root, tmp_path, monkeypatch):
+    """The "One file" tab: one file, reviewed by the AI chosen, into an
+    HTML report next to it; the options of a comparison greyed out, the
+    other formats too; no AI, no review."""
+    from test_aidocs import FIXED
+    from test_tracked import NEW, word_file
+
+    path = word_file(tmp_path / "paper.docx", NEW)
+    asked = []
+
+    def assessed(c, request):
+        asked.append((c, request))
+        return Assessment("claude", "## Verdict\n**Good**.", annotations=[FIXED], kind="review")
+
+    monkeypatch.setattr(gui, "assess_comparison", assessed)
+    s = Settings(mode="review", single=str(path), assess="claude", assess_preview=False)
+    stages = []
+    out, c, a = generate(s, stages.append)
+    assert out == tmp_path / "paper_review.html" and c.single and a.verdict == "good"
+    assert stages == [
+        "Reading the file…",
+        "Asking claude to review the file…",
+        "Writing the report…",
+    ]
+    assert out.read_text(encoding="utf-8").count('class="ai-document"') == 1
+    with pytest.raises(ValueError, match="choose an AI"):
+        generate(replace(s, assess=""))
+    with pytest.raises(ValueError, match="choose the file"):
+        generate(replace(s, single=""))
+    app = App(root, Settings(mode="files", output_format="wdiff"))
+    settle(root, app)
+    app.mode.set("review")
+    app.show_mode()
+    assert app.sides["review"].winfo_manager() == "pack"
+    assert app.output_format.get() == "html" and app.button.cget("text") == "Review"
+    assert all(app.format_buttons[f].instate(["disabled"]) for f in ("diff", "docx", "odt"))
+    assert all(w.instate(["disabled"]) for w in app.comparing_only)
+    app.single.set(str(path))
+    assert app.output.get() == str(tmp_path / "paper_review.html")
+    app.assess_ai.set("claude")
+    settle(root, app, "claude")
+    assert all(w.instate(["disabled"]) for w in app.changes_only)
+    assert not app.documents_switch.instate(["disabled"])
+    got = app.collect()
+    assert got.mode == "review" and got.single == str(path)
+    app.assess_ai.set(gui.NO_ASSESSMENT)
+    app.run()
+    assert app.job is None and "Choose an AI" in root.shown[-1]
+    app.mode.set("files")
+    app.show_mode()
+    assert app.button.cget("text") == "Compare"
+    assert not any(w.instate(["disabled"]) for w in app.comparing_only)

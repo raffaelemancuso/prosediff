@@ -119,6 +119,7 @@ prosediff sits between the two:
 prosediff --git REPO BASE [TARGET] [options]
 prosediff --files OLD NEW [options]
 prosediff --folders OLD NEW [options]
+prosediff --review FILE --assess AI [options]
 prosediff --setup-git [REPO | --global]
 prosediff --to-markdown FILE
 prosediff --list-models AI
@@ -139,6 +140,7 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--git REPO BASE [TARGET]` | compare commits of a git repository. REPO: the repository, or any folder inside it; BASE: the older commit (hash, branch, tag, `HEAD~2`, ...); TARGET: the newer commit; without it, BASE is compared with the working tree (tracked files), as `git diff BASE` does |
 | `--files OLD NEW`          | compare two files, whatever their names, outside git |
 | `--folders OLD NEW`        | compare two folders, file by file, outside git |
+| `--review FILE`            | no comparison: one file alone, reviewed whole by the AI `--assess` names (required), in an HTML report of its assessment and the problems it marked in the text, with, for a Word or OpenDocument file, the file with the AI's comments and fixes as tracked changes to download (see [Reviewing one file](#reviewing-one-file)). Written next to the file as `NAME_review.html` by default |
 | `--include PATTERNS`       | with `--folders`, compare only the files matching these glob patterns, separated by `\|` (quote them), e.g. `"*.docx\|*.md"`; a pattern is matched against each file's name, or its path within the folder when it has a `/`, ignoring case. Default `*.docx\|*.odt\|*.md\|*.typ\|*.txt`; `""` compares every file. The lock files an open document leaves beside it (Word's `~$name.docx`, LibreOffice's `.~lock.name.odt#`) are always left out. In the GUI, the "Folders: only" box |
 | `--cached`                 | with `--git`, compare BASE with the index instead, as `git diff --cached BASE` does |
 | `--untracked`              | with `--git` and the working tree, also show the untracked files `.gitignore` does not exclude |
@@ -201,7 +203,10 @@ Examples:
 - `prosediff --files draft_v1.docx draft_v2_returned.docx --assess claude
   --open`: the report, headed by Claude Code's assessment of the revision;
 - `prosediff --files draft_v1.docx draft_v2_returned.docx --assess
-  ollama/qwen3`: the same by a local model, nothing leaving the computer.
+  ollama/qwen3`: the same by a local model, nothing leaving the computer;
+- `prosediff --review paper.docx --assess claude --open`: no comparison,
+  one paper reviewed whole by Claude Code, its problems marked in the text
+  and the paper offered back with the AI's comments and fixes, tracked.
 
 ## Tracked changes
 
@@ -370,6 +375,26 @@ instructions over a long diff (a few billion parameters at least), and
 fast only when it fits the graphics card's memory; a very small one (under
 1 billion) answers, but does not assess.
 
+### Reviewing one file
+
+`--review FILE --assess AI` (in the window, the **One file** tab) skips the
+comparison: there is no other version, and the AI reads the file itself,
+whole, its comments included. It answers as for a revision, with a verdict
+(*Good*, *Fair* or *Poor*), a summary, the strengths and the problems to
+fix, and, with `--assess-annotate` (on by default), marks each problem in
+the text, a badge before its passage and a card in the margin. The report
+shows the file in one column, paragraph by paragraph. A Word document (or
+an OpenDocument text) comes back as **the document with the AI's fixes,
+tracked**, to download from the assessment's drawer: each problem a
+comment of the AI's on its passage, each fix it wrote out a tracked change
+of its own, as described above; review mode's boxes choose which problems
+it holds. There are no changes to track, so the other document is not
+made, and the options of a comparison do not apply: `--split` is paragraph,
+the output an HTML report, `--assess-context` has nothing to choose, and
+`--assess-ai-writing`, which asks about the text the changes added, is
+refused. Markdown and text files are reviewed too, without a document to
+download.
+
 ## With git's own commands
 
 `prosediff --setup-git` sets up the repository it is run in (or REPO;
@@ -424,7 +449,7 @@ console for a moment.
 ![The prosediff window: a git repository with base and target commits chosen from lists, the comparison options in one card, the output, and the AI assessment card with its AI, model and effort](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
 
 What is compared is chosen with the segmented button at the top, which
-shows the fields of one of three sources:
+shows the fields of one of three sources, or of one file to review:
 
 - **Git repository**: pick a folder; base and target are chosen among the
   working tree, the index and the latest 200 commits (hash, date, author,
@@ -434,6 +459,12 @@ shows the fields of one of three sources:
 - **Files**: two files, whatever their names, Word documents included.
 - **Folders**: two folders, of which only the files matching the patterns
   of "Only" (`--include`) are compared.
+- **One file**: a file alone, reviewed whole by the AI chosen under **AI
+  assessment** (see [Reviewing one file](#reviewing-one-file)); Compare
+  becomes **Review**, the output is the HTML report (`NAME_review.html`
+  next to the file), and the options that only a comparison has ("Compare
+  by", "Ignore whitespace", what the AI reads, the AI-writing check) are
+  greyed out.
 
 The options that change what the comparison finds sit in one card,
 **Comparison**, each explained by a tooltip (rest the pointer on it, or on

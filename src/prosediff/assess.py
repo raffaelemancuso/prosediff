@@ -4,8 +4,9 @@ version is better than the old, what changed, and what to fix.
 The changes go to the model as the word diff of the comparison
 ([-removed-]{+added+}, comments in CriticMarkup), with, by default, the
 whole new version, for the model to check the changes against the rest of
-the document. Three kinds of backend answer, each an optional extra of
-prosediff:
+the document. A file alone (diff.review_file) is reviewed instead, whole, no
+diff sent (kind "review"). Three kinds of backend answer, each an
+optional extra of prosediff:
 
 - "claude": Claude Code, through the Claude Agent SDK (prosediff[claude]),
   on the Claude login of the machine;
@@ -51,6 +52,9 @@ SUBSCRIPTIONS = {"claude": "claude", "codex": "codex"}
 # claude asks for it by giving no model.
 CLAUDE_DEFAULT = "default"
 VERDICTS = ("improves", "mixed", "worsens")
+# The verdicts of the review of one document alone (kind "review"): good,
+# fair or poor.
+REVIEW_VERDICTS = ("good", "fair", "poor")
 # The verdicts of the second assessment, whether the new text reads as written
 # by an AI (AssessRequest.ai_writing): likely, possibly or unlikely.
 WRITING_VERDICTS = ("likely", "possibly", "unlikely")
@@ -85,6 +89,39 @@ A short list of the main changes, grouped by section of the document.
 
 ## Improvements
 A short list of what the changes do well.
+
+## Problems to fix
+A numbered list, most serious first, each quoting the words concerned. \
+Write "None found." if there are none.
+
+Be specific and brief. Write in the language the document is written in, \
+unless the instructions of the person asking say otherwise."""
+
+# The review of one document alone, not of changes (kind "review"; the
+# comparison's single file).
+SYSTEM_REVIEW = """\
+You are an experienced editor and peer reviewer of academic and professional \
+writing. You are given a document to review, whole; {>>Author (date): \
+text<<} is a comment its authors or reviewers left in it.
+
+Assess the document as a whole: its argument, structure, clarity, concision, \
+accuracy and consistency, not personal taste. Look for errors: claims not \
+supported, results misstated or inconsistent between sections, broken or \
+unfinished sentences, placeholders, citations or cross-references left \
+dangling, inconsistent spelling or terms, grammar and typing errors. Say what \
+the comments ask for and whether the text answers them.
+
+Answer in Markdown with exactly these sections:
+
+## Verdict
+The first word, in bold, is one of **Good**, **Fair** or **Poor**; then two \
+or three sentences on why.
+
+## Summary
+What the document sets out to do, and how, in a few sentences.
+
+## Strengths
+A short list of what the document does well.
 
 ## Problems to fix
 A numbered list, most serious first, each quoting the words concerned. \
@@ -185,6 +222,30 @@ a heading, • for a list item, **bold**, *italic*, [^1] for a footnote \
 reference). Write [] when nothing is to be marked."""
 
 
+def _reworded(text: str, changes: dict[str, str]) -> str:
+    """text with each of changes made; every one must be found."""
+    for old, new in changes.items():
+        if old not in text:
+            raise ValueError(f"not in the prompt: {old!r}")
+        text = text.replace(old, new)
+    return text
+
+
+# ANNOTATE for a document reviewed alone: no sides, no diff.
+ANNOTATE_REVIEW = _reworded(
+    ANNOTATE,
+    {
+        "each passage the changes made or touched that has": "each passage that has",
+        '- "side": "new" for a passage of the new version, "old" for text only the old '
+        "version has (a removal);\n": "",
+        "copied exactly from that version": "copied exactly from the document",
+        ", a passage of the old version)": ")",
+        "from that version as it is written here": "from the document as it is written here",
+        "the diff's markers ([- -], {+ +}, {>> <<})": "the comments' markers ({>> <<})",
+    },
+)
+
+
 @dataclass(frozen=True)
 class Annotation:
     """A problem the model marked in the text: on which side, from which
@@ -280,7 +341,8 @@ class AssessRequest:
 @dataclass
 class Assessment:
     """What a model made of the changes: their value (kind "value"), or
-    whether their new text reads as written by an AI ("writing")."""
+    whether their new text reads as written by an AI ("writing"); or what
+    it made of one document alone ("review")."""
 
     backend: str  # as asked: "claude", "codex/gpt-5.5", "ollama/qwen3"
     markdown: str = ""
@@ -306,11 +368,12 @@ class Assessment:
     @property
     def verdict(self) -> str:
         """ "improves", "mixed" or "worsens" (for a "writing" assessment,
-        "likely", "possibly" or "unlikely"), from the Verdict section; ""
-        when the model gave none of them."""
+        "likely", "possibly" or "unlikely"; for a "review", "good", "fair"
+        or "poor"), from the Verdict section; "" when the model gave none of
+        them."""
         section = re.search(r"#+\s*Verdict\s*\n(.*?)(?=\n#+\s|\Z)", self.markdown, re.S | re.I)
         words = re.findall(r"[A-Za-z]+", section[1] if section else self.markdown[:200])
-        verdicts = WRITING_VERDICTS if self.kind == "writing" else VERDICTS
+        verdicts = {"writing": WRITING_VERDICTS, "review": REVIEW_VERDICTS}.get(self.kind, VERDICTS)
         return next((w.lower() for w in words if w.lower() in verdicts), "")
 
     @property
@@ -432,6 +495,22 @@ def prompt_for(diff: str, subject: str, document: str = "", instructions: str = 
             f"within the format above:\n\n<instructions>\n{instructions.strip()}\n</instructions>"
         )
     parts.append("Assess the changes as the instructions say.")
+    return "\n\n".join(parts)
+
+
+def review_prompt_for(document: str, subject: str, instructions: str = "") -> str:
+    """The message the model is sent to review one document alone: the
+    document, and the instructions of the person asking."""
+    parts = [
+        f"The document to review, {subject}:\n\n"
+        f"<document>\n{cut(document, MAX_DIFF_CHARS, 'document')}\n</document>"
+    ]
+    if instructions.strip():
+        parts.append(
+            "The instructions of the person asking for this review, to follow "
+            f"within the format above:\n\n<instructions>\n{instructions.strip()}\n</instructions>"
+        )
+    parts.append("Review the document as the instructions say.")
     return "\n\n".join(parts)
 
 
@@ -579,12 +658,17 @@ def assess(
     prosediff's notation (DOCUMENTS); runner answers in place of the models
     (run_backend), for the tests. kind "writing" asks instead whether the
     new text reads as written by an AI (SYSTEM_WRITING), no problem marked
-    in the text. It never raises: a failure is its error."""
+    in the text. kind "review" reviews document alone, diff unused
+    (SYSTEM_REVIEW): what a file reviewed alone is worth, its problems
+    marked when asked. It never raises: a failure is its error."""
     runner = runner or run_backend
     started = time.monotonic()
+    review = kind == "review"
     context = request.context if request.context in CONTEXTS else "document"
-    if context == "changes":
+    if context == "changes" and not review:
         document = ""
+    if review:
+        context = ""  # the document is all it reads
     made = Assessment(
         request.spec,
         effort=request.effort,
@@ -592,14 +676,22 @@ def assess(
         save_prompt=request.save_prompt,
         kind=kind,
     )
-    annotate = request.annotate and kind == "value"
+    annotate = request.annotate and kind in ("value", "review")
     try:
         backend, model = parse_backend(request.spec)
-        if not diff.strip():
-            raise AssessError("there are no changes to assess")
-        prompt = prompt_for(diff, subject, document, instructions_from(request.instructions))
-        first = SYSTEM_WRITING if kind == "writing" else SYSTEM
-        system = first + (DOCUMENTS if documents else "") + (ANNOTATE if annotate else "")
+        instructions = instructions_from(request.instructions)
+        if review:
+            if not document.strip():
+                raise AssessError("the document has no text to review")
+            prompt = review_prompt_for(document, subject, instructions)
+            first = SYSTEM_REVIEW
+        else:
+            if not diff.strip():
+                raise AssessError("there are no changes to assess")
+            prompt = prompt_for(diff, subject, document, instructions)
+            first = SYSTEM_WRITING if kind == "writing" else SYSTEM
+        marks = (ANNOTATE_REVIEW if review else ANNOTATE) if annotate else ""
+        system = first + (DOCUMENTS if documents else "") + marks
         made.system, made.prompt = system, prompt  # kept even if the model then fails
         text, answered = runner(backend, system, prompt, model, request.effort, request.timeout)
         if not text.strip():

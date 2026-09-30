@@ -2,7 +2,8 @@
 
 What is compared is chosen with a segmented button: a git repository (base
 and target picked among its latest commits, the working tree and the index,
-or typed as any ref), two files, or two folders. The options that change
+or typed as any ref), two files, or two folders; or one file alone, for an
+AI to review, nothing compared. The options that change
 what the comparison finds sit in one card, each explained by a tooltip; how
 the report shows it, with the settings few change, under Advanced settings;
 the output (an HTML report, a unified or word diff, or tracked changes) in
@@ -67,6 +68,7 @@ from prosediff.diff import (
     compare_paths,
     compare_split,
     move_defaults,
+    review_file,
     setting_type,
 )
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, language_name, normalize_language
@@ -84,7 +86,13 @@ from prosediff.render import (
     open_output,
     write_output,
 )
-from prosediff.sources import DOCX_CHANGES, FOLDER_FILES, SourceError, default_page
+from prosediff.sources import (
+    DOCX_CHANGES,
+    FOLDER_FILES,
+    SourceError,
+    default_page,
+    review_page,
+)
 from prosediff.tracked import TRACKED_FORMATS, check_paths
 
 MAX_COMMITS = 200
@@ -195,6 +203,7 @@ class Settings:
     new: str = ""
     old_folder: str = ""  # the two folders
     new_folder: str = ""
+    single: str = ""  # the one file an AI reviews alone (the tab "review")
     # the files of two folders compared: glob patterns separated by "|"
     include: str = FOLDER_FILES
     # "markers": set apart from the text (a marker and a panel in the HTML
@@ -257,13 +266,14 @@ class Settings:
 
 
 READY = "Choose what to compare, then Compare."
+REVIEW_READY = "Choose the file, and the AI to review it, then Review."
 # The tooltips: their width in pixels, and how long the pointer must rest.
 HINT_WIDTH = 360
 HINT_DELAY_MS = 400
 # How long the notification of a finished comparison stays up.
 TOAST_MS = 4000
-# The tabs, in their order.
-MODES = ("git", "files", "folders")
+# The tabs, in their order: the last reviews one file, nothing compared.
+MODES = ("git", "files", "folders", "review")
 PREFILLED_FILES = (".md", ".docx", ".odt")
 # The space around the fields of the window.
 PAD = {"padx": 6, "pady": 4}
@@ -419,6 +429,8 @@ def generate(
         language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
+    if s.mode == "review":
+        return review(s, options, progress, approve)
     old, new = sides(s)
     fmt = s.output_format if s.output_format in FORMATS else "html"
     split = s.split if s.split in SPLITS else default_split(fmt)
@@ -506,6 +518,49 @@ def generate(
     return out, comparison, assessment
 
 
+def review(
+    s: Settings,
+    options: Options,
+    progress: Callable[[str], None],
+    approve: Callable[[Path], bool] | None,
+) -> tuple[Path, Comparison, Assessment | None]:
+    """generate for one file alone (the tab "review"): the AI chosen reviews
+    it whole, into an HTML report, first written without the review when
+    s.assess_preview (as generate does)."""
+    if not s.single:
+        raise ValueError("choose the file to review")
+    if not s.assess:
+        raise ValueError("choose an AI to review the file")
+    progress("Reading the file…")
+    comparison = review_file(s.single, options)
+    out = Path(s.output) if s.output else review_page(Path(s.single))
+    out = Path(with_format(str(out), "html"))
+    write = partial(
+        write_output,
+        comparison,
+        out,
+        align=s.align,
+        split="paragraph",
+        documents=s.assess_documents,
+    )
+    if s.assess_preview and approve is not None:
+        progress("Writing the preview…")
+        write()
+        if not approve(out):
+            return out, comparison, None
+    request = AssessRequest(
+        s.assess,
+        effort=s.assess_effort,
+        instructions=s.assess_instructions,
+        save_prompt=s.assess_save_prompt,
+        annotate=s.assess_annotate,
+    )
+    progress(f"Asking {s.assess} to review the file…")
+    assessment = assess_comparison(comparison, request)
+    progress("Writing the report…")
+    return write(assessment=assessment), comparison, assessment
+
+
 # Why a comparison can fail: the errors the window reports, others being bugs.
 JOB_ERRORS = (
     git.InvalidGitRepositoryError,
@@ -530,6 +585,8 @@ class JobResult:
     additions: int
     deletions: int
     assessment: Assessment | None = None
+    # the name of the file reviewed alone, "" for a comparison
+    reviewed: str = ""
 
 
 # How long a preview waits for the window to say whether the AI assesses;
@@ -561,7 +618,14 @@ def run_job(s: Settings, messages, replies) -> None:
         messages.put(("error", f"{type(e).__name__}: {e}"))
         return
     counts = c.counts
-    result = JobResult(path, len(c.files), counts.additions, counts.deletions, assessment)
+    result = JobResult(
+        path,
+        len(c.files),
+        counts.additions,
+        counts.deletions,
+        assessment,
+        c.repo_name if c.single else "",
+    )
     messages.put(("done", result))
 
 
@@ -629,6 +693,7 @@ class App:
             ("git", "Git repository", "git"),
             ("files", "Files", "files"),
             ("folders", "Folders", "folder2"),
+            ("review", "One file", "file-earmark-text"),
         ):
             ttk.Radiobutton(
                 switch,
@@ -648,6 +713,7 @@ class App:
             side.columnconfigure(1, weight=1)
         self.build_git_side(self.sides["git"])
         self.build_path_sides(self.sides["files"], self.sides["folders"])
+        self.build_review_side(self.sides["review"])
 
         # The options that change what the comparison finds, in one card; how
         # the report shows it goes with the advanced settings
@@ -739,6 +805,21 @@ class App:
             "(its path within the folder for a pattern with a /); empty: every file.",
         )
 
+    def build_review_side(self, side: ttk.Frame) -> None:
+        """The field of one file, reviewed alone."""
+        self.single = tk.StringVar(value=self.s.single)
+        ttk.Label(side, text="File").grid(row=0, column=0, sticky="w", **PAD)
+        ttk.Entry(side, textvariable=self.single).grid(row=0, column=1, sticky="ew", **PAD)
+        browse(side, lambda: self.pick(self.single, False), "Choose the file to review").grid(
+            row=0, column=2, **PAD
+        )
+        ttk.Label(
+            side,
+            text="One file alone, reviewed whole by the AI chosen below: nothing compared. "
+            "A Word or OpenDocument file comes back with the AI's comments and fixes.",
+            bootstyle="secondary",
+        ).grid(row=1, column=1, sticky="w", padx=6)
+
     def build_compared_card(self, card: ttk.Labelframe) -> None:
         """The options that change what the comparison finds, in two columns."""
         compared = ttk.Frame(card)
@@ -801,15 +882,19 @@ class App:
         self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "both")
         splits = ttk.Frame(compared)
         split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
+        # what only a comparison has, greyed out reviewing one file (show_mode)
+        self.comparing_only: list[tk_ttk.Widget] = []
         for value, text in split_names:
-            ttk.Radiobutton(
+            button = ttk.Radiobutton(
                 splits,
                 text=text,
                 value=value,
                 variable=self.split,
                 bootstyle="secondary-outline-toolbutton",
                 padding=(8, 3),
-            ).pack(side="left")
+            )
+            button.pack(side="left")
+            self.comparing_only.append(button)
         field_row(
             compared,
             2,
@@ -820,12 +905,14 @@ class App:
             "toolbar switches between the two.",
         )
         self.ignore_ws = tk.BooleanVar(value=self.s.ignore_whitespace)
-        switch_row(
-            right,
-            1,
-            "Ignore whitespace",
-            self.ignore_ws,
-            "Lines that differ only in spacing are the same, as git diff -w.",
+        self.comparing_only.append(
+            switch_row(
+                right,
+                1,
+                "Ignore whitespace",
+                self.ignore_ws,
+                "Lines that differ only in spacing are the same, as git diff -w.",
+            )
         )
 
     def build_report_card(self, card: ttk.Labelframe) -> None:
@@ -1028,7 +1115,7 @@ class App:
         )
         # Save to, while it is the default: it follows the sides (follow_sides)
         self.auto_output = ""
-        for var in (self.mode, self.old, self.new, self.old_folder, self.new_folder):
+        for var in (self.mode, self.old, self.new, self.old_folder, self.new_folder, self.single):
             var.trace_add("write", lambda *_: self.follow_sides())
         self.follow_sides()
         save = ttk.Button(
@@ -1122,6 +1209,8 @@ class App:
         # what only matters when an AI assesses, greyed out while none is
         # chosen (update_ai_switches)
         self.ai_switches = []
+        # what only applies to changes, greyed out reviewing one file
+        self.changes_only: list[tk_ttk.Widget] = []
         reads = ttk.Frame(card)
         for value, text, tip in (
             (
@@ -1151,6 +1240,7 @@ class App:
             button.pack(side="left")
             hint(button, tip)
             self.ai_switches.append(button)
+            self.changes_only.append(button)
         field_row(card, 1, "Reads", reads, "What the model is sent, besides the instructions.")
         self.assess_instructions = tk.StringVar(value=self.s.assess_instructions)
         ttk.Label(card, text="Instructions").grid(row=2, column=0, sticky="w", **PAD)
@@ -1229,6 +1319,8 @@ class App:
             self.ai_switches.append(switch)
             if var is self.assess_documents:
                 self.documents_switch = switch
+            if var is self.assess_ai_writing:
+                self.changes_only.append(switch)
         self.assess_annotate.trace_add("write", lambda *_: self.update_ai_switches())
         self.assess_ai.trace_add("write", lambda *_: self.update_ai_switches())
         self.update_ai_switches()
@@ -1257,6 +1349,11 @@ class App:
         chosen = self.ai_chosen() not in ("", NO_ASSESSMENT)
         return chosen and self.output_format.get() == "html"
 
+    def reviewing(self) -> bool:
+        """Whether one file is reviewed alone (the tab "review"), not two
+        versions compared."""
+        return self.mode.get() == "review"
+
     def update_ai_card(self) -> None:
         """The AI assessment card, greyed out whole unless the output is the
         HTML report; its model, effort and switches then as the AI says."""
@@ -1282,6 +1379,9 @@ class App:
             # the documents are made of the problems marked in the text
             if switch is getattr(self, "documents_switch", None):
                 on = on and self.assess_annotate.get()
+            # what the model reads and the AI-writing check are of changes
+            if switch in self.changes_only:
+                on = on and not self.reviewing()
             switch.state(["!disabled"] if on else ["disabled"])
 
     def pick_into(self, var: tk.StringVar, title: str) -> None:
@@ -1542,14 +1642,25 @@ class App:
         self.root.bind("<Escape>", lambda e: self.cancel())
 
     def show_mode(self) -> None:
-        """Show the fields of what is compared: a repository, files or folders."""
+        """Show the fields of what is compared: a repository, files or
+        folders; or of the one file reviewed, the options of a comparison
+        greyed out, the output an HTML report."""
         if self.mode.get() != "git":
-            self.status.set(READY)
+            self.status.set(REVIEW_READY if self.reviewing() else READY)
         for mode, side in self.sides.items():
             if mode == self.mode.get():
                 side.pack(fill="x")
             else:
                 side.pack_forget()
+        for w in self.comparing_only:
+            w.state(["disabled"] if self.reviewing() else ["!disabled"])
+        if self.reviewing() and self.output_format.get() != "html":
+            self.output_format.set("html")
+            self.rename_output()
+        self.update_tracked_formats()
+        self.update_ai_switches()
+        if self.job is None:
+            self.show_cancel(False)
 
     # Choosing ------------------------------------------------------------------
 
@@ -1582,6 +1693,9 @@ class App:
         mode = self.mode.get()
         if mode == "git":
             return ""
+        if mode == "review":
+            single = self.single.get().strip()
+            return str(review_page(Path(single)).resolve()) if single else ""
         old, new = (self.old, self.new) if mode == "files" else (self.old_folder, self.new_folder)
         if not old.get().strip() or not new.get().strip():
             return ""
@@ -1606,6 +1720,9 @@ class App:
                 Path(v.get().strip()).suffix.lower() == suffix for v in (self.old, self.new)
             )
             self.format_buttons[fmt].state(["!disabled"] if fits else ["disabled"])
+        if self.reviewing():  # a review is an HTML report: no diff, no changes
+            for fmt, button in self.format_buttons.items():
+                button.state(["!disabled"] if fmt == "html" else ["disabled"])
 
     def update_empty_comments(self) -> None:
         """Comments without text are a choice of markers only."""
@@ -1710,6 +1827,7 @@ class App:
             new=self.new.get().strip(),
             old_folder=self.old_folder.get().strip(),
             new_folder=self.new_folder.get().strip(),
+            single=self.single.get().strip(),
             include=self.include.get().strip(),
             comments=self.comments.get(),
             empty_comments=self.empty_comments.get(),
@@ -1838,6 +1956,9 @@ class App:
         if self.job is not None:
             return  # one comparison at a time
         s = self.collect()
+        if s.mode == "review" and not s.assess:
+            self.complain("Choose an AI, under AI assessment, to review the file.")
+            return
         if s.assess and s.output_format == "html":
             try:
                 parse_backend(s.assess)
@@ -1880,6 +2001,13 @@ class App:
                 text="Cancel", image=self.cancel_icon, command=self.cancel, bootstyle="danger"
             )
             self.button_tip.text = "Stop this comparison and the AI assessment (Esc)"
+        elif self.reviewing():
+            self.button.configure(
+                text="Review", image=self.compare_icon, command=self.run, bootstyle="primary"
+            )
+            self.button_tip.text = (
+                "Have the AI review the file, write the report and open it (Ctrl+Enter)"
+            )
         else:
             self.button.configure(
                 text="Compare", image=self.compare_icon, command=self.run, bootstyle="primary"
@@ -1941,7 +2069,9 @@ class App:
         result: JobResult = value
         path, assessment = result.path, result.assessment
         summary = (
-            f"{counted(result.files, 'file')} changed, "
+            f"{result.reviewed} reviewed"
+            if result.reviewed
+            else f"{counted(result.files, 'file')} changed, "
             f"+{result.additions:,} −{result.deletions:,} lines"
         )
         if assessment is not None:
@@ -1968,10 +2098,13 @@ class App:
         its text goes to the AI is asked in this window (answer_preview), not
         in a dialog, which the browser opening would cover."""
         self.set_stage("Preview open in the browser: send it to the AI?")
+        what, it = (
+            ("the file", "it") if self.job_settings.mode == "review" else ("the changes", "them")
+        )
         self.preview_text.set(
             f"The report without the AI assessment is open in the browser: {path.name}. "
-            f"Send the changes to {self.job_settings.assess} for assessment? Send: the "
-            "AI assesses them and the report is written again with its assessment. "
+            f"Send {what} to {self.job_settings.assess} for assessment? Send: the "
+            f"AI assesses {it} and the report is written again with its assessment. "
             "Don't send: the report stays as it is."
         )
         self.preview_bar.pack(fill="x", side="bottom", pady=(10, 0), after=self.bottom)

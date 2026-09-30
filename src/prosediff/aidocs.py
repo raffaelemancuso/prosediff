@@ -560,7 +560,14 @@ class Download:
 
 def document_file(comparison: Comparison) -> tuple[FileDiff, str] | None:
     """The one Word document (or OpenDocument text) of a comparison, compared
-    with another of its kind, and its format; None for anything else."""
+    with another of its kind or reviewed alone (Comparison.single), and its
+    format; None for anything else."""
+    if comparison.single:
+        f = next((f for f in comparison.files if f.new_data and not f.binary), None)
+        fmt = PurePosixPath(f.new_path or "").suffix.lower().lstrip(".") if f else ""
+        if fmt not in TRACKED_FORMATS or (fmt == "odt" and f.document_changes != "accept-all"):
+            return None
+        return f, fmt
     for fmt in TRACKED_FORMATS:
         try:
             f = check_tracked(comparison, fmt)
@@ -637,7 +644,8 @@ def notes_in(red, notes, author: str, assessment: Assessment, fixes: bool) -> di
 def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Download]:
     """The documents the report offers when the AI marked problems in a Word
     document or an OpenDocument text: the tracked changes with the AI's
-    comments, and the new version with its fixes; none for anything else.
+    comments, and the new version with its fixes (a document reviewed
+    alone, that one only: it has no changes); none for anything else.
     A document that cannot be made is left out, with a warning: the report
     must not cost it."""
     if assessment is None or assessment.error or not assessment.annotations:
@@ -651,24 +659,26 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
     stem = PurePosixPath((f.new_path or "document").replace("\\", "/")).stem
     red_of = WordRedline if fmt == "docx" else OdtRedline
     out = []
-    try:
-        red = red_of(f, author_of(comparison))
-        red.run()
-        ids = notes_in(red, notes, ai, assessment, fixes=False)
-        data = (WordNotes if fmt == "docx" else OdtNotes)(red, ai).save()
-        out.append(
-            Download(
-                f"{stem}_tracked_with_AI_comments.{fmt}",
-                "The changes, tracked, with the AI's comments",
-                data,
-                fmt,
-                ids,
+    if not comparison.single:  # a document alone has no changes to track
+        try:
+            red = red_of(f, author_of(comparison))
+            red.run()
+            ids = notes_in(red, notes, ai, assessment, fixes=False)
+            data = (WordNotes if fmt == "docx" else OdtNotes)(red, ai).save()
+            out.append(
+                Download(
+                    f"{stem}_tracked_with_AI_comments.{fmt}",
+                    "The changes, tracked, with the AI's comments",
+                    data,
+                    fmt,
+                    ids,
+                )
             )
-        )
-    except Exception as e:  # a document the redline cannot take
-        warnings.warn(
-            f"the tracked changes with the AI's comments could not be made: {e}", stacklevel=2
-        )
+        except Exception as e:  # a document the redline cannot take
+            warnings.warn(
+                f"the tracked changes with the AI's comments could not be made: {e}", stacklevel=2
+            )
+    which = "document" if comparison.single else "new version"
     try:
         red = red_of(f, ai)
         ids = notes_in(red, notes, ai, assessment, fixes=True)
@@ -676,12 +686,12 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
         out.append(
             Download(
                 f"{stem}_with_AI_fixes.{fmt}",
-                "The new version with the AI's fixes, tracked",
+                f"The {which} with the AI's fixes, tracked",
                 data,
                 fmt,
                 ids,
             )
         )
     except Exception as e:
-        warnings.warn(f"the new version with the AI's fixes could not be made: {e}", stacklevel=2)
+        warnings.warn(f"the {which} with the AI's fixes could not be made: {e}", stacklevel=2)
     return out

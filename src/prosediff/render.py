@@ -223,6 +223,8 @@ def write_output(
     the other formats have none. documents as in render."""
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {tuple(FORMATS)}, not {fmt!r}")
+    if comparison.single and fmt != "html":
+        raise ValueError("a file reviewed alone has no changes: its review is an HTML report")
     if fmt in TRACKED_FORMATS:
         return write_tracked(comparison, path, fmt)
     if fmt != "html":
@@ -262,13 +264,27 @@ def assess_comparison(
     (prosediff.assess): its word diff, the changed lines alone, comments
     included, and the whole new version (new_version) when the request's
     context says so, sent to the model; kind "writing" asks instead whether
-    their new text reads as written by an AI."""
+    their new text reads as written by an AI. A file reviewed alone
+    (Comparison.single) is sent whole, for a review (kind "review"); it has
+    no new text to ask the other question of (ValueError)."""
+    documents = any(f.old_data or f.new_data for f in comparison.files)
+    if comparison.single:
+        if kind != "value":
+            raise ValueError("a file reviewed alone has no changes whose writing to assess")
+        return assess(
+            "",
+            comparison.repo_name,
+            request,
+            document=new_version(comparison),
+            documents=documents,
+            kind="review",
+        )
     return assess(
         unified(comparison, 0, "wdiff"),
         comparison.repo_name,
         request,
         document=new_version(comparison) if request.context == "document" else "",
-        documents=any(f.old_data or f.new_data for f in comparison.files),
+        documents=documents,
         kind=kind,
     )
 
