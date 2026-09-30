@@ -163,22 +163,30 @@ version, punctuation included;
 - "end": its last 3 to 8 words, copied exactly (the same as "start" for a \
 short passage);
 - "problem": what is wrong with it, in a sentence;
-- "solution": the change you propose, in a sentence or as the text to put.
+- "solution": the change you propose, in a sentence;
+- "replacement": when the fix is an edit of the passage's own words, the \
+whole passage from its "start" to its "end" as it should read, every word \
+it keeps copied exactly, only what must change changed; "" when the fix is \
+anything else (text to add elsewhere, a question to answer, a figure to \
+make, a passage of the old version) or the passage runs over more than one \
+paragraph.
 Copy the words from the text itself, never with the diff's markers ([- -], \
-{+ +}, {>> <<}) nor the notation of a document's formatting. Write [] when \
-nothing is to be marked."""
+{+ +}, {>> <<}) nor the notation of a document's formatting, in \
+"replacement" too. Write [] when nothing is to be marked."""
 
 
 @dataclass(frozen=True)
 class Annotation:
     """A problem the model marked in the text: on which side, from which
-    words to which, what is wrong and what to do."""
+    words to which, what is wrong and what to do; replacement, the passage
+    as it should read, when the fix is an edit of its words ("" else)."""
 
     side: str  # "new" or "old"
     start: str
     end: str
     problem: str
     solution: str = ""
+    replacement: str = ""
 
 
 # The fenced JSON block at the end of an answer, with the marked passages.
@@ -204,13 +212,16 @@ def split_annotations(answer: str) -> tuple[str, list[Annotation]]:
         get = {k: str(item.get(k) or "").strip() for k in ("side", "start", "end", "problem")}
         if not get["start"] or not get["problem"]:
             continue
+        side = "old" if get["side"].lower() == "old" else "new"
         notes.append(
             Annotation(
-                "old" if get["side"].lower() == "old" else "new",
+                side,
                 get["start"],
                 get["end"] or get["start"],
                 get["problem"],
                 str(item.get("solution") or "").strip(),
+                # a passage of the new version only: the old one is not in the file
+                str(item.get("replacement") or "").strip() if side == "new" else "",
             )
         )
     text = answer[: block.start()] + answer[block.end() :]

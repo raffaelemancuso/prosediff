@@ -930,3 +930,49 @@ def test_the_margin_hidden_and_shown(page):
     assert not page.locator(".card").is_visible()
     page.keyboard.press("g")
     assert page.locator(".card").is_visible()
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
+    """The drawer saves each document the AI's problems were put in; a
+    problem left out in review mode (its box unticked) is not in either:
+    no comment of its, its fix rejected."""
+    from test_aidocs import ADVICE, FIXED, assessment, comments_of
+    from test_tracked import lines, pair
+
+    old, new = pair(tmp_path, fmt)
+    c = compare_paths(str(old), str(new), Options())
+    page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
+    included = page.locator(".ai-documents .ai-included")
+
+    def save(label, name):
+        page.click(".verdict-button")
+        with page.expect_download() as d:
+            page.click(f".ai-download:has-text('{label}')")
+        out = tmp_path / name
+        d.value.save_as(out)
+        assert (
+            d.value.suggested_filename
+            == f"new_{'with_AI_fixes' if 'fixes' in label else 'tracked_with_AI_comments'}.{fmt}"
+        )
+        page.keyboard.press("Escape")
+        return out
+
+    assert "2 of the 2 problems" in included.inner_text()
+    fixed = save("fixes", f"all.{fmt}")
+    assert "We find a small and significant effect." in lines(fixed, "accept-all")
+    assert "Nothing supports a large effect." in comments_of(fixed, fmt)
+    # the fixed problem left out in review mode
+    page.keyboard.press("r")
+    page.locator("#review-list .with-check", has_text="Nothing supports").locator("input").uncheck()
+    page.keyboard.press("r")
+    assert "1 of the 2 problems" in included.inner_text()
+    fewer = save("fixes", f"fewer.{fmt}")
+    assert lines(fewer, "accept-all") == lines(new, "accept-all")
+    texts = comments_of(fewer, fmt)
+    assert "Nothing supports a large effect." not in texts
+    assert "Which checks?\nProposed: Name them." in texts
+    tracked = save("comments", f"tracked.{fmt}")
+    assert lines(tracked, "reject-all") == lines(old, "accept-all")
+    assert [t for t in comments_of(tracked, fmt) if "Nothing supports" in t] == []
+    page.context.close()

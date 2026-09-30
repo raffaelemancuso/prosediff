@@ -878,3 +878,30 @@ def test_moved_passage_settings_loaded_and_checked(tmp_path):
     assert load_settings(path).moved_passages == {}
     with pytest.raises(ValueError, match="partial_share"):
         MovedPassageSettings.from_choices({"partial_share": 3})
+
+
+def test_documents_to_download(tmp_path, monkeypatch, root):
+    """The documents made of the AI's problems go in the report unless
+    switched off; the switch is greyed out while the problems are not
+    marked in the text."""
+    from test_aidocs import FIXED, assessment
+    from test_tracked import pair
+
+    old, new = pair(tmp_path, "docx")
+    monkeypatch.setattr(gui, "assess_comparison", lambda c, request: assessment([FIXED]))
+    s = Settings(mode="files", old=str(old), new=str(new), assess="claude", assess_preview=False)
+    path, _, _ = generate(s)
+    assert path.read_text(encoding="utf-8").count('class="ai-document"') == 2
+    path, _, _ = generate(replace(s, assess_documents=False))
+    assert 'class="ai-document"' not in path.read_text(encoding="utf-8")
+    app = App(root, Settings(mode="files"))
+    settle(root, app)
+    assert app.collect().assess_documents is True
+    app.assess_ai.set("claude")
+    settle(root, app, "claude")
+    assert not app.documents_switch.instate(["disabled"])
+    app.assess_annotate.set(False)
+    assert app.documents_switch.instate(["disabled"])
+    app.assess_annotate.set(True)
+    app.assess_documents.set(False)
+    assert app.collect().assess_documents is False

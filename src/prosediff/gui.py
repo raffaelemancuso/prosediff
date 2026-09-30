@@ -251,6 +251,9 @@ class Settings:
     # whether the AI is also asked, apart, if the new text reads as written by
     # an AI
     assess_ai_writing: bool = False
+    # whether the report holds the documents made of the problems the AI
+    # marked in a Word document or an OpenDocument text (prosediff.aidocs)
+    assess_documents: bool = True
 
 
 READY = "Choose what to compare, then Compare."
@@ -471,6 +474,7 @@ def generate(
         context=context_of(s),
         sentences=sentences,
         split=split,
+        documents=s.assess_documents,
     )
     if s.assess and fmt == "html" and s.assess_preview and approve is not None:
         progress("Writing the preview…")
@@ -1169,6 +1173,7 @@ class App:
         self.assess_save_prompt = tk.BooleanVar(value=self.s.assess_save_prompt)
         self.assess_preview = tk.BooleanVar(value=self.s.assess_preview)
         self.assess_ai_writing = tk.BooleanVar(value=self.s.assess_ai_writing)
+        self.assess_documents = tk.BooleanVar(value=self.s.assess_documents)
         switches = ttk.Frame(card)
         switches.grid(row=3, column=1, columnspan=2, sticky="w", **PAD)
         for k, (text, var, tip) in enumerate(
@@ -1204,13 +1209,27 @@ class App:
                     "message) in the HTML report, in a closed panel at its end: to see what "
                     "it read.",
                 ),
+                (
+                    "Documents to download",
+                    self.assess_documents,
+                    "Comparing a Word document with another (or an OpenDocument text with "
+                    "another), put two documents in the HTML report, to download from the AI "
+                    "assessment: the tracked changes with the AI's comments, and the new "
+                    "version with the AI's fixes as its own tracked changes, to accept or "
+                    "reject. Review mode chooses which problems they hold. They make the "
+                    "report larger: about 2.7 times the document's size. Needs \"Mark "
+                    'individual changes".',
+                ),
             )
         ):
             switch = toggle(switches, text, var)
-            # two rows of two
+            # rows of two
             switch.grid(row=k // 2, column=k % 2, sticky="w", padx=(0, 24), pady=3)
             hint(switch, tip)
             self.ai_switches.append(switch)
+            if var is self.assess_documents:
+                self.documents_switch = switch
+        self.assess_annotate.trace_add("write", lambda *_: self.update_ai_switches())
         self.assess_ai.trace_add("write", lambda *_: self.update_ai_switches())
         self.update_ai_switches()
         self.assess_ai.trace_add("write", lambda *_: self.update_models())
@@ -1259,7 +1278,11 @@ class App:
         """What the AI is sent and the AI assessment's switches, greyed out
         while no AI will assess."""
         for switch in self.ai_switches:
-            switch.state(["!disabled"] if self.ai_active() else ["disabled"])
+            on = self.ai_active()
+            # the documents are made of the problems marked in the text
+            if switch is getattr(self, "documents_switch", None):
+                on = on and self.assess_annotate.get()
+            switch.state(["!disabled"] if on else ["disabled"])
 
     def pick_into(self, var: tk.StringVar, title: str) -> None:
         chosen = filedialog.askopenfilename(
@@ -1718,6 +1741,7 @@ class App:
             assess_annotate=self.assess_annotate.get(),
             assess_preview=self.assess_preview.get(),
             assess_ai_writing=self.assess_ai_writing.get(),
+            assess_documents=self.assess_documents.get(),
         )
 
     def toggle_advanced(self) -> None:
@@ -1798,6 +1822,7 @@ class App:
             (self.assess_annotate, d.assess_annotate),
             (self.assess_preview, d.assess_preview),
             (self.assess_ai_writing, d.assess_ai_writing),
+            (self.assess_documents, d.assess_documents),
         ):
             var.set(value)
         self.move_passages.set(d.move_passages)

@@ -167,6 +167,7 @@ works](#how-it-works)). git must be on `PATH`, or named by the
 | `--assess-context document\|changes` | what the model reads: `document` (default), the changes and the whole new version, to check them against the rest of the document (citations, cross-references, terms); `changes`, the changes only. The old version is never sent apart: its unchanged paragraphs are in the new one, and what changed is in the changes. In the GUI, "Changes + new version" and "Changes only" |
 | `--assess-instructions TEXT` | your own instructions, added to the prompt (e.g. `"the journal is Research Policy; Laura asked to shorten the introduction"`), or a text file holding them |
 | `--assess-annotate`, `--no-assess-annotate` | have the AI mark each problem in the text (default: on): from its first words to its last, with what is wrong and the change it proposes; a numbered ⚠ badge before each in the HTML report, its passage highlighted when clicked, a card in the margin beside it, and stepped through from the top bar. In the GUI, "Mark individual changes" |
+| `--assess-documents`, `--no-assess-documents` | with problems marked in a Word document or an OpenDocument text compared with another, put in the HTML report the tracked changes with the AI's comments and the new version with its fixes, to download (default: on; see [The AI's problems in Word and LibreOffice documents](#the-ais-problems-in-word-and-libreoffice-documents)). In the GUI, "Documents to download" |
 | `--assess-save-prompt`     | also put the exact text sent to the model, its system prompt and its message, in the HTML report, in a closed panel at its end (off by default): to see what it read. In the GUI, "Save AI prompt" |
 | `--assess-ai-writing`      | also ask the AI, apart, whether the text the changes added reads as written by an AI (off by default): a second assessment, its verdict (likely, possibly or unlikely) in the HTML report's top bar, opening its own drawer, with the signs for and against. An indication, not a proof: careful writers show the same signs, and writers in a second language are often taken for an AI wrongly. In the GUI, "Check for AI writing" |
 | `--assess-timeout SECONDS` | give up on the assessment after this long (default 900); the report is written all the same, saying why there is none |
@@ -278,6 +279,33 @@ card ringed, until clicked again. The top bar's ◀ ⚠ ▶ (`a`, Shift+`a`) ste
 through them.
 
 ![A paragraph of a prosediff report with the problems the AI marked: a numbered badge before each passage in the text, and in the margin beside it a card for each, what is wrong and the change proposed; the first pinned, its passage highlighted and its card ringed](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_marks.png)
+
+### The AI's problems in Word and LibreOffice documents
+
+When a Word document is compared with another (or an OpenDocument text with
+another) and the AI marked problems, the assessment's drawer offers two
+documents to download, made from the new version:
+
+- **The changes, tracked, with the AI's comments**: the document of
+  [tracked changes](#tracked-changes), each problem a comment of the AI's
+  on its passage, what is wrong and the change it proposes;
+- **The new version with the AI's fixes, tracked**: where the AI wrote out
+  how the passage should read, its fix is a tracked change of its own, to
+  accept or reject in Word or LibreOffice, what is wrong a comment on it;
+  a problem it gave no such fix for (text to add elsewhere, a reviewer to
+  answer, a passage over several paragraphs) is a comment, the change
+  proposed in it.
+
+Each opens with a comment on the first paragraph giving the AI's verdict;
+the comments and the changes are the AI's, under its name ("Claude Code
+(claude-opus-5-5)"). Review mode (`r`) has a box beside each problem:
+unticked, the problem is left out of both documents when they are saved, its
+comment taken out and its fix rejected. A problem in text only the old
+version has stays in the report. The documents are made when the report is,
+paragraph by paragraph, and held in it as text: the report grows by about
+2.7 times the document's size (two copies, a third larger as text);
+`--no-assess-documents` (in the window, "Documents to download" off)
+leaves them out.
 
 The AI is one of three kinds, each an optional extra of prosediff, so the
 plain install stays small:
@@ -805,6 +833,11 @@ simulated revisions made from them, so no run downloads or rebuilds them.
 prosediff was inspired by [diff2html](https://diff2html.xyz/)
 ([rtfpessoa/diff2html](https://github.com/rtfpessoa/diff2html)), whose
 side-by-side HTML view of a diff it carries over from code to prose.
+
+The HTML report reads and writes the zips of the Word and LibreOffice
+documents it offers with [fflate](https://github.com/101arrowz/fflate)
+(0.8.3, MIT licence), whose browser build ships with prosediff
+(`src/prosediff/vendor/`, its licence beside it).
 
 prosediff was written with the help of [Claude Code](https://claude.com/claude-code),
 Anthropic's AI coding assistant.

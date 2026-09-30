@@ -8,3 +8,5 @@
 *.gz binary
 # books as Project Gutenberg serves them (CRLF): never normalized
 docs/benchmark_data/gutenberg/*.txt -text
+# third-party files as their authors publish them: never normalized
+src/prosediff/vendor/* -text

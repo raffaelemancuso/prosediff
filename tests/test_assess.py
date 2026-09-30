@@ -103,8 +103,9 @@ MARKED = """## Verdict
 ```json
 [
  {"side": "new", "start": "One changed", "end": "line.", "problem": "Vague.",
-  "solution": "Say what changed."},
- {"side": "old", "start": "One line.", "end": "One line.", "problem": "Lost."},
+  "solution": "Say what changed.", "replacement": "One line, reworded."},
+ {"side": "old", "start": "One line.", "end": "One line.", "problem": "Lost.",
+  "replacement": "An old passage: none kept."},
  {"side": "new", "start": "", "problem": "No words: left out."},
  "not an object"
 ]
@@ -115,12 +116,14 @@ MARKED = """## Verdict
 def test_the_problems_marked_in_the_text(tmp_path):
     """With annotate (the default) the model is asked to mark the problems
     in the text; its JSON list is taken out of the assessment, each item
-    read, one without its words left out; without annotate, nothing is
-    asked, nor taken out."""
+    read, one without its words left out, a replacement only for the new
+    version; without annotate, nothing is asked, nor taken out."""
     text, notes = split_annotations(MARKED)
     assert text.endswith("1. A broken sentence.") and "```" not in text
     assert notes == [
-        Annotation("new", "One changed", "line.", "Vague.", "Say what changed."),
+        Annotation(
+            "new", "One changed", "line.", "Vague.", "Say what changed.", "One line, reworded."
+        ),
         Annotation("old", "One line.", "One line.", "Lost.", ""),
     ]
     assert split_annotations("## Verdict\nNo list.") == ("## Verdict\nNo list.", [])

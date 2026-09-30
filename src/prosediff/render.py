@@ -7,10 +7,13 @@ import sys
 import tempfile
 import webbrowser
 from datetime import datetime
+from functools import cache
 from importlib.metadata import PackageNotFoundError, version
+from importlib.resources import files
 from pathlib import Path
 
 from jinja2 import Environment, PackageLoader, select_autoescape
+from markupsafe import Markup
 
 from prosediff.assess import Assessment, AssessRequest, assess
 from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text
@@ -137,6 +140,13 @@ def set_apart(comparison: Comparison, prefix: str) -> None:
                 e.anchor = new + e.anchor[len(old) :]
 
 
+@cache
+def fflate() -> Markup:
+    """fflate's browser build (vendor/fflate.umd.js, MIT: vendor/fflate.LICENSE),
+    which reads and writes the zips of the documents the report offers."""
+    return Markup((files("prosediff") / "vendor" / "fflate.umd.js").read_text(encoding="utf-8"))
+
+
 def render(
     comparison: Comparison,
     paths: list[str] | None = None,
@@ -145,6 +155,7 @@ def render(
     split: str = "paragraph",
     assessment: Assessment | None = None,
     writing: Assessment | None = None,
+    documents: bool = True,
 ) -> str:
     """The HTML report; align ("left" or "justify") sets how wrapped lines are
     aligned. split says how the comparison compared prose, "paragraph" or
@@ -152,10 +163,20 @@ def render(
     the report holds both (comparison then paragraph by paragraph), and a
     switch of its toolbar shows one or the other. An AI's assessment of the
     changes, given, heads the report; writing, its assessment of whether
-    their new text reads as written by an AI, beside it."""
+    their new text reads as written by an AI, beside it. documents: when the
+    AI marked problems in a Word document or an OpenDocument text, compared
+    paragraph by paragraph, the report holds the documents made of them to
+    download (prosediff.aidocs)."""
     if align not in ALIGNMENTS:
         raise ValueError(f"align must be one of {ALIGNMENTS}, not {align!r}")
     template = _env.get_template("report.html.j2")
+    # the documents keep the paragraphs as they are: made from them only
+    by_paragraph = sentences is not None or split == "paragraph"
+    ai_documents = []
+    if documents and by_paragraph and assessment is not None and assessment.annotations:
+        from prosediff.aidocs import downloads  # python-docx and odfdo: only then
+
+        ai_documents = downloads(comparison, assessment)
     if sentences is not None:
         set_apart(sentences, "s-")
     return template.render(
@@ -166,6 +187,8 @@ def render(
         align=align,
         assessment=assessment,
         writing=writing,
+        ai_documents=ai_documents,
+        fflate=fflate() if ai_documents else "",
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         version=package_version(),
         homepage=HOMEPAGE,
@@ -186,6 +209,7 @@ def write_output(
     split: str = "paragraph",
     assessment: Assessment | None = None,
     writing: Assessment | None = None,
+    documents: bool = True,
 ) -> Path:
     """Write the HTML report (fmt "html"), the unified diff ("diff"), the word
     diff ("wdiff"), LF line ends on every system, or the Word document
@@ -196,7 +220,7 @@ def write_output(
     tracked changes holds every line. sentences and split as in render; the
     other formats hold one comparison only. An AI's assessment, given, heads
     the HTML report (and, when asked for, the text sent to the AI ends it);
-    the other formats have none."""
+    the other formats have none. documents as in render."""
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {tuple(FORMATS)}, not {fmt!r}")
     if fmt in TRACKED_FORMATS:
@@ -212,6 +236,7 @@ def write_output(
             split=split,
             assessment=assessment,
             writing=writing,
+            documents=documents,
         )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

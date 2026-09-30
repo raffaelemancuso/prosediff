@@ -184,6 +184,18 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
 /* The problems the AI marked: in the text, a numbered badge before each
    passage; its card in the margin. */
 .ai-pointer { margin: 10px 0 2px; }
+/* The documents to download: the tracked changes with the AI's comments,
+   and the new version with its fixes. */
+.ai-documents { margin: 14px 0 4px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 6px; }
+.ai-documents h3 { font-size: 14px; margin: 0 0 4px; }
+.ai-documents p { margin: 4px 0; }
+.ai-documents ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.ai-documents li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.ai-documents .file-name { font-size: 12px; overflow-wrap: anywhere; }
+#review-list .with-check { display: flex; align-items: center; }
+#review-list .with-check input { flex-shrink: 0; margin: 0 0 0 16px; }
+#review-list .with-check button { padding-left: 8px; }
 .ai-mark { display: inline-block; font: 600 11px/1.4 -apple-system, "Segoe UI", sans-serif;
   color: var(--bg); background: var(--current); border-radius: 8px; padding: 0 5px;
   margin-right: 3px; vertical-align: 1px; }
@@ -864,6 +876,18 @@ thead.print, .print-note { display: none; }
   {% if a.annotations %}
   <p class="ai-pointer">It marked {{ a.annotations | length | counted("problem") }} in the text: ⚠ in the text, and in the margin beside it.</p>
   <script type="application/json" id="ai-notes-data">{{ a.notes_json | tojson }}</script>
+  {% if id == "assessment" and ai_documents %}
+  <section class="ai-documents" aria-labelledby="ai-documents-title">
+    <h3 id="ai-documents-title">{{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }} documents</h3>
+    <p class="role">Each problem the AI marked is a comment on its passage; in the new version with its fixes, the fixes it wrote out are its own tracked changes, to accept or reject. <span class="ai-included"></span></p>
+    <ul>
+    {% for d in ai_documents %}
+      <li><button type="button" class="btn ai-download" data-document="{{ loop.index0 }}">{{ d.label }}</button><span class="role file-name">{{ d.name }}</span>
+        <script type="application/octet-stream" class="ai-document" data-spec="{{ d.spec | tojson | forceescape }}">{{ d.base64 }}</script></li>
+    {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
   {% endif %}
   <p class="role assess-note">{{ note }}</p>
   {% endif %}
@@ -899,6 +923,7 @@ thead.print, .print-note { display: none; }
 <footer>Generated {{ generated }} by <a href="{{ homepage }}">prosediff</a> {{ version }}.</footer>
 </main>
 <div id="tip" role="tooltip" hidden></div>
+{% if ai_documents %}<script>{{ fflate }}</script>{% endif %}
 <script>
 (function () {
   var changes = [];
@@ -1705,6 +1730,149 @@ thead.print, .print-note { display: none; }
   barHeight();
   window.addEventListener("resize", barHeight);
 
+  // The documents to download (the drawer's Word or LibreOffice documents):
+  // each a zip held as base64, with the ids of each problem's comments and
+  // changes in it (by the problem's index; -1, the verdict's). The problems
+  // left out in review mode (their box unticked) are taken out of the
+  // document before it is saved: their comments, and their changes
+  // rejected. fflate reads and writes the zip.
+  var aiDocuments = Array.prototype.slice.call(document.querySelectorAll("script.ai-document"));
+  var leftOut = {};
+  var W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+  var OFFICE_NS = "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
+  var TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
+  var XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  function withCheck(button, k, note) {
+    var box = el("input");
+    box.type = "checkbox";
+    box.checked = !leftOut[k];
+    box.title = "In the downloaded documents";
+    box.setAttribute("aria-label", "Problem " + note.num + " in the downloaded documents");
+    box.addEventListener("change", function () {
+      if (box.checked) delete leftOut[k]; else leftOut[k] = true;
+      countIncluded();
+    });
+    var wrap = el("div", "with-check");
+    button.parentNode.insertBefore(wrap, button);
+    wrap.appendChild(box);
+    wrap.appendChild(button);
+  }
+  function countIncluded() {
+    var out = document.querySelector(".ai-documents .ai-included");
+    if (!out) return;
+    var n = aiNotes.filter(function (note, k) { return !leftOut[k]; }).length;
+    out.textContent = "They hold " + fmt(n) + " of the " + fmt(aiNotes.length) + " problems" +
+      " (untick those to leave out in Review).";
+  }
+  countIncluded();
+  function xmlOf(bytes) {
+    return new DOMParser().parseFromString(fflate.strFromU8(bytes), "application/xml");
+  }
+  function bytesOfXml(doc) {
+    return fflate.strToU8(XML_HEAD + new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, ""));
+  }
+  function each(doc, ns, name, attrNs, attr, ids, fn) {
+    var want = {};
+    ids.forEach(function (id) { want[String(id)] = true; });
+    Array.prototype.slice.call(doc.getElementsByTagNameNS(ns, name)).forEach(function (e) {
+      if (want[e.getAttributeNS(attrNs, attr)]) fn(e);
+    });
+  }
+  function unwrap(e) {
+    while (e.firstChild) e.parentNode.insertBefore(e.firstChild, e);
+    e.parentNode.removeChild(e);
+  }
+  function remove(e) { if (e.parentNode) e.parentNode.removeChild(e); }
+  function leaveOutWord(files, comments, changes) {
+    var doc = xmlOf(files["word/document.xml"]);
+    ["commentRangeStart", "commentRangeEnd"].forEach(function (name) {
+      each(doc, W_NS, name, W_NS, "id", comments, remove);
+    });
+    each(doc, W_NS, "commentReference", W_NS, "id", comments, function (e) {
+      remove(e.parentNode.localName === "r" ? e.parentNode : e);
+    });
+    // a change rejected: the words put in taken out, the words taken out put back
+    each(doc, W_NS, "ins", W_NS, "id", changes, remove);
+    each(doc, W_NS, "del", W_NS, "id", changes, function (e) {
+      Array.prototype.slice.call(e.getElementsByTagNameNS(W_NS, "delText")).forEach(function (d) {
+        var t = doc.createElementNS(W_NS, "w:t");
+        t.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
+        t.textContent = d.textContent;
+        d.parentNode.replaceChild(t, d);
+      });
+      unwrap(e);
+    });
+    files["word/document.xml"] = bytesOfXml(doc);
+    if (files["word/comments.xml"] && comments.length) {
+      var notes = xmlOf(files["word/comments.xml"]);
+      each(notes, W_NS, "comment", W_NS, "id", comments, remove);
+      files["word/comments.xml"] = bytesOfXml(notes);
+    }
+  }
+  function leaveOutOdt(files, comments, changes) {
+    var doc = xmlOf(files["content.xml"]);
+    ["annotation", "annotation-end"].forEach(function (name) {
+      each(doc, OFFICE_NS, name, OFFICE_NS, "name", comments, remove);
+    });
+    var regions = {};
+    Array.prototype.forEach.call(doc.getElementsByTagNameNS(TEXT_NS, "changed-region"), function (r) {
+      regions[r.getAttributeNS(TEXT_NS, "id") || r.getAttribute("xml:id")] = r;
+    });
+    each(doc, TEXT_NS, "change-start", TEXT_NS, "change-id", changes, function (e) {
+      var words = e.nextSibling;
+      if (words && words.localName === "span") remove(words);
+      remove(e);
+    });
+    each(doc, TEXT_NS, "change-end", TEXT_NS, "change-id", changes, remove);
+    each(doc, TEXT_NS, "change", TEXT_NS, "change-id", changes, function (e) {
+      var region = regions[e.getAttributeNS(TEXT_NS, "change-id")];
+      var p = region && region.getElementsByTagNameNS(TEXT_NS, "p")[0];
+      if (p) while (p.firstChild) e.parentNode.insertBefore(p.firstChild, e);
+      remove(e);
+    });
+    changes.forEach(function (id) { if (regions[id]) remove(regions[id]); });
+    files["content.xml"] = bytesOfXml(doc);
+  }
+  function zipOf(files, odt) {
+    var out = {};
+    // an OpenDocument's mimetype first, stored as it is
+    if (odt && files.mimetype) out.mimetype = [files.mimetype, { level: 0 }];
+    Object.keys(files).forEach(function (name) {
+      if (!(odt && name === "mimetype")) out[name] = files[name];
+    });
+    return fflate.zipSync(out);
+  }
+  function download(k) {
+    var holder = aiDocuments[k], spec = JSON.parse(holder.dataset.spec);
+    var raw = atob(holder.textContent.trim()), bytes = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    var comments = [], changes = [];
+    Object.keys(spec.notes).forEach(function (note) {
+      if (!leftOut[note]) return;
+      comments = comments.concat(spec.notes[note].comments);
+      changes = changes.concat(spec.notes[note].changes);
+    });
+    if (comments.length || changes.length) {
+      var files = fflate.unzipSync(bytes);
+      if (spec.fmt === "docx") leaveOutWord(files, comments, changes);
+      else leaveOutOdt(files, comments, changes);
+      bytes = zipOf(files, spec.fmt === "odt");
+    }
+    var type = spec.fmt === "docx"
+      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      : "application/vnd.oasis.opendocument.text";
+    var a = el("a");
+    a.href = URL.createObjectURL(new Blob([bytes], { type: type }));
+    a.download = spec.name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); remove(a); }, 1000);
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest(".ai-download");
+    if (b) download(Number(b.dataset.document));
+  });
+
   // Review mode (r, or Review in the top bar): down the left, what there is
   // to review, the assessment, the changes, the comments and the problems;
   // beside it, the one row the chosen one is in, with its cards, a line
@@ -1813,6 +1981,7 @@ thead.print, .print-note { display: none; }
           b.disabled = true;
           b.querySelector(".what").textContent = note.problem + " (not found in the text)";
         }
+        if (aiDocuments.length) withCheck(b, k, note);
       });
     }
   }
