@@ -1317,7 +1317,11 @@ thead.print, .print-note { display: none; }
     var data = document.getElementById("ai-notes-data");
     if (!data) return;
     try { aiNotes = JSON.parse(data.textContent); } catch (e) { return; }
-    var QUOTES = { "‘": "'", "’": "'", "“": '"', "”": '"' };
+    // typographic variants a model writes plainly: curly quotes and dashes
+    // (as prosediff.aidocs finds passages)
+    var QUOTES = { "‘": "'", "’": "'", "‚": "'", "‛": "'",
+      "“": '"', "”": '"', "„": '"', "‟": '"', "‐": "-", "‑": "-",
+      "‒": "-", "–": "-", "—": "-", "―": "-", "−": "-" };
     // Not text: NOT_TEXT. A row holding a moved passage is written twice,
     // its words marked as moved (.pv-on) and as removed and added (.pv-off),
     // the "Moved passages" switch hiding one: each is searched apart, so a

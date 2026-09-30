@@ -24,6 +24,7 @@ left out before saving it.
 import base64
 import copy
 import datetime as dt
+import difflib
 import re
 import warnings
 from dataclasses import dataclass, field
@@ -50,7 +51,15 @@ from prosediff.redline import (
 )
 from prosediff.tracked import TRACKED_FORMATS, author_of, check_tracked
 
-QUOTES = {"‘": "'", "’": "'", "“": '"', "”": '"'}
+# Typographic variants a model writes plainly: curly quotes and dashes. A
+# passage is found whatever of them it quotes, and a fix never changes one
+# into the other (the report's script finds passages the same way).
+TYPOGRAPHIC = {
+    **dict.fromkeys("‘’‚‛", "'"),
+    **dict.fromkeys("“”„‟", '"'),
+    **dict.fromkeys("‐‑‒–—―−", "-"),
+}
+PLAIN = str.maketrans(TYPOGRAPHIC)
 SOFT_HYPHEN = "­"
 # How far after its start words a passage's end words are looked for (as the
 # report's script does), in characters.
@@ -81,7 +90,7 @@ def haystack(lines: list[str]) -> tuple[str, list]:
     text, at = [], []
 
     def put(c, where):
-        c = QUOTES.get(c, c)
+        c = TYPOGRAPHIC.get(c, c)
         if c.isspace():
             if not text or text[-1] == " ":
                 return
@@ -157,7 +166,8 @@ def fix_of(line: str, place: Place, note: Annotation) -> list | None:
 
 
 def whole_words(a: str, b: str) -> list[tuple[int, int, int, int]]:
-    """The changes from a to b (word_ops), each widened to the whole words it
+    """The changes from a to b (word_ops, curly quotes and dashes taken for
+    plain ones), each widened to the whole words it
     touches, those that then meet made one: (a1, a2, b1, b2). A number is
     several of word_ops' words ("39", ".", "2"): 39.2 made 19.6 is then one
     change, not "39" to "19" and "2" to "6"."""
@@ -166,7 +176,8 @@ def whole_words(a: str, b: str) -> list[tuple[int, int, int, int]]:
         return not c.isspace()
 
     out: list[list[int]] = []
-    for op, a1, a2, b1, b2 in word_ops(a, b):
+    # typographic variants alike: a fix keeps the document's quotes and dashes
+    for op, a1, a2, b1, b2 in word_ops(a.translate(PLAIN), b.translate(PLAIN)):
         if op == "equal":
             continue
         # a change starting (ending) inside a word takes the rest of it; the
@@ -182,6 +193,36 @@ def whole_words(a: str, b: str) -> list[tuple[int, int, int, int]]:
         else:
             out.append([a1, a2, b1, b2])
     return [tuple(c) for c in out]
+
+
+def exact(line: str, text: str) -> list[bool]:
+    """For each character of line, whether it is a character of text, one to
+    one (aligned): not an equation's, a note reference's or a field's, which
+    the line has as text and the file has not as ordinary text."""
+    out = [False] * len(line)
+    matcher = difflib.SequenceMatcher(None, line, text, autojunk=False)
+    for tag, i1, i2, _, _ in matcher.get_opcodes():
+        if tag == "equal":
+            out[i1:i2] = [True] * (i2 - i1)
+    return out
+
+
+def in_text(line: str, text: str, edits: list) -> bool:
+    """Whether each of a fix's edits is where line and the file's text are
+    one to one: the words it takes out, and a word beside the place it puts
+    words in. An edit elsewhere (in an equation) could go only by guess."""
+    ok = exact(line, text)
+
+    def good(i: int) -> bool:
+        return 0 <= i < len(line) and ok[i]
+
+    for start, end, _ in edits:
+        if end > start:
+            if not all(ok[i] for i in range(start, end) if not ANY_PLACEHOLDER.match(line[i])):
+                return False
+        elif not (good(start - 1) or good(start)):
+            return False
+    return True
 
 
 # Word ---------------------------------------------------------------------------
@@ -211,6 +252,36 @@ def word_run_before(paragraphs, line: str, o: int):
     return at[x - 1][0]
 
 
+def note_reference(red: WordRedline, p):
+    """The run of the reference to the footnote (endnote) paragraph p is in,
+    in the document's body, and its kind ("footnote", "endnote"); None, ""
+    for a paragraph of the body, or a note referred to nowhere."""
+    for kind in ("footnote", "endnote"):
+        note = next(p.iterancestors(qn(f"w:{kind}")), None)
+        if note is None:
+            continue
+        nid = note.get(qn("w:id"))
+        for ref in red.new.doc.element.body.iter(qn(f"w:{kind}Reference")):
+            if ref.get(qn("w:id")) == nid and ref.getparent().tag == qn("w:r"):
+                return ref.getparent(), kind
+    return None, ""
+
+
+def mark_paragraphs(first, last, cid: int) -> None:
+    """A comment's range from the start of paragraph first to the end of
+    paragraph last, its reference at the end."""
+    start = OxmlElement("w:commentRangeStart", attrs={qn("w:id"): str(cid)})
+    ppr = first.find(qn("w:pPr"))
+    (ppr.addnext(start) if ppr is not None else first.insert(0, start))
+    last.append(OxmlElement("w:commentRangeEnd", attrs={qn("w:id"): str(cid)}))
+    ref = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    rpr.append(OxmlElement("w:rStyle", attrs={qn("w:val"): "CommentReference"}))
+    ref.append(rpr)
+    ref.append(OxmlElement("w:commentReference", attrs={qn("w:id"): str(cid)}))
+    last.append(ref)
+
+
 class WordNotes:
     """The AI's comments and fixes put in a Word document: red, a
     WordRedline, its changes marked (the document of tracked changes) or
@@ -228,13 +299,23 @@ class WordNotes:
         red, lines = self.red, self.lines
         # the start first: a split keeps a run's first part in the run, so the
         # end's run, found first, could be left before the start
-        first = word_run_at(red.new_paragraphs[place.j1], lines[place.j1], place.o1)
-        last = word_run_before(red.new_paragraphs[place.j2], lines[place.j2], place.o2)
-        if first is None or last is None:
+        starts, ends = red.new_paragraphs[place.j1], red.new_paragraphs[place.j2]
+        if not starts or not ends:
             return None
-        c = red.new.doc.add_comment(
-            [Run(first, None), Run(last, None)], author=self.author, initials="AI"
-        )
+        ref, kind = note_reference(red, starts[0])
+        if ref is not None:  # Word takes no comment in a note: on its number
+            first = last = ref
+            paragraphs = [f"In the {kind}: {paragraphs[0]}", *paragraphs[1:]]
+        else:
+            first = word_run_at(starts, lines[place.j1], place.o1)
+            last = word_run_before(ends, lines[place.j2], place.o2)
+        if first is not None and last is not None:
+            c = red.new.doc.add_comment(
+                [Run(first, None), Run(last, None)], author=self.author, initials="AI"
+            )
+        else:  # no ordinary text to anchor it to (an equation): its paragraphs
+            c = red.new.doc.comments.add_comment(author=self.author, initials="AI")
+            mark_paragraphs(starts[0], ends[-1], c.comment_id)
         for k, text in enumerate(paragraphs):
             p = c.paragraphs[0] if k == 0 else c.add_paragraph()
             if k and bold_first and text.startswith(bold_first):
@@ -275,8 +356,10 @@ class WordNotes:
                     after = mark
             if not put:
                 continue
-            # in the formatting of the word before (the first after, at the start)
-            like = at[x1 - 1][0] if x1 > 0 else (at[x1][0] if at else None)
+            # in the formatting of the words it replaces; else of the word
+            # before (the first after, at the start)
+            k = x1 if x2 > x1 or x1 == 0 else x1 - 1
+            like = at[k][0] if k < len(at) else None
             run = OxmlElement("w:r")
             rpr = like.find(qn("w:rPr")) if like is not None else None
             if rpr is not None:
@@ -305,6 +388,9 @@ class WordNotes:
                 paragraphs[0].append(mark)
         return ids
 
+    def can_fix(self, j: int, edits: list) -> bool:
+        return in_text(self.lines[j], atoms(self.red.new_paragraphs[j])[0], edits)
+
     def save(self) -> bytes:
         out = BytesIO()
         self.red.new.save(out)
@@ -319,12 +405,13 @@ def odf_place(paragraphs, line: str, o: int) -> int:
     return aligned(line, odf_atoms(paragraphs)[0])[o]
 
 
-def odf_put(paragraphs, x: int, elements: list) -> None:
+def odf_put(paragraphs, x: int, elements: list, after: bool = False) -> None:
     """Put elements one after the other before character x of paragraphs'
-    text (after the last one, x at its end)."""
+    text (after the last one, x at its end); after: just after character x
+    - 1 instead, in the paragraph that one is in."""
     at = odf_atoms(paragraphs)[1]
     first = elements[0]
-    odf_insert(at, x, first, paragraphs)
+    odf_insert(at[:x] if after else at, x, first, paragraphs)
     rest, first.tail = first.tail, None
     last = first
     for el in elements[1:]:
@@ -399,6 +486,7 @@ class OdtNotes:
         red, line = self.red, self.lines[j]
         paragraphs = red.new_paragraphs[j]
         where = aligned(line, odf_atoms(paragraphs)[0])
+        first = where[begin]
         ids = []
         # from the last: an edit moves only what comes after it
         for start, end, put in edits:
@@ -410,7 +498,6 @@ class OdtNotes:
                     name = red.region("del", [gone])
                     ids.append(name)
                     marks.append(red.point("text:change", name))
-                odf_remove(paragraphs, x1, x2)
             if put:
                 name = red.region("ins")
                 ids.append(name)
@@ -421,9 +508,22 @@ class OdtNotes:
                     span,
                     red.point("text:change-end", name),
                 ]
-            if marks:
+            if not marks:
+                continue
+            # the marks after the last word taken out (or put in before the
+            # passage's first word, after the word before elsewhere), in its
+            # paragraph, then the words taken out: a table cell left empty
+            # has no word of its own to find its place by afterwards
+            if x2 > x1 or (x1 > 0 and x1 != first):
+                odf_put(paragraphs, x2, marks, after=True)
+            else:
                 odf_put(paragraphs, x1, marks)
+            if x2 > x1:
+                odf_remove(paragraphs, x1, x2)
         return ids
+
+    def can_fix(self, j: int, edits: list) -> bool:
+        return in_text(self.lines[j], odf_atoms(self.red.new_paragraphs[j])[0], edits)
 
     def save(self) -> bytes:
         out = BytesIO()
@@ -504,6 +604,10 @@ def notes_in(red, notes, author: str, assessment: Assessment, fixes: bool) -> di
     places = {k: locate(lines, n, hay) for k, n in enumerate(notes) if n.side == "new"}
     places = {k: p for k, p in places.items() if p is not None}
     edits = {k: fix_of(lines[p.j1], p, notes[k]) for k, p in places.items()} if fixes else {}
+    # a fix where the words are not the file's own text (an equation): a comment
+    for k, e in edits.items():
+        if e and not put.can_fix(places[k].j1, e):
+            edits[k] = None
     # no two fixes in one passage: the second a comment only
     taken: list[Place] = []
     for k in sorted(edits, key=lambda k: (places[k].j1, places[k].o1)):

@@ -5,6 +5,7 @@ changes with the AI's comments, and the new version with its fixes."""
 import re
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 import docx
 import pytest
@@ -228,3 +229,125 @@ def test_words_put_in_at_a_passages_edge_stay_in_its_comment(tmp_path, start, en
     d = got[1]
     assert d.notes[0]["changes"]
     assert covered(d.data, "docx", d.notes[0]["comments"][0]) == fixed
+
+
+# A Word pair with what a paper has besides plain paragraphs, made by pandoc
+# from tests/data/ai_rich/v1.md and v2.md (its README says how): an equation
+# in a paragraph and one of its own, curly quotes and en dashes, a footnote,
+# a list with bold and italic words, a table, a link. v2 brings in errors;
+# RICH are the problems a model would mark in it, as it writes them: straight
+# quotes and a hyphen where the document has curly ones and an en dash.
+RICH_DIR = Path(__file__).parent / "data" / "ai_rich"
+
+
+def rich_notes() -> list[Annotation]:
+    def fix(start, replacement, end=""):
+        return Annotation("new", start, end or start, "Wrong.", "Fix it.", replacement)
+
+    return [
+        # 0: in an equation: no fix, a comment
+        fix("the energy E = mc^(3)", "the energy E = mc^(2)"),
+        # 1: after the equation, in its paragraph
+        fix("which is huge", "which is enormous"),
+        # 2: straight quotes for curly ones
+        fix(
+            'The so-called "inertial mass" is doubled', 'The so-called "inertial mass" is conserved'
+        ),
+        # 3: a hyphen for an en dash
+        fix("closed system - a result checked", "closed system - a result confirmed"),
+        # 4: a list item's bold words
+        fix("release the whole of", "release a small part of"),
+        # 5: an italic word
+        fix("weighs slightly less than", "weighs slightly more than"),
+        # 6: a table cell
+        fix("watt", "joule"),
+        # 7: a link's words
+        fix("the first paper", "the original paper"),
+        # 8: a footnote
+        fix("were abandoned in the", "were refined throughout the"),
+        # 9: words put in before a footnote's reference
+        fix("by later work.", "by later work, as noted."),
+        # 10: the equation of its own
+        fix("E^(2) = (pc)^(2)", "E^(2) = (pc)^(3)"),
+    ]
+
+
+# what the rich pair's fixes change, as v2's lines read (RICH, 1 to 9)
+RICH_FIXED = [
+    ("is huge", "is enormous"),
+    ("is doubled", "is conserved"),
+    ("result checked", "result confirmed"),
+    ("the whole of", "a small part of"),
+    ("slightly less", "slightly more"),
+    ("| watt", "| joule"),
+    ("first paper", "original paper"),
+    ("were abandoned in", "were refined throughout"),
+    ("later work.", "later work, as noted."),
+]
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+def test_fixes_in_a_rich_document(tmp_path, fmt):
+    """In a document with equations, a footnote, a list, a table and a link,
+    each fix changes its words and nothing else, the document's curly quotes
+    and dashes kept where the model wrote plain ones; a fix in an equation,
+    whose words are not the file's text, is a comment, the change proposed
+    in it (an .odt's equations are objects, found nowhere: neither). In a
+    Word document the footnote's comment is on the footnote's number."""
+    old, new = RICH_DIR / f"v1.{fmt}", RICH_DIR / f"v2.{fmt}"
+    c = compare_paths(str(old), str(new), Options())
+    got = downloads(c, assessment(rich_notes()))
+    out = tmp_path / got[1].name
+    out.write_bytes(got[1].data)
+    expected = []
+    for line in lines(new, "accept-all"):
+        for a, b in RICH_FIXED:
+            line = line.replace(a, b)
+        expected.append(line)
+    assert lines(out, "accept-all") == expected
+    assert lines(out, "reject-all") == lines(new, "accept-all")
+    notes = got[1].notes
+    assert all(notes[k]["changes"] for k in range(1, 10))
+    texts = comments_of(out, fmt)
+    if fmt == "docx":
+        assert not notes[0]["changes"] and not notes[10]["changes"]
+        assert texts.count("Wrong.\nProposed: Fix it.") == 2  # the equations'
+        # the words put in take the formatting of those they replace
+        body = docx.Document(str(out)).element.body
+        # (the text of each w:t: python-docx's elements repeat it to itertext)
+        put = {"".join(t.text for t in el.iter(W + "t")): el for el in body.iter(W + "ins")}
+        assert put["a small part"].find(f".//{W}b") is not None
+        assert put["more"].find(f".//{W}i") is not None
+        # Word takes no comment in a footnote: the footnote's is on its number
+        assert "In the footnote: Wrong." in texts
+        notes_xml = zipfile.ZipFile(out).read("word/footnotes.xml").decode()
+        assert "commentRangeStart" not in notes_xml
+        assert texts.count("Wrong.") == 8
+    else:
+        assert 0 not in notes and 10 not in notes
+        assert texts.count("Wrong.") == 9
+
+
+@pytest.mark.parametrize(
+    ("words", "found"),
+    [
+        ('The so-called "inertial mass"', True),
+        ("closed system - a result", True),
+        ("closed system -- a result", False),
+    ],
+)
+def test_passages_found_whatever_their_quotes_and_dashes(words, found):
+    """A passage quoted with straight quotes or a hyphen is found where the
+    text has curly quotes or an en dash, not with two hyphens for one dash."""
+    line = "The so-called “inertial mass” is kept in every closed system – a result."
+    assert (locate([line], Annotation("new", words, "", "p")) is not None) == found
+
+
+def test_a_fix_keeps_the_documents_quotes_and_dashes():
+    """Only the words changed make a fix: not a quote or a dash written
+    plainly."""
+    line = "The so-called “inertial mass” is doubled – said."
+    note = Annotation(
+        "new", "The so-called", "said.", "p", "", 'The so-called "inertial mass" is kept - said.'
+    )
+    assert fix_of(line, locate([line], note), note) == [(33, 40, "kept")]
