@@ -294,14 +294,19 @@ documents to download, made from the new version:
   accept or reject in Word or LibreOffice, what is wrong a comment on it;
   a problem it gave no such fix for (text to add elsewhere, a reviewer to
   answer, a passage over several paragraphs) is a comment, the change
-  proposed in it.
+  proposed in it. So is a fix whose words are not the document's own text,
+  word for word: one in an equation, a field or a note reference, whose
+  place could only be guessed. A fix changes whole words, and keeps the
+  document's curly quotes and dashes where the AI wrote plain ones.
 
 Each opens with a comment on the first paragraph giving the AI's verdict;
 the comments and the changes are the AI's, under its name ("Claude Code
 (claude-opus-5-5)"). Review mode (`r`) has a box beside each problem:
 unticked, the problem is left out of both documents when they are saved, its
 comment taken out and its fix rejected. A problem in text only the old
-version has stays in the report. The documents are made when the report is,
+version has stays in the report. Word takes no comment in a footnote or an
+endnote, so a problem in one has its comment on the note's number in the
+text ("In the footnote: ..."); its fix is in the note itself. The documents are made when the report is,
 paragraph by paragraph, and held in it as text: the report grows by about
 2.7 times the document's size (two copies, a third larger as text);
 `--no-assess-documents` (in the window, "Documents to download" off)
