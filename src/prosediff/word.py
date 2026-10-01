@@ -58,15 +58,14 @@ from prosediff.document import (
     Source,
     Span,
     Text,
+    check_changes,
     comment_runs,
     join_paragraphs,
-    markdown,
     spaced,
     strip,
 )
 from prosediff.language import WordLanguages, most_letters
 
-CHANGES = ("accept-all", "reject-all", "show")
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 HEADING_STYLES = {"title": 1, **{f"heading {n}": n for n in range(1, 7)}}
 LIST_STYLES = ("list", "bullet", "number")
@@ -246,20 +245,16 @@ class Reader(DocumentReader):
         return (str(part.partname), el.getroottree().getpath(el))
 
     def paragraph(self, el) -> Block | None:
-        inlines = self.paragraph_inlines(el)
-        if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
-            return None
-        language = self.language_of([el])
-        p = Paragraph(el, _Story(self.document.part))
-        style = _style_name(p)
-        source = (self.source(el),)
-        if style in HEADING_STYLES:
-            level = HEADING_STYLES[style]
-            return Block("heading", inlines, level=level, language=language, source=source)
+        style = _style_name(Paragraph(el, _Story(self.document.part)))
         numbered = el.find(f"{qn('w:pPr')}/{qn('w:numPr')}") is not None
-        if numbered or style.startswith(LIST_STYLES):
-            return Block("item", inlines, language=language, source=source)
-        return Block("p", inlines, language=language, source=source)
+        if style in HEADING_STYLES:
+            kind = ("heading", HEADING_STYLES[style])
+        elif numbered or style.startswith(LIST_STYLES):
+            kind = ("item",)
+        else:
+            kind = ("p",)
+        inlines = self.paragraph_inlines(el)
+        return self.block(inlines, kind, self.language_of([el]), (self.source(el),))
 
     def kept_row(self, tr) -> bool:
         """Whether a table row stays: not one deleted (inserted) as a tracked
@@ -461,8 +456,7 @@ def read_docx(data: bytes, changes: str = "accept-all") -> Document:
     """A Word document as prosediff reads it (prosediff.document), its
     tracked changes settled ("accept-all", "reject-all") or kept as markup ("show"),
     its comments kept, each paragraph with the language it is marked with."""
-    if changes not in CHANGES:
-        raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")
+    check_changes(changes)
     try:
         document = docx.Document(BytesIO(data))
     except (PackageNotFoundError, KeyError, ValueError) as e:

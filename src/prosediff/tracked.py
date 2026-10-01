@@ -87,7 +87,6 @@ def write_tracked(comparison: Comparison, path: Path, fmt: str) -> Path:
             "tracked changes as .odt accept the tracked changes the files have: "
             "--docx-changes must be accept-all"
         )
-    from prosediff.redline import redline_docx, redline_odt
+    from prosediff.redline import redline
 
-    redline = redline_docx if fmt == "docx" else redline_odt
-    return save(lambda target: redline(f, target, author_of(comparison)), path)
+    return save(lambda target: redline(f, target, author_of(comparison), fmt), path)

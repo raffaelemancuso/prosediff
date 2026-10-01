@@ -46,12 +46,17 @@ from prosediff.redline import (
     XML_ID,
     OdtRedline,
     WordRedline,
+    after_properties,
     aligned,
     atoms,
+    by_run,
     odf,
     odf_atoms,
+    odf_drop,
     odf_insert,
     split_before,
+    text_element,
+    without_changes,
 )
 from prosediff.tracked import TRACKED_FORMATS, author_of, check_tracked
 
@@ -69,7 +74,6 @@ SOFT_HYPHEN = "­"
 # report's script does), in characters.
 REACH = 20_000
 DC = "http://purl.org/dc/elements/1.1/"
-XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 # What holds the words a Word document's own tracked changes put in.
 WORD_INSERTIONS = {qn("w:ins"), qn("w:moveTo")}
 
@@ -294,8 +298,7 @@ def mark_paragraphs(first, last, cid: int) -> None:
     """A comment's range from the start of paragraph first to the end of
     paragraph last, its reference at the end."""
     start = OxmlElement("w:commentRangeStart", attrs={qn("w:id"): str(cid)})
-    ppr = first.find(qn("w:pPr"))
-    (ppr.addnext(start) if ppr is not None else first.insert(0, start))
+    after_properties(first, start)
     last.append(OxmlElement("w:commentRangeEnd", attrs={qn("w:id"): str(cid)}))
     ref = OxmlElement("w:r")
     rpr = OxmlElement("w:rPr")
@@ -368,18 +371,9 @@ class WordNotes:
                     split_before(at[x])
             at = atoms(paragraphs)[1]
             after = None  # what the words put in go after
-            if x2 > x1:
-                runs = []
-                for r, _, _ in at[x1:x2]:
-                    if not runs or runs[-1] is not r:
-                        runs.append(r)
-                for r in runs:
-                    for t in r.iter(qn("w:t")):
-                        t.tag = qn("w:delText")
-                    red.wrap(r, "w:del")
-                    mark = r.getparent()
-                    ids.append(int(mark.get(qn("w:id"))))
-                    after = mark
+            for r, _ in by_run(at[x1:x2]):
+                after = red.delete_run(r)
+                ids.append(int(after.get(qn("w:id"))))
             if not put:
                 continue
             # in the formatting of the words it replaces; else of the word
@@ -389,14 +383,8 @@ class WordNotes:
             run = OxmlElement("w:r")
             rpr = like.find(qn("w:rPr")) if like is not None else None
             if rpr is not None:
-                rpr = copy.deepcopy(rpr)
-                for c in rpr.findall(qn("w:rPrChange")):
-                    rpr.remove(c)
-                run.append(rpr)
-            t = OxmlElement("w:t")
-            t.text = put
-            t.set(XML_SPACE, "preserve")
-            run.append(t)
+                run.append(without_changes(copy.deepcopy(rpr)))
+            run.append(text_element("w:t", put))
             mark = red.revision("w:ins")
             mark.append(run)
             ids.append(int(mark.get(qn("w:id"))))
@@ -417,11 +405,6 @@ class WordNotes:
 
     def can_fix(self, j: int, edits: list) -> bool:
         return in_text(self.lines[j], atoms(self.red.new_paragraphs[j])[0], edits)
-
-    def save(self) -> bytes:
-        out = BytesIO()
-        self.red.new.save(out)
-        return out.getvalue()
 
 
 # OpenDocument ---------------------------------------------------------------------
@@ -455,29 +438,12 @@ def odf_remove(paragraphs, x1: int, x2: int) -> None:
             count = int(node.get(odf("text:c")) or 1)
             if count > 1:
                 node.set(odf("text:c"), str(count - 1))
-                continue
-            parent, prev = node.getparent(), node.getprevious()
-            if node.tail:
-                if prev is not None:
-                    prev.tail = (prev.tail or "") + node.tail
-                else:
-                    parent.text = (parent.text or "") + node.tail
-            parent.remove(node)
+            else:
+                odf_drop(node)
         elif where == "text":
             node.text = (node.text[:k] + node.text[k + 1 :]) or None
         else:
             node.tail = (node.tail[:k] + node.tail[k + 1 :]) or None
-
-
-def odf_drop(el) -> None:
-    """Take el out of its paragraph, its tail kept."""
-    parent, prev = el.getparent(), el.getprevious()
-    if el.tail:
-        if prev is not None:
-            prev.tail = (prev.tail or "") + el.tail
-        else:
-            parent.text = (parent.text or "") + el.tail
-    parent.remove(el)
 
 
 def odf_put_around(marks: list, end, start) -> None:
@@ -582,13 +548,6 @@ class OdtNotes:
         self.drop_empty()
         return ids
 
-    def regions(self) -> dict:
-        """The document's changed regions, by id."""
-        return {
-            r.get(odf("text:id")) or r.get(XML_ID): r
-            for r in self.red.root.iter(odf("text:changed-region"))
-        }
-
     def opened(self, at) -> list[str]:
         """The document's own changes (not the AI's) whose range element at
         is in: between their change-start and their change-end."""
@@ -618,7 +577,7 @@ class OdtNotes:
         """The AI's deletion on the insertion name: the region of the
         deletion followed by that insertion's, as LibreOffice writes a
         deletion of words another put in."""
-        regions = self.regions()
+        regions = self.red.changed_regions()
         insertion = regions[name].find(odf("text:insertion")) if name in regions else None
         if insertion is not None:
             regions[deletion].append(copy.deepcopy(insertion))
@@ -627,7 +586,7 @@ class OdtNotes:
         """The insertions left with no text (a co-author's split around a
         fix, the AI having taken all of its first part out): their marks
         and their regions."""
-        regions = self.regions()
+        regions = self.red.changed_regions()
         for start in list(self.red.root.iter(odf("text:change-start"))):
             end = start.getnext()
             name = start.get(odf("text:change-id"))
@@ -645,7 +604,7 @@ class OdtNotes:
         marks were put in) in two around them, the second a copy of its
         region: no range of the AI's within another's."""
         red = self.red
-        regions = self.regions()
+        regions = self.red.changed_regions()
         for name in opened:
             region = regions.get(name)
             if region is None:
@@ -672,11 +631,6 @@ class OdtNotes:
 
     def can_fix(self, j: int, edits: list) -> bool:
         return in_text(self.lines[j], odf_atoms(self.red.new_paragraphs[j])[0], edits)
-
-    def save(self) -> bytes:
-        out = BytesIO()
-        self.red.doc.save(out)
-        return out.getvalue()
 
 
 # The downloads ---------------------------------------------------------------------
@@ -820,8 +774,9 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
             if red is None:
                 return
             ids = notes_in(red, notes, ai, assessment, fixes)
-            data = (WordNotes if fmt == "docx" else OdtNotes)(red, ai).save()
-            out.append(Download(name, label, data, fmt, ids, short))
+            data = BytesIO()
+            red.save(data)
+            out.append(Download(name, label, data.getvalue(), fmt, ids, short))
         except Exception as e:  # a document the redline cannot take
             warnings.warn(f"{what} could not be made: {e}", stacklevel=3)
 

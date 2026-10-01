@@ -10,9 +10,9 @@ from datetime import datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+from prosediff.document import CHANGES as DOCX_CHANGES
 from prosediff.document import Document, to_markdown
 from prosediff.odt import OdtError, read_odt
-from prosediff.word import CHANGES as DOCX_CHANGES
 from prosediff.word import WordError, read_docx
 
 __all__ = [

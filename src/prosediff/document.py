@@ -244,6 +244,18 @@ def attach_carried(blocks: list[Block], carried: list) -> None:
         last.inlines += carried
 
 
+# How a Word or OpenDocument file's tracked changes are settled.
+CHANGES = ("accept-all", "reject-all", "show")
+# A paragraph's kind: ("p",), ("item",) or ("heading", level).
+Kind = tuple
+
+
+def check_changes(changes: str) -> None:
+    """ValueError unless changes is one of CHANGES."""
+    if changes not in CHANGES:
+        raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")
+
+
 @dataclass(kw_only=True)
 class DocumentReader:
     """What the Word and OpenDocument readers share: their tracked changes
@@ -281,6 +293,17 @@ class DocumentReader:
         if self.changes == "show":
             return [Span(kind, inner, author=author, date=date)] if markdown(inner).strip() else []
         return inner
+
+    def block(
+        self, inlines: list, kind: Kind, language: str | None, source: tuple = ()
+    ) -> Block | None:
+        """A paragraph's block, of its kind; None for one without text (its
+        comments carried to the next, carry)."""
+        if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
+            return None
+        if kind[0] == "heading":
+            return Block("heading", inlines, level=kind[1], language=language, source=source)
+        return Block(kind[0], inlines, language=language, source=source)
 
     def carry(self, inlines: list) -> list | None:
         """A paragraph's inlines, the comments carried to it first; None for

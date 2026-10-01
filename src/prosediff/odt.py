@@ -50,9 +50,11 @@ from prosediff.document import (
     CommentMark,
     DocumentReader,
     Image,
+    Kind,
     NoteRef,
     Span,
     Text,
+    check_changes,
     comment_runs,
     comments_in,
     join_paragraphs,
@@ -62,7 +64,6 @@ from prosediff.document import (
 )
 from prosediff.document import Document as Prose
 from prosediff.language import OdtLanguages, most_letters
-from prosediff.word import CHANGES
 
 # Whitespace in ODF text collapses to one space; text:s stands for the rest.
 BLANKS = re.compile(r"[ \t\r\n]+")
@@ -119,8 +120,6 @@ class OdtError(RuntimeError):
 
 # An inline of a paragraph and the tracked insertion it belongs to (or None).
 Tagged = tuple[object, str | None]
-# A paragraph's kind: ("p",), ("item",) or ("heading", level).
-Kind = tuple
 
 
 @dataclass
@@ -442,15 +441,6 @@ class Reader(DocumentReader):
                 out.append(block)
         return out
 
-    def block(
-        self, inlines: list, kind: Kind, language: str | None, source: tuple = ()
-    ) -> Block | None:
-        if not markdown(inlines) or (inlines := self.carry(inlines)) is None:
-            return None
-        if kind[0] == "heading":
-            return Block("heading", inlines, level=kind[1], language=language, source=source)
-        return Block(kind[0], inlines, language=language, source=source)
-
     def tracked_whole(self, tr: Element) -> bool:
         """Whether a table row is tracked as a whole: its style says
         loext:text-changes-only "false", as LibreOffice writes a row
@@ -510,8 +500,7 @@ def read_odt(data: bytes, changes: str = "accept-all") -> Prose:
     """An OpenDocument text as prosediff reads it (prosediff.document), its
     tracked changes settled ("accept-all", "reject-all") or kept as markup ("show"),
     its comments kept, each paragraph with the language it is marked with."""
-    if changes not in CHANGES:
-        raise ValueError(f"changes must be one of {CHANGES}, not {changes!r}")
+    check_changes(changes)
     try:
         document = Document(BytesIO(data))
         if document.get_type() not in ("text", "text-template"):

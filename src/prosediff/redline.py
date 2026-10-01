@@ -49,6 +49,7 @@ from docx_plus.revisions import (
 )
 from lxml import etree
 
+from prosediff.comments import ANY_PLACEHOLDER
 from prosediff.diff import FileDiff, word_ops
 from prosediff.document import (
     BULLET,
@@ -61,9 +62,32 @@ from prosediff.document import (
     UNDERLINE,
     heading_level,
 )
+from prosediff.footnotes import STAND_IN
 
 STYLES = frozenset(FORMATTING)
-HEADING = re.compile(r"h([1-6])")
+XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+# What a line holds that is prosediff's, not the document's text: the
+# comments' placeholders and the footnotes' stand-ins.
+MARKS = re.compile(f"{ANY_PLACEHOLDER.pattern}|{STAND_IN.pattern}")
+
+
+def plain_text(s: str) -> str:
+    """A line's text without prosediff's marks (MARKS)."""
+    return MARKS.sub("", s)
+
+
+def text_element(tag: str, text: str):
+    """A w:t (w:delText) holding text, its spaces kept."""
+    t = OxmlElement(tag)
+    t.text = text
+    t.set(XML_SPACE, "preserve")
+    return t
+
+
+def after_properties(p, el) -> None:
+    """Put el first in paragraph p, after its properties."""
+    ppr = p.find(qn("w:pPr"))
+    (ppr.addnext(el) if ppr is not None else p.insert(0, el))
 
 
 def kind_of(line: str) -> tuple[str, int]:
@@ -245,7 +269,7 @@ def split_before(atom) -> None:
         rest.text = el.text[k:]
         el.text = el.text[:k]
         for t in (el, rest):
-            t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            t.set(XML_SPACE, "preserve")
         el.addnext(rest)
         el = rest
     children = list(r)
@@ -299,10 +323,21 @@ class WordRedline:
         el.set(qn("w:date"), self.date)
         return el
 
-    def wrap(self, run, tag: str) -> None:
+    def wrap(self, run, tag: str):
+        """Wrap run in a new change of tag; the change."""
         mark = self.revision(tag)
         run.addprevious(mark)
         mark.append(run)
+        return mark
+
+    def delete_run(self, r):
+        """Mark run r deleted, its text and field codes as deleted text;
+        the deletion."""
+        for t in r.iter(qn("w:t")):
+            t.tag = qn("w:delText")
+        for t in r.iter(qn("w:instrText")):
+            t.tag = qn("w:delInstrText")
+        return self.wrap(r, "w:del")
 
     def mark_paragraph(self, p, tag: str) -> None:
         """Mark a paragraph's mark inserted or deleted (and its row, when it
@@ -348,35 +383,32 @@ class WordRedline:
         """The runs of the old words o1 to o2 of old line i, deleted: copies
         of the old file's runs holding them, in their formatting; runs in
         the line's styles when the old file is not a Word document."""
-        paragraphs = self.old_paragraphs[i] if i < len(self.old_paragraphs) else []
+        paragraphs = self.old_paragraphs[i]
         runs = []
         if paragraphs:
             text, at = atoms(paragraphs)
             where = aligned(old_line, text)
             x1, x2 = where[o1], where[o2]
-            for r, group in _by_run(at[x1:x2]):
+            for r, group in by_run(at[x1:x2]):
                 run = OxmlElement("w:r")
                 rpr = r.find(qn("w:rPr"))
                 if rpr is not None:
-                    run.append(_without_changes(copy.deepcopy(rpr)))
+                    run.append(without_changes(copy.deepcopy(rpr)))
                 _deleted_content(run, group)
                 runs.append(run)
         if not runs:
-            words = "".join(ch for ch in old_line[o1:o2] if ord(ch) < 0xE000)
+            words = plain_text(old_line[o1:o2])
             if words:
                 styles = getattr(old_line, "styles", None)
                 run = OxmlElement("w:r")
                 run.append(run_properties(styles[o1] & STYLES if styles else frozenset()))
-                t = OxmlElement("w:delText")
-                t.text = words
-                t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-                run.append(t)
+                run.append(text_element("w:delText", words))
                 runs.append(run)
         return runs
 
     def old_formatting(self, old_line: str, i: int, o: int):
         """The run properties of the old character o of old line i."""
-        paragraphs = self.old_paragraphs[i] if i < len(self.old_paragraphs) else []
+        paragraphs = self.old_paragraphs[i]
         if paragraphs:
             text, at = atoms(paragraphs)
             x = aligned(old_line, text)[o]
@@ -426,7 +458,7 @@ class WordRedline:
         # a run of characters whose formatting alone changed: each of its runs
         # with the formatting its first character had
         for x1, x2, o in formatted:
-            for r, group in _by_run(at[x1:x2]):
+            for r, group in by_run(at[x1:x2]):
                 rpr = r.find(qn("w:rPr"))
                 if rpr is None:
                     rpr = OxmlElement("w:rPr")
@@ -434,10 +466,10 @@ class WordRedline:
                 if rpr.find(qn("w:rPrChange")) is None:
                     first = o + at.index(group[0]) - x1
                     change = self.revision("w:rPrChange")
-                    change.append(_without_changes(self.old_formatting(a, i, first)))
+                    change.append(without_changes(self.old_formatting(a, i, first)))
                     rpr.append(change)
         # the insertions' runs, found before the deletions go in
-        runs_in = [[r for r, _ in _by_run(at[x1:x2])] for x1, x2 in inserted if x2 > x1]
+        runs_in = [[r for r, _ in by_run(at[x1:x2])] for x1, x2 in inserted if x2 > x1]
         for x, o1, o2 in deleted:
             runs = self.deleted_runs(a, i, o1, o2)
             if not runs:
@@ -450,8 +482,7 @@ class WordRedline:
             elif at:
                 at[-1][0].addnext(mark)
             else:
-                ppr = paragraphs[0].find(qn("w:pPr"))
-                (ppr.addnext(mark) if ppr is not None else paragraphs[0].insert(0, mark))
+                after_properties(paragraphs[0], mark)
         for runs in runs_in:
             for r in runs:
                 self.wrap(r, "w:ins")
@@ -460,15 +491,12 @@ class WordRedline:
         """Old line i's paragraphs (a row: its table row), copied from the old
         file and deleted, for the new one."""
         old_line = self.f.old_text[i]
-        paragraphs = self.old_paragraphs[i] if i < len(self.old_paragraphs) else []
+        paragraphs = self.old_paragraphs[i]
         if not paragraphs:
             p = OxmlElement("w:p")
-            words = "".join(ch for ch in old_line if ord(ch) < 0xE000)
             run = OxmlElement("w:r")
             run.append(run_properties(frozenset()))
-            t = OxmlElement("w:t")
-            t.text = words
-            run.append(t)
+            run.append(text_element("w:t", plain_text(old_line)))
             p.append(run)
             paragraphs = [p]
         if getattr(old_line, "kind", "") == "row":
@@ -488,13 +516,8 @@ class WordRedline:
 
     def delete_paragraph(self, p) -> None:
         for r in list(p.iter(qn("w:r"))):
-            if not in_text(r, p):
-                continue
-            for t in r.iter(qn("w:t")):
-                t.tag = qn("w:delText")
-            for t in r.iter(qn("w:instrText")):
-                t.tag = qn("w:delInstrText")
-            self.wrap(r, "w:del")
+            if in_text(r, p):
+                self.delete_run(r)
         self.mark_paragraph(p, "w:del")
 
     # The file ---------------------------------------------------------------------
@@ -508,7 +531,7 @@ class WordRedline:
             if j is None:
                 pending.append(i)
                 continue
-            paragraphs = self.new_paragraphs[j] if j < len(self.new_paragraphs) else []
+            paragraphs = self.new_paragraphs[j]
             if pending and paragraphs:
                 self.place(pending, anchor, before=paragraphs[0], row=self.is_row(j))
                 pending = []
@@ -520,6 +543,10 @@ class WordRedline:
                 anchor = self.after_of(paragraphs[-1], self.is_row(j))
         if pending:
             self.place(pending, anchor, before=None, row=False)
+
+    def save(self, target) -> None:
+        """Write the document to target, a path or a binary stream."""
+        self.new.save(target)
 
     def is_row(self, j: int) -> bool:
         return getattr(self.f.new_text[j], "kind", "") == "row"
@@ -569,7 +596,7 @@ class WordRedline:
         return side, tbl if tbl is not None else ref
 
 
-def _by_run(atoms_) -> list:
+def by_run(atoms_) -> list:
     """The atoms grouped by their run, in order."""
     out: list = []
     for atom in atoms_:
@@ -587,10 +614,7 @@ def _deleted_content(run, group) -> None:
 
     def flush():
         if text:
-            t = OxmlElement("w:delText")
-            t.text = "".join(text)
-            t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-            run.append(t)
+            run.append(text_element("w:delText", "".join(text)))
             text.clear()
 
     for _, el, k in group:
@@ -602,7 +626,8 @@ def _deleted_content(run, group) -> None:
     flush()
 
 
-def _without_changes(rpr):
+def without_changes(rpr):
+    """Run properties without their own formatting change."""
     for c in rpr.findall(qn("w:rPrChange")):
         rpr.remove(c)
     return rpr
@@ -619,14 +644,6 @@ def _cleaned(el):
     for x in [x for x in el.iter() if x.tag in POINTERS]:
         x.getparent().remove(x)
     return el
-
-
-def redline_docx(f: FileDiff, path: str, author: str) -> None:
-    """Write the new Word document of f with its changes since the old one
-    marked as tracked changes."""
-    r = WordRedline(f, author)
-    r.run()
-    r.new.save(path)
 
 
 # OpenDocument ----------------------------------------------------------------------
@@ -723,6 +740,17 @@ def odf_insert(at: list, x: int, el, paragraphs) -> None:
     el.tail = text[k:] or None
 
 
+def odf_drop(el) -> None:
+    """Take el out of its paragraph, its tail kept."""
+    parent, prev = el.getparent(), el.getprevious()
+    if el.tail:
+        if prev is not None:
+            prev.tail = (prev.tail or "") + el.tail
+        else:
+            parent.text = (parent.text or "") + el.tail
+    parent.remove(el)
+
+
 def odf_at_start(p, el) -> None:
     el.tail, p.text = p.text, None
     p.insert(0, el)
@@ -789,10 +817,7 @@ class OdtRedline:
         if not own:
             self.accept_own()
         # the ids of the document's own changes, not to be given again
-        self.taken = {
-            r.get(odf("text:id")) or r.get(XML_ID)
-            for r in self.root.iter(odf("text:changed-region"))
-        }
+        self.taken = set(self.changed_regions())
         self.styles = OdtStyles(self.doc, prefix="PD_T")
         self.author = author
         self.date = dt.datetime.now(dt.UTC).replace(microsecond=0, tzinfo=None)
@@ -813,18 +838,23 @@ class OdtRedline:
                 out += etree.XPath(path, namespaces=ns)(self.root.getroottree())[:1]
         return out
 
+    def changed_regions(self) -> dict:
+        """The document's changed regions, by id."""
+        return {
+            r.get(odf("text:id")) or r.get(XML_ID): r
+            for r in self.root.iter(odf("text:changed-region"))
+        }
+
+    def save(self, target) -> None:
+        """Write the document to target, a path or a binary stream."""
+        self.doc.save(target)
+
     def accept_own(self) -> None:
         """The document's own tracked changes accepted: its deletions gone,
         its insertions kept, their marks and regions dropped."""
         for tag in ("text:change", "text:change-start", "text:change-end"):
             for el in list(self.root.iter(odf(tag))):
-                parent, prev = el.getparent(), el.getprevious()
-                if el.tail:
-                    if prev is not None:
-                        prev.tail = (prev.tail or "") + el.tail
-                    else:
-                        parent.text = (parent.text or "") + el.tail
-                parent.remove(el)
+                odf_drop(el)
         for region in list(self.root.iter(odf("text:changed-region"))):
             region.getparent().remove(region)
 
@@ -866,7 +896,7 @@ class OdtRedline:
             n = k
             while n < end and style(n) == style(k):
                 n += 1
-            text = "".join(ch for ch in line[k:n] if ord(ch) < 0xE000)
+            text = plain_text(line[k:n])
             if text:
                 name = self.styles.name(style(k))
                 p.append(odfdo.Span(text, style=name) if name else text)
@@ -1074,9 +1104,10 @@ def in_table(p) -> bool:
     return next(p.iterancestors(odf("table:table-cell")), None) is not None
 
 
-def redline_odt(f: FileDiff, path: str, author: str) -> None:
-    """Write the new OpenDocument text of f with its changes since the old
-    one marked as tracked changes."""
-    r = OdtRedline(f, author)
+def redline(f: FileDiff, path: str, author: str, fmt: str) -> None:
+    """Write the new version of f, a Word document (fmt "docx") or an
+    OpenDocument text ("odt"), with its changes since the old one marked as
+    tracked changes."""
+    r = (WordRedline if fmt == "docx" else OdtRedline)(f, author)
     r.run()
-    r.doc.save(path)
+    r.save(path)

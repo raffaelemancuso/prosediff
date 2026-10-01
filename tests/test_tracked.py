@@ -337,3 +337,16 @@ def test_the_new_odt_file_is_kept_and_marked(tmp_path):
     assert "styles.xml" in zipfile.ZipFile(out).namelist()
     assert "Box" in zipfile.ZipFile(out).read("styles.xml").decode()
     assert same(new, out, "accept-all") and same(old, out, "reject-all")
+
+
+def test_only_prosediffs_marks_are_left_out_of_deleted_text():
+    """Text put back as deleted keeps every character of the document's,
+    emoji and ligatures included; only prosediff's marks (the comments'
+    placeholders, the footnotes' stand-ins) are left out."""
+    from prosediff.comments import END_FIRST, PUA_FIRST
+    from prosediff.footnotes import FIRST
+    from prosediff.redline import plain_text
+
+    text = "Fine 🙂 ﬁt�"
+    assert plain_text(text) == text
+    assert plain_text(f"a{chr(PUA_FIRST)}b{chr(END_FIRST)}c{chr(FIRST)}") == "abc"
