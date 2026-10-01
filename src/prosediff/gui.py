@@ -1150,13 +1150,14 @@ class App:
         )
         pick.pack(side="left")
         self.assess_author = self.setting("assess_author")
-        ttk.Label(card, text="Comments by").grid(row=3, column=0, sticky="w", **PAD)
+        ttk.Label(card, text="Author").grid(row=3, column=0, sticky="w", **PAD)
         author = ttk.Entry(card, textvariable=self.assess_author, width=30)
         author.grid(row=3, column=1, sticky="w", **PAD)
         hint(
             author,
-            "Who the AI's comments and fixes in the Word and OpenDocument documents "
-            "are by, as Word and LibreOffice show them. Empty: the AI and its model, "
+            "Who the AI's comments and its fixes, tracked changes, in the Word and "
+            "OpenDocument documents are by, as Word and LibreOffice show them (Review, "
+            "Track Changes). Empty: the AI and its model, "
             'e.g. "Claude Code (claude-opus-5-5)".',
         )
         self.ai_switches += [entry, write, pick, author]

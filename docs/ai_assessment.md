@@ -81,7 +81,7 @@ effort starred, as the window does. Three more settings:
   files and for marking problems in the text. `--assess-save-prompt` shows
   the prompt sent.
 - **Who the comments are by** (`--assess-author`; in the window,
-  **Comments by**): the name on the AI's comments and fixes in the Word
+  **Author**): the name on the AI's comments and tracked-change fixes in the Word
   and OpenDocument documents; by default the AI and its model.
 
 **Privacy.** The AI is sent the word diff of the changed paragraphs

@@ -71,7 +71,7 @@ in a large box in a window of their own (the pencil button), or from a text
 file; in that window, prosediff's own prompts too, to edit (**Restore
 default** puts prosediff's back): for one file, the review's; for two
 versions, the assessment's and the AI-writing check's; who its comments in the Word and OpenDocument documents are by
-(**Comments by**; empty: the AI and its model); whether it marks problems in the text (on by default); and
+(**Author**, of its comments and tracked changes; empty: the AI and its model); whether it marks problems in the text (on by default); and
 whether the prompt is saved in the report. The switches are greyed out
 while no AI is chosen, and the whole card unless the output is the HTML
 report.
