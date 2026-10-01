@@ -20,8 +20,8 @@ authors:
 repository-code: "https://github.com/raffaelemancuso/prosediff"
 url: "https://raffaelemancuso.github.io/prosediff/"
 license: MIT
-version: 0.6.0
-date-released: "2026-09-29"
+version: 0.7.0
+date-released: "2026-10-01"
 keywords:
   - diff
   - document comparison
