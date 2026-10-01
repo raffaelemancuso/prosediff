@@ -81,6 +81,10 @@ TRANSPARENT = {
     qn("w:dir"),
     qn("w:bdo"),
 }
+# What a run holds besides text that is read as a space, or as a hyphen (the
+# redline finds the run's characters by the same reading).
+SPACES = {qn(t) for t in ("w:tab", "w:ptab", "w:br", "w:cr")}
+HYPHEN = qn("w:noBreakHyphen")
 
 
 class WordError(RuntimeError):
@@ -163,21 +167,16 @@ class Reader(DocumentReader):
         its comments are kept, so its footnote references are not counted.
         """
         r = Run(el, paragraph)
-        style = _style_name(r)
-        styles = set(styles_of(resolve_effective_formatting(r)))
-        if style == "strong":
-            styles.add(STRONG)
-        elif style == "emphasis":
-            styles.add(EM)
+        styles = styles_of(resolve_effective_formatting(r)) | _character_style(r)
         styles = frozenset(styles - self.plain)
         out: list = []
         for child in el:
             tag = child.tag
             if tag == qn("w:t") or (tag == qn("w:delText") and deleted):
                 out.append(Text(child.text or "", styles))
-            elif tag in (qn("w:tab"), qn("w:ptab"), qn("w:br"), qn("w:cr")):
+            elif tag in SPACES:
                 out.append(Text(" ", styles))
-            elif tag == qn("w:noBreakHyphen"):
+            elif tag == HYPHEN:
                 out.append(Text("-", styles))
             elif tag == qn("w:footnoteReference") and not dropping:
                 out += self.note_ref("footnote", child.get(qn("w:id")))
@@ -331,10 +330,10 @@ def comment_inlines(p: Paragraph) -> list[Text]:
     out = []
     for item in p.iter_inner_content():
         for r in item.runs if isinstance(item, Hyperlink) else [item]:
-            f, styles = r.font, set()
-            if f.bold or _style_name(r) == "strong":
+            f, styles = r.font, _character_style(r)
+            if f.bold:
                 styles.add(STRONG)
-            if f.italic or _style_name(r) == "emphasis":
+            if f.italic:
                 styles.add(EM)
             if f.underline not in (None, False, WD_UNDERLINE.NONE):
                 styles.add(UNDERLINE)
@@ -351,6 +350,12 @@ def comment_inlines(p: Paragraph) -> list[Text]:
 def _style_name(x) -> str:
     """The name of a paragraph's or a run's style, lowercase ("" for none)."""
     return (x.style.name or "").lower() if x.style is not None else ""
+
+
+def _character_style(r) -> set[str]:
+    """What a run's character style makes it: Strong bold, Emphasis italic."""
+    style = {"strong": STRONG, "emphasis": EM}.get(_style_name(r))
+    return {style} if style else set()
 
 
 def styles_of(fmt) -> frozenset[str]:

@@ -33,7 +33,6 @@ from prosediff.diff import (
     FilterError,
     MovedPassageSettings,
     MoveSettings,
-    Options,
     SettingError,
     check_encoding,
     check_move_similarity,
@@ -42,7 +41,7 @@ from prosediff.diff import (
 from prosediff.document import CHANGES
 from prosediff.gitsetup import SetupError, document_name, setup_git
 from prosediff.language import DEFAULT, normalize_language
-from prosediff.pipeline import OutputError, Run, execute, request_of
+from prosediff.pipeline import OutputError, Run, execute, options_of, request_of
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
@@ -557,14 +556,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     except SettingError as e:
         ap.error(f"{passage_option(e.name)}: {e}")
-    options = Options(
-        **_reading_options(args),
+    options = options_of(
+        args,
         context=None if args.full else ("auto" if args.context is None else args.context),
-        ignore_whitespace=args.ignore_whitespace,
-        max_hidden=args.max_hidden,
         paragraph_moves=MoveSettings(args.move_similarity, args.move_algorithm),
         sentence_moves=MoveSettings(args.sentence_move_similarity, args.sentence_move_algorithm),
-        move_passages=args.move_passages,
         moved_passage_settings=passage_settings,
     )
     run = Run(
@@ -627,20 +623,6 @@ def _verdict(a: Assessment) -> str:
     return f" ({a.verdict})" if a.verdict else ""
 
 
-def _reading_options(args: argparse.Namespace) -> dict:
-    """The Options that read the files, as a comparison and a review share
-    them."""
-    return {
-        "md_filter": args.md_filter,
-        "comments": args.comments or "markers",
-        "empty_comments": args.empty_comments,
-        "skip_resolved": args.skip_resolved,
-        "docx_changes": args.docx_changes,
-        "language": args.language,
-        "encoding": args.encoding,
-    }
-
-
 def _say(stage: str) -> None:
     """A stage of the run, on stderr: only asking the AI, which takes long."""
     if stage.startswith("Asking"):
@@ -672,7 +654,7 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             ap.error(f"{option} picks what to compare: --review takes one file")
     _check_reading(ap, args)
     path = Path(args.repo)
-    options = Options(**_reading_options(args))
+    options = options_of(args, comparing=False)
     output = args.output or (default_output() if args.open else review_page(path))
     run = Run(
         "review",

@@ -312,6 +312,18 @@ class Annotation:
     replacement: str = ""
 
 
+# How an annotation's passage is found in the text, by prosediff.aidocs and
+# the HTML report's script alike: whatever typographic variants of quotes
+# and dashes a model writes plainly, its end words within REACH characters
+# of its start words.
+TYPOGRAPHIC = {
+    **dict.fromkeys("‘’‚‛", "'"),
+    **dict.fromkeys("“”„‟", '"'),
+    **dict.fromkeys("‐‑‒–—―−", "-"),
+}
+REACH = 20_000
+
+
 # The fenced JSON block at the end of an answer, with the marked passages.
 JSON_BLOCK = re.compile(r"```(?:json)?\s*(\[.*?\])\s*```", re.S | re.I)
 

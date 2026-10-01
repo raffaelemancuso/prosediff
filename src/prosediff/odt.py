@@ -97,6 +97,9 @@ SILENT = {
     "text:alphabetical-index-mark",
     "text:toc-mark",
 }
+# Inline elements read as a space (the redline finds the characters of a
+# paragraph by the same reading); text:s stands for text:c of them.
+SPACES = ("text:tab", "text:line-break")
 
 
 def position(value: str) -> set[str]:
@@ -156,9 +159,14 @@ class Break:
     after: Kind | None
 
 
+def lxml_of(el: Element):
+    """The lxml element behind an odfdo one."""
+    return el._xml_element
+
+
 def source_of(el: Element) -> tuple[str, str]:
     """Where a paragraph is (document.Source): content.xml, its XPath."""
-    x = el._Element__element  # odfdo's lxml element
+    x = lxml_of(el)
     return ("content.xml", x.getroottree().getpath(x))
 
 
@@ -188,7 +196,7 @@ class Reader(DocumentReader):
         self.styles: dict[str, frozenset[str]] = {}
 
     def language_of(self, paragraphs: list[Element]) -> str | None:
-        return super().language_of(p._xml_element for p in paragraphs)
+        return super().language_of(lxml_of(p) for p in paragraphs)
 
     # Styles ------------------------------------------------------------------------
 
@@ -374,7 +382,7 @@ class Reader(DocumentReader):
             elif tag == "text:s":
                 count = child.get_attribute_integer("text:c") or 1
                 out.append((Text(" " * count, styles), where))
-            elif tag in ("text:tab", "text:line-break"):
+            elif tag in SPACES:
                 out.append((Text(" ", styles), where))
             elif tag == "text:note":
                 if not self.dropping():

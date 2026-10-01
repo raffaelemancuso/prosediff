@@ -14,7 +14,7 @@ pytest.importorskip("tkinter", reason="the GUI tests need a Python built with Tk
 import tkinter as tk
 from tkinter import ttk as tk_ttk
 
-from helpers import two_files
+from helpers import FIXED, NEW, assessment, pair, two_files, word_file
 
 from prosediff import gui, pipeline
 from prosediff.assess import (
@@ -864,9 +864,6 @@ def test_documents_to_download(tmp_path, monkeypatch, root):
     """The documents made of the AI's problems go in the report unless
     switched off; the switch is greyed out while the problems are not
     marked in the text."""
-    from test_aidocs import FIXED, assessment
-    from test_tracked import pair
-
     old, new = pair(tmp_path, "docx")
     monkeypatch.setattr(pipeline, "assess_comparison", lambda c, request: assessment([FIXED]))
     s = Settings(mode="files", old=str(old), new=str(new), assess="claude", assess_preview=False)
@@ -891,9 +888,6 @@ def test_one_file_reviewed(root, tmp_path, monkeypatch):
     """The "One file" tab: one file, reviewed by the AI chosen, into an
     HTML report next to it; the options of a comparison greyed out, the
     other formats too; no AI, no review."""
-    from test_aidocs import FIXED
-    from test_tracked import NEW, word_file
-
     path = word_file(tmp_path / "paper.docx", NEW)
     asked = []
 

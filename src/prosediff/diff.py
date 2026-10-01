@@ -72,11 +72,13 @@ from prosediff.sentences import split_sentences
 from prosediff.sources import (
     DOCUMENT_SUFFIXES,
     FOLDER_FILES,
+    MINUTE,
     SourceError,
     describe_side,
     is_document,
     read_document,
     read_side,
+    suffix_of,
 )
 
 # The styles of a document's line the text formats write: its formatting,
@@ -463,7 +465,7 @@ def revision(commit: git.Commit) -> Revision:
         short=commit.hexsha[:7],
         subject=summary if isinstance(summary, str) else summary.decode(),
         author=commit.author.name or "",
-        date=commit.committed_datetime.strftime("%Y-%m-%d %H:%M"),
+        date=commit.committed_datetime.strftime(MINUTE),
     )
 
 
@@ -579,7 +581,7 @@ def split_lines(text: str) -> list[str]:
 
 
 def image_uri(path: str, data: bytes) -> str | None:
-    mime = IMAGE_TYPES.get(Path(path).suffix.lower())
+    mime = IMAGE_TYPES.get(suffix_of(path))
     if not mime or not data or len(data) > MAX_IMAGE_BYTES:
         return None
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
@@ -736,10 +738,7 @@ def format_marks(
     if old_f == new_f:
         return None
     left, right, changes = [], [], []
-    start = 0
-    for k in range(1, len(text) + 1):
-        if k < len(text) and (old_f[k], new_f[k]) == (old_f[start], new_f[start]):
-            continue
+    for start, k in document.runs(zip(old_f, new_f, strict=False)):
         piece = text[start:k]
         o, n = styled(piece, old_styles[start:k]), styled(piece, new_styles[start:k])
         if old_f[start] != new_f[start] and piece.strip():
@@ -748,7 +747,6 @@ def format_marks(
             o, n = FMT.format("; ".join(what), o), FMT.format("; ".join(what), n)
         left.append(o)
         right.append(n)
-        start = k
     if not changes:
         return None
     return Markup("").join(left), Markup("").join(right), changes
@@ -2544,7 +2542,7 @@ def build_files(
             fd.new_data = new_bytes if new_doc is not None else b""
             fd.document_changes = options.docx_changes
             kinds = {
-                DOCUMENT_SUFFIXES[Path(p).suffix.lower()]
+                DOCUMENT_SUFFIXES[suffix_of(p)]
                 for p in (fd.old_path, fd.new_path)
                 if is_document(p)
             }

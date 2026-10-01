@@ -24,15 +24,26 @@ LOCK_FILES = ("~$*", ".~lock.*#")
 # The HTML report comparing two folders goes into the new one, by default, under
 # this name; at the top of a folder, it is never one of the files compared.
 FOLDER_PAGE = "prosediff.html"
+# When a side was made, as the HTML report shows it: to the minute. And the
+# time in the name of a file written (a temporary report, a locked document's
+# stand-in): to the second.
+MINUTE = "%Y-%m-%d %H:%M"
+FILE_STAMP = "%Y%m%d_%H%M%S"
 
 
 class SourceError(RuntimeError):
     """A side could not be read or converted."""
 
 
+def suffix_of(path: str | Path | None) -> str:
+    """A file name's extension in lower case (".docx"); "" for none, or no
+    name."""
+    return Path(path).suffix.lower() if path else ""
+
+
 def is_document(path: str | None) -> bool:
     """Whether a path names a Word or OpenDocument text."""
-    return bool(path) and Path(path).suffix.lower() in DOCUMENT_SUFFIXES
+    return suffix_of(path) in DOCUMENT_SUFFIXES
 
 
 def document_to_markdown(data: bytes, name: str, changes: str = "accept-all") -> bytes:
@@ -46,7 +57,7 @@ def read_document(data: bytes, name: str, changes: str = "accept-all") -> Docume
     """A Word document or an OpenDocument text as prosediff reads it
     (prosediff.document), by its name's extension; changes as in
     document_to_markdown."""
-    if Path(name).suffix.lower() == ".odt":
+    if suffix_of(name) == ".odt":
         try:
             return read_odt(data, changes)
         except OdtError as e:
@@ -122,5 +133,5 @@ def review_page(path: Path) -> Path:
 
 def describe_side(path: Path) -> tuple[str, str, str, str]:
     """(full name, short name, kind, date) of a side, for the HTML report header."""
-    stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime(MINUTE)
     return str(path.resolve()), path.name, "folder" if path.is_dir() else "file", stamp

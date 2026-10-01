@@ -61,14 +61,13 @@ from prosediff.diff import (
     Context,
     MovedPassageSettings,
     MoveSettings,
-    Options,
     check_encoding,
     move_defaults,
     stop_process_tree,
 )
 from prosediff.document import CHANGES as DOCX_CHANGES
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
-from prosediff.pipeline import Run, execute, request_of
+from prosediff.pipeline import Run, execute, options_of, request_of
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
@@ -81,7 +80,7 @@ from prosediff.render import (
     format_of,
     open_output,
 )
-from prosediff.sources import FOLDER_FILES, page_of
+from prosediff.sources import FOLDER_FILES, page_of, suffix_of
 from prosediff.tracked import TRACKED_FORMATS, check_paths
 
 MAX_COMMITS = 200
@@ -250,7 +249,7 @@ NUMBER_NAMES = {"max_hidden": "Hidden lines", "assess_timeout": "The AI's timeou
 def prefillable(path: Path) -> bool:
     """Whether path is a Markdown, Word or OpenDocument file, which the
     window's tabs are filled in with."""
-    return path.is_file() and path.suffix.lower() in PREFILLED_FILES
+    return path.is_file() and suffix_of(path) in PREFILLED_FILES
 
 
 def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
@@ -375,21 +374,12 @@ def run_of(s: Settings) -> Run:
     """The run the settings ask for (pipeline.Run); ValueError for settings
     that ask for none: sides or an AI to review with not chosen, a split or
     a document of tracked changes the output cannot hold."""
-    options = Options(
+    options = options_of(
+        s,
         context=context_of(s),
-        md_filter=s.md_filter or None,
-        ignore_whitespace=s.ignore_whitespace,
-        comments=s.comments,
-        empty_comments=s.empty_comments,
-        skip_resolved=s.skip_resolved,
-        max_hidden=s.max_hidden,
-        docx_changes=s.docx_changes,
         paragraph_moves=moves_of(s, False),
         sentence_moves=moves_of(s, True),
-        move_passages=s.move_passages,
         moved_passage_settings=MovedPassageSettings.from_choices(s.moved_passages),
-        language=s.language or DEFAULT,
-        encoding=s.encoding or AUTO_ENCODING,
     )
     request = request_of(s)
     if request and s.mode == "review":
@@ -523,10 +513,9 @@ def run_job(s: Settings, messages, replies) -> None:
 def with_format(path: str, fmt: str) -> str:
     """The output file named for the format chosen: .html, .diff (a .patch
     stays one) or .wdiff; any other name, or none, stays."""
-    p = Path(path)
-    if not path or p.suffix.lower() not in (".html", *TEXT_SUFFIXES) or format_of(p) == fmt:
+    if suffix_of(path) not in (".html", *TEXT_SUFFIXES) or format_of(path) == fmt:
         return path
-    return str(p.with_suffix(FORMATS[fmt]))
+    return str(Path(path).with_suffix(FORMATS[fmt]))
 
 
 def moves_of(s: Settings, sentences: bool) -> MoveSettings:
@@ -873,16 +862,15 @@ class App:
             self.advanced, text="Moved paragraphs and sentences", padding=(10, 8)
         )
         moves.pack(fill="x", pady=(8, 0))
-        similarity, algorithm = moves_of(self.s, False).resolved(False)
-        self.move_similarity = tk.DoubleVar(value=similarity)
-        self.move_algorithm = tk.StringVar(value=algorithm)
-        similarity, algorithm = moves_of(self.s, True).resolved(True)
-        self.sentence_move_similarity = tk.DoubleVar(value=similarity)
-        self.sentence_move_algorithm = tk.StringVar(value=algorithm)
-        for row, what, similarity, algorithm, sentences in (
-            (0, "paragraphs", self.move_similarity, self.move_algorithm, False),
-            (1, "sentences", self.sentence_move_similarity, self.sentence_move_algorithm, True),
-        ):
+        # the similarity and the algorithm of paragraphs (False) and sentences
+        self.moves: dict[bool, tuple[tk.DoubleVar, tk.StringVar]] = {}
+        for sentences in (False, True):
+            similarity, algorithm = moves_of(self.s, sentences).resolved(sentences)
+            self.moves[sentences] = (tk.DoubleVar(value=similarity), tk.StringVar(value=algorithm))
+        self.move_similarity, self.move_algorithm = self.moves[False]
+        self.sentence_move_similarity, self.sentence_move_algorithm = self.moves[True]
+        for row, (what, sentences) in enumerate((("paragraphs", False), ("sentences", True))):
+            similarity, algorithm = self.moves[sentences]
             default = "{:.2f} {}".format(*move_defaults(sentences))
             field_row(
                 moves,
@@ -1768,10 +1756,7 @@ class App:
         if not context.lstrip("-").isdigit():
             context = "auto"
         moves = {}
-        for sentences, similarity, algorithm in (
-            (False, self.move_similarity, self.move_algorithm),
-            (True, self.sentence_move_similarity, self.sentence_move_algorithm),
-        ):
+        for sentences, (similarity, algorithm) in self.moves.items():
             # the default, while it is the one shown: it follows prosediff's
             default_similarity, default_algorithm = move_defaults(sentences)
             try:
@@ -1947,10 +1932,7 @@ class App:
             if name not in COMPARED:
                 var.set(getattr(d, name))
         self.docx.set(DOCX_CHANGE_LABELS[d.docx_changes])
-        for sentences, similarity, algorithm in (
-            (False, self.move_similarity, self.move_algorithm),
-            (True, self.sentence_move_similarity, self.sentence_move_algorithm),
-        ):
+        for sentences, (similarity, algorithm) in self.moves.items():
             value, name = moves_of(d, sentences).resolved(sentences)
             similarity.set(value)
             algorithm.set(name)

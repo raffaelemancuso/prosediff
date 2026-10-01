@@ -6,6 +6,17 @@ Skipped when Playwright's Chromium is not installed
 
 import pytest
 from conftest import RepoBuilder
+from helpers import (
+    ADVICE,
+    FIXED,
+    assessment,
+    authors_of,
+    co_authored,
+    commented_documents,
+    comments_of,
+    lines,
+    pair,
+)
 
 from prosediff import Options, compare, compare_paths, render
 
@@ -677,8 +688,6 @@ def test_moved_passages_switch(browser, tmp_path):
 def test_a_comment_card_shows_its_paragraphs_and_italics(browser, tmp_path):
     """A Word comment's card has a line for each of its paragraphs, the blank
     one too, and its italics."""
-    from test_comments import commented_documents
-
     old, new = commented_documents(tmp_path, "docx")
     page = open_report(browser, tmp_path, compare_paths(old, new, Options(context=None)))
     card = page.locator(".card").first
@@ -937,9 +946,6 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     """The drawer, and the top bar, save each document the AI's problems were put in; a
     problem left out in review mode (its box unticked) is not in either:
     no comment of its, its fix rejected."""
-    from test_aidocs import ADVICE, FIXED, assessment, comments_of
-    from test_tracked import lines, pair
-
     old, new = pair(tmp_path, fmt)
     c = compare_paths(str(old), str(new), Options())
     page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
@@ -989,9 +995,6 @@ def test_a_fix_left_out_gives_the_co_authors_words_back(browser, tmp_path, fmt):
     downloaded file as the co-author left it, their insertion and deletion
     still tracked, all accepted the text unfixed, all rejected the text
     before them."""
-    from test_aidocs import ADVICE, FIXED, assessment, authors_of, co_authored
-    from test_tracked import lines, pair
-
     from prosediff.diff import review_file
 
     new = co_authored(pair(tmp_path, fmt)[1], fmt)

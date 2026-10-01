@@ -5,7 +5,7 @@ models, so no test needs one, but for one with a real local model."""
 import socket
 
 import pytest
-from helpers import two_files
+from helpers import ANSWER, fake, two_files
 
 from prosediff import assess as assess_module
 from prosediff import compare_paths, render
@@ -31,30 +31,10 @@ from prosediff.cli import main
 from prosediff.diff import review_file
 from prosediff.render import assess_comparison, new_version
 
-ANSWER = """## Verdict
-**Improves**: the introduction is tighter.
 
-## What changed
-- The second sentence was cut.
-
-## Improvements
-- Shorter.
-
-## Problems to fix
-1. "a claim" is no longer supported.
-"""
-
-
-def fake(answer: str = ANSWER, model: str = "fake-1"):
-    """A backend answering answer, recording what it was asked."""
-    asked = []
-
-    def runner(backend, system, prompt, model_asked, effort, timeout):
-        asked.append((backend, system, prompt, model_asked, effort, timeout))
-        return answer, model
-
-    runner.asked = asked
-    return runner
+def failing(*_):
+    """A backend that cannot answer."""
+    raise AssessError("no login")
 
 
 def test_backends_parsed():
@@ -229,10 +209,6 @@ def test_verdicts_read():
 def test_a_failure_is_the_assessment_s_error():
     """A backend that fails, a wrong backend, or no changes: an assessment
     holding the error, never an exception."""
-
-    def failing(*_):
-        raise AssessError("no login")
-
     assert assess("diff", "x", AssessRequest("codex"), runner=failing).error == "no login"
     assert "ollama/MODEL" in assess("diff", "x", AssessRequest("ollama"), runner=fake()).error
     assert "no changes" in assess("  \n", "x", AssessRequest("claude"), runner=fake()).error
@@ -334,10 +310,6 @@ def test_cli_assess_writes_the_report(tmp_path, monkeypatch, capsys):
     assert main([*args, "--assess-context", "changes"]) == 0
     assert "<document>" not in runner.asked[1][2]
     assert "Text sent to the AI" not in out.read_text(encoding="utf-8")
-
-    def failing(*_):
-        raise AssessError("no login")
-
     monkeypatch.setattr(assess_module, "run_backend", failing)
     assert main([*args, "--assess-save-prompt"]) == 0
     html = out.read_text(encoding="utf-8")

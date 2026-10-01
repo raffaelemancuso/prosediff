@@ -10,93 +10,12 @@ import docx
 import odfdo
 import pytest
 from docx_plus.revisions import read_revisions
+from helpers import NEW, commented_documents, lines, odt_file, pair, word_file
 
-from prosediff import document, tracked
+from prosediff import tracked
 from prosediff.cli import main
 from prosediff.diff import Options, compare_paths
 from prosediff.render import check_split, format_of, write_output
-from prosediff.sources import read_document
-
-OLD = [
-    ("h", "Introduction"),
-    ("p", "Innovation policy has long relied on grants to firms."),
-    ("p", "It studies the effect of **regional** subsidies on patenting."),
-    ("p", "We find a small but significant effect."),
-    ("p", "Limitations are discussed in the last section."),
-    ("l", "Patents granted"),
-    ("l", "Firms treated"),
-]
-NEW = [
-    ("h", "Introduction and aims"),
-    ("p", "Innovation policy has long relied on grants and loans to firms."),
-    ("p", "It studies the effect of *regional* subsidies on patenting."),
-    ("p", "We find a large and significant effect."),
-    ("l", "Patents granted"),
-    ("l", "Firms treated, by region"),
-    ("l", "Workers hired"),
-    ("p", "Robustness checks confirm every result."),
-]
-
-
-def parts(text):
-    for m in re.finditer(r"\*\*(.+?)\*\*|\*(.+?)\*|([^*]+)", text):
-        yield (m[1] or m[2] or m[3]), bool(m[1]), bool(m[2])
-
-
-def word_file(path, blocks, comment=False):
-    d = docx.Document()
-    for kind, text in blocks:
-        if kind == "h":
-            d.add_heading(text, level=1)
-            continue
-        p = d.add_paragraph(style="List Bullet" if kind == "l" else None)
-        for t, bold, italic in parts(text):
-            r = p.add_run(t)
-            r.bold, r.italic = bold or None, italic or None
-    if comment:
-        d.add_comment(d.paragraphs[3].runs[0], text="Say how large.", author="Anna Rossi")
-    d.save(path)
-    return path
-
-
-def odt_file(path, blocks):
-    d = odfdo.Document("text")
-    body = d.body
-    body.clear()
-    d.insert_style(odfdo.Style("text", name="B", bold=True), automatic=True)
-    d.insert_style(odfdo.Style("text", name="I", italic=True), automatic=True)
-    for kind, text in blocks:
-        if kind == "h":
-            body.append(odfdo.Header(1, text))
-        elif kind == "l":
-            last = body.children[-1] if body.children else None
-            if last is None or last.tag != "text:list":
-                last = odfdo.List()
-                body.append(last)
-            last.append(odfdo.ListItem(text))
-        else:
-            p = odfdo.Paragraph()
-            for t, bold, italic in parts(text):
-                p.append(odfdo.Span(t, style="B" if bold else "I") if bold or italic else t)
-            body.append(p)
-    d.save(path)
-    return path
-
-
-def pair(tmp_path, ext, comment=False):
-    if ext == "docx":
-        return (
-            word_file(tmp_path / "old.docx", OLD),
-            word_file(tmp_path / "new.docx", NEW, comment),
-        )
-    return odt_file(tmp_path / "old.odt", OLD), odt_file(tmp_path / "new.odt", NEW)
-
-
-def lines(path, changes):
-    """The text prosediff reads from a document, its tracked changes
-    accepted or rejected: a line per paragraph."""
-    doc = read_document(path.read_bytes(), path.name, changes)
-    return [str(line) for line in document.lines(doc, lambda mark: "")]
 
 
 def same(a, b, changes):
@@ -232,8 +151,6 @@ def test_cli_writes_tracked_changes(tmp_path, capsys):
 def test_the_new_comments_stay_as_written(tmp_path, fmt):
     """The new file's comments are its own, their paragraphs and italics
     as they were."""
-    from test_comments import commented_documents
-
     old, new = commented_documents(tmp_path, fmt)
     out = write_output(compare_paths(str(old), str(new), Options()), tmp_path / f"o.{fmt}", fmt)
     if fmt == "docx":

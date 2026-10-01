@@ -1,7 +1,7 @@
 """Comments: folding pandoc comment spans into markers, and the comments panel."""
 
 import pytest
-from helpers import END, NOTE, two_folders
+from helpers import END, NOTE, commented_documents, two_folders
 
 from prosediff import Options, compare, compare_paths, render
 from prosediff.comments import (
@@ -215,42 +215,6 @@ def test_comments_panel_statuses_and_links(tmp_path):
     assert html.count('class="comment new"') == 1
     assert html.count('class="comment removed"') == 1
     assert not PLACEHOLDER.search(html)  # every comment became a marker
-
-
-def commented_documents(tmp_path, ext):
-    """Two versions of a document, the new one with a comment of two
-    paragraphs, a blank one between them, a title in italics."""
-    import docx
-    import odfdo
-
-    if ext == "docx":
-        for name, comment in (("old", False), ("new", True)):
-            d = docx.Document()
-            p = d.add_paragraph("Some text.")
-            if comment:
-                c = d.add_comment(p.runs[0], text="Please cite:", author="Anna")
-                c.add_paragraph("")
-                second = c.add_paragraph("See ")
-                second.add_run("Research Policy").italic = True
-                second.add_run(", 49.")
-            d.save(tmp_path / f"{name}.docx")
-    else:
-        for name, comment in (("old", False), ("new", True)):
-            d = odfdo.Document("text")
-            d.body.clear()
-            d.insert_style(odfdo.Style("text", name="I", italic=True), automatic=True)
-            p = odfdo.Paragraph("Some text.")
-            if comment:
-                note = odfdo.Annotation("Please cite:", creator="Anna", name="n1")
-                note.append(odfdo.Paragraph(""))
-                second = odfdo.Paragraph("See ")
-                second.append(odfdo.Span("Research Policy", style="I"))
-                second.append(", 49.")
-                note.append(second)
-                p.insert(note, position=0)
-            d.body.append(p)
-            d.save(tmp_path / f"{name}.{ext}")
-    return tmp_path / f"old.{ext}", tmp_path / f"new.{ext}"
 
 
 @pytest.mark.parametrize("ext", ["docx", "odt"])

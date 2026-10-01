@@ -97,9 +97,6 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
   align-items: baseline; }
 .card .chip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
   color: var(--muted); background: var(--panel); white-space: nowrap; }
-.card.comment-new .chip { color: var(--add); background: var(--ins-line); }
-.card.comment-removed .chip { color: var(--rem); background: var(--del-line); }
-.card.problem .chip { color: var(--fmt); background: var(--fmt-bg); }
 .card .who { font-weight: 600; }
 .card .when { color: var(--muted); font-size: 12px; }
 .card .body { margin-top: 3px; overflow-wrap: anywhere; }
@@ -120,8 +117,7 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
   background: linear-gradient(var(--link), var(--link)) center / 2px 100% no-repeat; }
 body.col-dragging { cursor: col-resize; user-select: none; }
 body.unified .col-resizer, body.review .col-resizer { display: none; }
-@media screen and (max-width: 1100px) { .col-resizer { display: none; } }
-@media print { .col-resizer { display: none; } }
+@media print, screen and (max-width: 1100px) { .col-resizer { display: none; } }
 /* No comment and no problem anywhere, or the margin hidden by its switch
    (g): no margin, the two versions taking its width. */
 body.no-notes col.notes, body:not(.margin) col.notes { width: 0 !important; }
@@ -159,12 +155,13 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
   max-height: 70vh; overflow: auto; margin: 8px 0 0; }
 .verdict { font-weight: 600; padding: 0 8px; border-radius: 999px; }
 /* the changes', the review's, and whether the new text reads as written
-   by an AI */
-.verdict-improves, .verdict-good, .verdict-unlikely { color: var(--add);
-  background: var(--ins-line); }
-.verdict-mixed, .verdict-fair, .verdict-possibly { color: var(--fmt); background: var(--fmt-bg); }
-.verdict-worsens, .verdict-poor, .verdict-likely { color: var(--rem);
-  background: var(--del-line); }
+   by an AI; and the chips of the margin's cards, in the same colours */
+.verdict-improves, .verdict-good, .verdict-unlikely, .card.comment-new .chip {
+  color: var(--add); background: var(--ins-line); }
+.verdict-mixed, .verdict-fair, .verdict-possibly, .card.problem .chip {
+  color: var(--fmt); background: var(--fmt-bg); }
+.verdict-worsens, .verdict-poor, .verdict-likely, .card.comment-removed .chip {
+  color: var(--rem); background: var(--del-line); }
 .assess-body { max-width: 80em; }
 .assess-body h1, .assess-body h2, .assess-body h3 { font-size: 14px; margin: 14px 0 4px; }
 .assess-body p, .assess-body ul, .assess-body ol { margin: 4px 0; }
@@ -700,9 +697,7 @@ thead.print, .print-note { display: none; }
 {% macro cells(f, r, side, spoken=none, sign="", plain=none) -%}
 {% set left = side == "left" %}{% set no, lang, label = r[side ~ "_no"], r[side ~ "_lang"], r[side ~ "_label"] %}{% set end = "moved-out" if left else "moved-in" %}{% set move = r.changes[0] if spoken is not none and r.kind == end and r.changes else "" %}
 <td class="no {{ "l" if left else "r" }}"{% if move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, no, lang) }}{% if spoken is none %}{{ label or no }}{% else %}{{ (label or no) if no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign }}</span>{% endif %}</td>
-{%- if spoken is none %}<td class="code {{ side }}"{% if lang and lang != f.language %} lang="{{ lang }}"{% endif %}>{{ r[side] | hyphenate(lang or f.language) }}</td>
-{%- else %}<td class="code {{ side }}"{% if lang and lang != f.language %} lang="{{ lang }}"{% endif %}>{% if r.kind in spoken and no is not none %}<span class="sr">{{ spoken[r.kind] }}, {{ "old" if left else "new" }}: </span>{% endif %}{{ pv(r[side] | hyphenate(lang or f.language), plain[side] | hyphenate(lang or f.language) if plain else none) }}{% if move %}<span class="print-note" aria-hidden="true">{{ move | replace(", edited:", "") }}</span>{% endif %}</td>
-{%- endif %}
+{%- set hy = lang or f.language %}<td class="code {{ side }}"{% if lang and lang != f.language %} lang="{{ lang }}"{% endif %}>{% if spoken is not none and r.kind in spoken and no is not none %}<span class="sr">{{ spoken[r.kind] }}, {{ "old" if left else "new" }}: </span>{% endif %}{{ pv(r[side] | hyphenate(hy), plain[side] | hyphenate(hy) if plain else none) }}{% if move %}<span class="print-note" aria-hidden="true">{{ move | replace(", edited:", "") }}</span>{% endif %}</td>
 {%- endmacro %}
 
 {# A count as the report shows it with moved passages (on) and without
@@ -936,6 +931,12 @@ thead.print, .print-note { display: none; }
   var counter = document.querySelector(".toolbar .counter");
   var current = -1;
   var fmt = function (n) { return n.toLocaleString("en-US"); };
+  // A count and what it counts, plural but for one: "1,234 lines".
+  function counted(n, word) { return fmt(n) + " " + word + (n === 1 ? "" : "s"); }
+  // Every element marked cls left unmarked.
+  function unmarkAll(cls) {
+    document.querySelectorAll("." + cls).forEach(function (e) { e.classList.remove(cls); });
+  }
   // What the report remembers between visits, under "prosediff-" + key:
   // nothing when the browser keeps nothing (a file:// page may not).
   function stored(key) {
@@ -959,7 +960,7 @@ thead.print, .print-note { display: none; }
     changes = Array.prototype.slice.call(root.querySelectorAll("tr.first-change"));
     current = -1;
     counter.textContent = fmt(changes.length);
-    counter.dataset.help = fmt(changes.length) + " change" + (changes.length === 1 ? "" : "s");
+    counter.dataset.help = counted(changes.length, "change");
     document.querySelectorAll("[data-nav]").forEach(function (b) { b.disabled = !changes.length; });
   }
   // Paragraph by paragraph, or sentence by sentence: remembered like the views.
@@ -983,6 +984,8 @@ thead.print, .print-note { display: none; }
     document.dispatchEvent(new Event("prosediff-layout"));
     if (reviewing) setReview(true);  // the queue of the split shown
   }
+  // The other split, chosen.
+  function flipSplit() { setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true); }
   refreshChanges();
   if (splitSwitch) {
     setSplit(stored("split") === "sentence", false);
@@ -995,7 +998,7 @@ thead.print, .print-note { display: none; }
     var row = changes[current];
     var file = row.closest("details");
     if (file) file.open = true;
-    document.querySelectorAll("tr.current").forEach(function (r) { r.classList.remove("current"); });
+    unmarkAll("current");
     row.classList.add("current");
     row.scrollIntoView({ block: "center" });
     counter.textContent = fmt(current + 1) + " / " + fmt(changes.length);
@@ -1062,8 +1065,7 @@ thead.print, .print-note { display: none; }
     verb.className = "verb";
     verb.textContent = "show ";
     button.appendChild(verb);
-    button.appendChild(document.createTextNode(
-      fmt(n) + " unchanged line" + (n === 1 ? "" : "s")));
+    button.appendChild(document.createTextNode(counted(n, "unchanged line")));
   }
   // The unchanged lines el is folded among, unfolded.
   function unfoldAround(el) {
@@ -1109,10 +1111,7 @@ thead.print, .print-note { display: none; }
     }
     var splitTo = e.target.closest("[data-split-to]");
     if (splitTo) { setSplit(splitTo.dataset.splitTo === "sentence", true); return; }
-    if (e.target.closest("[data-split-switch]")) {
-      setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true);
-      return;
-    }
+    if (e.target.closest("[data-split-switch]")) { flipSplit(); return; }
     var nav = e.target.closest("[data-nav]");
     if (nav) { go(current + Number(nav.dataset.nav)); return; }
     var view = e.target.closest("[data-toggle]");
@@ -1167,7 +1166,7 @@ thead.print, .print-note { display: none; }
                  g: function () { toggle("margin"); },
                  j: function () { if (reviewing) stepReview(1); },
                  k: function () { if (reviewing) stepReview(-1); },
-                 s: function () { if (splitSwitch) setSplit(splitSwitch.getAttribute("aria-pressed") !== "true", true); },
+                 s: function () { if (splitSwitch) flipSplit(); },
                  "[": function () { setGap(gapStep - 1); }, "]": function () { setGap(gapStep + 1); } };
     if (keys[e.key]) keys[e.key]();
   });
@@ -1181,7 +1180,7 @@ thead.print, .print-note { display: none; }
     var file = t.tagName === "DETAILS" ? t : t.closest("details.file");
     if (file) file.open = true;
     if (t.tagName === "TR") {
-      document.querySelectorAll("tr.target").forEach(function (r) { r.classList.remove("target"); });
+      unmarkAll("target");
       t.classList.add("target");
       t.scrollIntoView({ block: "center" });
     }
@@ -1288,7 +1287,7 @@ thead.print, .print-note { display: none; }
     if (canHighlight) CSS.highlights.delete("pin");
     if (pinned.cell) pinned.cell.classList.remove("pinned");
     pinned.mark.classList.remove("pinned");
-    document.querySelectorAll(".card.active").forEach(function (c) { c.classList.remove("active"); });
+    unmarkAll("active");
     pinned = null;
   }
   function pinComment(marker) {
@@ -1333,11 +1332,10 @@ thead.print, .print-note { display: none; }
     var data = document.getElementById("ai-notes-data");
     if (!data) return;
     try { aiNotes = JSON.parse(data.textContent); } catch (e) { return; }
-    // typographic variants a model writes plainly: curly quotes and dashes
-    // (as prosediff.aidocs finds passages)
-    var QUOTES = { "‘": "'", "’": "'", "‚": "'", "‛": "'",
-      "“": '"', "”": '"', "„": '"', "‟": '"', "‐": "-", "‑": "-",
-      "‒": "-", "–": "-", "—": "-", "―": "-", "−": "-" };
+    // typographic variants a model writes plainly: curly quotes and dashes;
+    // the end words looked for within REACH characters of the start words
+    // (as prosediff.aidocs finds passages: assess.TYPOGRAPHIC, assess.REACH)
+    var QUOTES = {{ typographic | tojson }}, REACH = {{ reach }};
     // Not text: NOT_TEXT. A row holding a moved passage is written twice,
     // its words marked as moved (.pv-on) and as removed and added (.pv-off),
     // the "Moved passages" switch hiding one: each is searched apart, so a
@@ -1389,7 +1387,7 @@ thead.print, .print-note { display: none; }
         if (i < 0) return null;
       }
       var j = text.indexOf(end, i);
-      if (j < 0 || j - i > 20000) { j = i; end = start; }
+      if (j < 0 || j - i > REACH) { j = i; end = start; }
       var a = hay.at[i], b = hay.at[j + end.length - 1];
       if (!a || !b) return null;
       var range = document.createRange();
@@ -1672,7 +1670,7 @@ thead.print, .print-note { display: none; }
     commentCurrent = null;
     if (!commentNav) return;
     commentNav.hidden = !n;
-    commentCounter.textContent = fmt(n) + (n === 1 ? " comment" : " comments");
+    commentCounter.textContent = counted(n, "comment");
   }
   countComments();
   document.addEventListener("prosediff-layout", countComments);
@@ -1725,8 +1723,8 @@ thead.print, .print-note { display: none; }
   // under them.
   // The rows and file review mode marked, unmarked.
   function clearReview() {
-    document.querySelectorAll(".review-row").forEach(function (r) { r.classList.remove("review-row"); });
-    document.querySelectorAll(".review-file").forEach(function (f) { f.classList.remove("review-file"); });
+    unmarkAll("review-row");
+    unmarkAll("review-file");
     unpin();
   }
   function setDrawer(open, id) {

@@ -38,17 +38,17 @@ from docx.oxml.ns import qn
 from docx.text.run import Run
 from lxml import etree
 
-from prosediff.assess import Annotation, Assessment
+from prosediff.assess import REACH, TYPOGRAPHIC, Annotation, Assessment
 from prosediff.comments import ANY_PLACEHOLDER
 from prosediff.diff import Comparison, FileDiff, word_ops
 from prosediff.document import spaced
 from prosediff.hyphenate import SOFT_HYPHEN
 from prosediff.redline import (
+    ODF,
     XML_ID,
     OdtRedline,
     WordRedline,
     after_properties,
-    aligned,
     atoms,
     by_run,
     located,
@@ -56,25 +56,17 @@ from prosediff.redline import (
     odf_atoms,
     odf_drop,
     odf_insert,
+    odf_located,
     run_like,
     split_before,
     text_element,
 )
+from prosediff.sources import suffix_of
 from prosediff.tracked import TRACKED_FORMATS, author_of, check_tracked, settled
 
-# Typographic variants a model writes plainly: curly quotes and dashes. A
-# passage is found whatever of them it quotes, and a fix never changes one
-# into the other (the report's script finds passages the same way).
-TYPOGRAPHIC = {
-    **dict.fromkeys("‘’‚‛", "'"),
-    **dict.fromkeys("“”„‟", '"'),
-    **dict.fromkeys("‐‑‒–—―−", "-"),
-}
+# A passage is found whatever typographic variants (TYPOGRAPHIC) it quotes,
+# and a fix never changes one into the other.
 PLAIN = str.maketrans(TYPOGRAPHIC)
-# How far after its start words a passage's end words are looked for (as the
-# report's script does), in characters.
-REACH = 20_000
-DC = "http://purl.org/dc/elements/1.1/"
 # What holds the words a Word document's own tracked changes put in.
 WORD_INSERTIONS = {qn("w:ins"), qn("w:moveTo")}
 
@@ -430,16 +422,13 @@ class WordNotes:
             out_of_insertions(mark, red)
         return ids
 
-    def can_fix(self, j: int, edits: list) -> bool:
-        return in_text(self.lines[j], atoms(self.red.new_paragraphs[j])[0], edits)
-
 
 # OpenDocument ---------------------------------------------------------------------
 
 
 def odf_place(paragraphs, line: str, o: int) -> int:
     """Where character o of line is in paragraphs' text."""
-    return aligned(line, odf_atoms(paragraphs)[0])[o]
+    return odf_located(paragraphs, line)[2][o]
 
 
 def odf_put(paragraphs, x: int, elements: list, after: bool = False) -> None:
@@ -503,10 +492,10 @@ class OdtNotes:
             return None
         self.count += 1
         name = f"pdai{self.count}"
-        note = etree.Element(odf("office:annotation"), nsmap={"dc": DC})
+        note = etree.Element(odf("office:annotation"), nsmap={"dc": ODF["dc"]})
         note.set(odf("office:name"), name)
-        etree.SubElement(note, f"{{{DC}}}creator").text = self.author
-        etree.SubElement(note, f"{{{DC}}}date").text = red.date.isoformat()
+        etree.SubElement(note, odf("dc:creator")).text = self.author
+        etree.SubElement(note, odf("dc:date")).text = red.date.isoformat()
         for text in paragraphs:
             p = etree.SubElement(note, odf("text:p"))
             p.text = text
@@ -528,7 +517,7 @@ class OdtNotes:
         rejected, the words come back as the co-author's."""
         red, line = self.red, self.lines[j]
         paragraphs = red.new_paragraphs[j]
-        where = aligned(line, odf_atoms(paragraphs)[0])
+        _, _, where = odf_located(paragraphs, line)
         first = where[begin]
         ids = []
         # from the last: an edit moves only what comes after it
@@ -654,9 +643,6 @@ class OdtNotes:
                 red.point("text:change-start", f"{name}_{k}"),
             )
 
-    def can_fix(self, j: int, edits: list) -> bool:
-        return in_text(self.lines[j], odf_atoms(self.red.new_paragraphs[j])[0], edits)
-
 
 # The downloads ---------------------------------------------------------------------
 
@@ -693,7 +679,7 @@ def document_file(comparison: Comparison) -> tuple[FileDiff, str] | None:
     format; None for anything else."""
     if comparison.single:
         f = next((f for f in comparison.files if f.new_data and not f.binary), None)
-        fmt = PurePosixPath(f.new_path or "").suffix.lower().lstrip(".") if f else ""
+        fmt = suffix_of(f.new_path).lstrip(".") if f else ""
         if fmt not in TRACKED_FORMATS or not settled(f, fmt):
             return None
         return f, fmt
@@ -731,7 +717,8 @@ def summary(assessment: Assessment, fixes: bool) -> list[str]:
 def notes_in(red, notes, author: str, assessment: Assessment, fixes: bool) -> dict:
     """Put the AI's comments (and, with fixes, its fixes) in red's document;
     each problem's ids."""
-    kind = WordNotes if isinstance(red, WordRedline) else OdtNotes
+    word = isinstance(red, WordRedline)
+    kind, text_of = (WordNotes, atoms) if word else (OdtNotes, odf_atoms)
     put = kind(red, author)
     lines = put.lines
     hay = haystack(lines)
@@ -740,7 +727,8 @@ def notes_in(red, notes, author: str, assessment: Assessment, fixes: bool) -> di
     edits = {k: fix_of(lines[p.j1], p, notes[k]) for k, p in places.items()} if fixes else {}
     # a fix where the words are not the file's own text (an equation): a comment
     for k, e in edits.items():
-        if e and not put.can_fix(places[k].j1, e):
+        j = places[k].j1
+        if e and not in_text(lines[j], text_of(red.new_paragraphs[j])[0], e):
             edits[k] = None
     # no two fixes in one passage: the second a comment only
     taken: list[Place] = []

@@ -8,9 +8,17 @@ import base64
 import re
 
 import pytest
-from test_aidocs import ADVICE, FIXED, comments_of, revisions
-from test_assess import fake
-from test_tracked import NEW, lines, odt_file, word_file
+from helpers import (
+    ADVICE,
+    FIXED,
+    NEW,
+    comments_of,
+    fake,
+    lines,
+    odt_file,
+    revisions,
+    word_file,
+)
 
 from prosediff import assess as assess_module
 from prosediff.aidocs import downloads

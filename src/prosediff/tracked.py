@@ -15,6 +15,7 @@ import warnings
 from pathlib import Path
 
 from prosediff.diff import Comparison, FileDiff
+from prosediff.sources import FILE_STAMP, suffix_of
 
 # The documents of tracked changes, by the name --format gives them, and the
 # suffix of the files each is made from.
@@ -37,7 +38,7 @@ def check_paths(old: str | Path, new: str | Path, fmt: str) -> None:
     (ValueError)."""
     suffix = TRACKED_FORMATS[fmt]
     for side, path in (("old", old), ("new", new)):
-        if Path(path).suffix.lower() != suffix:
+        if suffix_of(path) != suffix:
             raise refusal(fmt, f"the {side} one is {Path(path).name}")
 
 
@@ -50,7 +51,7 @@ def check_tracked(comparison: Comparison, fmt: str) -> FileDiff:
         raise refusal(fmt, f"{len(files):,} files changed")
     f = files[0]
     for side, data, path in (("old", f.old_data, f.old_path), ("new", f.new_data, f.new_path)):
-        if not data or not (path or "").lower().endswith(suffix):
+        if not data or suffix_of(path) != suffix:
             raise refusal(fmt, f"the {side} side is {path or 'missing'}")
     return f
 
@@ -74,7 +75,7 @@ def save(write, path: Path) -> Path:
         write(str(path))
         return path
     except PermissionError:
-        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        stamp = dt.datetime.now().strftime(FILE_STAMP)
         other = path.with_name(f"{path.stem}__locked_{stamp}{path.suffix}")
         write(str(other))
         warnings.warn(f"{path} is open and locked: written to {other} instead", stacklevel=2)

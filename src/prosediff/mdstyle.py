@@ -24,7 +24,7 @@ import re
 
 from markupsafe import Markup, escape
 
-from prosediff.document import DATE_ATTRIBUTE, change_marks
+from prosediff.document import DATE_ATTRIBUTE, change_marks, runs
 
 HEADING = re.compile(r"^(#{1,6})([ \t]+)")
 QUOTE = re.compile(r"^((?:>[ \t]?)+)")
@@ -95,19 +95,16 @@ def styled(text: str, styles: list[set[str]] | None) -> Markup:
     if not styles:
         return escape(text)
     out = []
-    start = 0
-    for k in range(1, len(text) + 1):
-        if k == len(text) or styles[k] != styles[start]:
-            piece = escape(text[start:k])
-            if styles[start]:
-                cls = " ".join(f"s-{c}" for c in sorted(styles[start]) if c[0] != "@")
-                data = Markup("").join(
-                    Markup(' data-{}="{}"').format(*c[1:].split("=", 1))
-                    for c in sorted(styles[start])
-                    if c[0] == "@"
-                )
-                out.append(Markup('<span class="{}"{}>{}</span>').format(cls, data, piece))
-            else:
-                out.append(piece)
-            start = k
+    for start, end in runs(styles[: len(text)]):
+        piece = escape(text[start:end])
+        if styles[start]:
+            cls = " ".join(f"s-{c}" for c in sorted(styles[start]) if c[0] != "@")
+            data = Markup("").join(
+                Markup(' data-{}="{}"').format(*c[1:].split("=", 1))
+                for c in sorted(styles[start])
+                if c[0] == "@"
+            )
+            out.append(Markup('<span class="{}"{}>{}</span>').format(cls, data, piece))
+        else:
+            out.append(piece)
     return Markup("").join(out)

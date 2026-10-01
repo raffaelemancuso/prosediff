@@ -61,8 +61,12 @@ from prosediff.document import (
     SUP,
     UNDERLINE,
     heading_level,
+    runs,
 )
 from prosediff.footnotes import STAND_IN
+from prosediff.odt import SPACES as ODF_SPACE_TAGS
+from prosediff.odt import lxml_of
+from prosediff.word import HYPHEN, SPACES
 
 STYLES = frozenset(FORMATTING)
 XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
@@ -88,6 +92,13 @@ def after_properties(p, el) -> None:
     """Put el first in paragraph p, after its properties."""
     ppr = p.find(qn("w:pPr"))
     (ppr.addnext(el) if ppr is not None else p.insert(0, el))
+
+
+def xpath_first(root, path: str):
+    """The element at path, an XPath as lxml's getpath writes it, in root's
+    document (its prefixes root's own); None when there is none."""
+    found = etree.XPath(path, namespaces={k: v for k, v in root.nsmap.items() if k})(root)
+    return found[0] if found else None
 
 
 def kind_of(line: str) -> tuple[str, int]:
@@ -126,8 +137,6 @@ def run_properties(styles: frozenset[str]):
 NOT_THE_TEXT = {
     qn(t) for t in ("w:del", "w:moveFrom", "w:txbxContent", "w:drawing", "w:pict", "w:object")
 }
-# What a run holds besides text that is read as a space, or a hyphen.
-SPACES = {qn(t) for t in ("w:tab", "w:ptab", "w:br", "w:cr")}
 # What a paragraph copied from the old file loses: what points into it.
 POINTERS = {
     qn(t)
@@ -204,10 +213,7 @@ class WordFile:
     def find(self, source: tuple[str, str]):
         part, path = source
         root = self.roots.get(part)
-        if root is None:
-            return None
-        found = etree.XPath(path, namespaces={k: v for k, v in root.nsmap.items() if k})(root)
-        return found[0] if found else None
+        return xpath_first(root, path) if root is not None else None
 
     def settle(self) -> None:
         """The document's own tracked changes accepted (or rejected, as the
@@ -247,11 +253,8 @@ def atoms(paragraphs) -> tuple[str, list]:
                     for k, ch in enumerate(child.text or ""):
                         text.append(ch)
                         at.append((r, child, k))
-                elif child.tag in SPACES:
-                    text.append(" ")
-                    at.append((r, child, None))
-                elif child.tag == qn("w:noBreakHyphen"):
-                    text.append("-")
+                elif child.tag in SPACES or child.tag == HYPHEN:
+                    text.append(" " if child.tag in SPACES else "-")
                     at.append((r, child, None))
     return "".join(text), at
 
@@ -682,6 +685,7 @@ ODF = {
     "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
     "style": "urn:oasis:names:tc:opendocument:xmlns:style:1.0",
     "loext": "urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0",
+    "dc": "http://purl.org/dc/elements/1.1/",
 }
 
 
@@ -705,7 +709,7 @@ ODF_NOT_TEXT = {
         "text:change-end",
     )
 }
-ODF_SPACES = {odf("text:tab"), odf("text:line-break")}
+ODF_SPACES = {odf(t) for t in ODF_SPACE_TAGS}
 XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 
 
@@ -738,6 +742,12 @@ def odf_atoms(paragraphs) -> tuple[str, list]:
     for p in paragraphs:
         walk(p)
     return "".join(text), at
+
+
+def odf_located(paragraphs, line: str) -> tuple[str, list, list[int]]:
+    """located, for an OpenDocument's paragraphs (odf_atoms)."""
+    text, at = odf_atoms(paragraphs)
+    return text, at, aligned(line, text)
 
 
 def odf_insert(at: list, x: int, el, paragraphs) -> None:
@@ -821,11 +831,6 @@ class OdtStyles:
         return self.names[styles]
 
 
-def lxml_of(element):
-    """The lxml element behind an odfdo one."""
-    return element._Element__element
-
-
 class OdtRedline:
     """The changes of one file marked in a copy of its new version, laid
     out as LibreOffice lays out its own : an
@@ -858,12 +863,9 @@ class OdtRedline:
         self.changes = changes
 
     def found(self, line) -> list:
-        ns = {k: v for k, v in self.root.nsmap.items() if k}
-        out = []
-        for part, path in getattr(line, "source", ()):
-            if part == "content.xml":
-                out += etree.XPath(path, namespaces=ns)(self.root.getroottree())[:1]
-        return out
+        sources = getattr(line, "source", ())
+        found = (xpath_first(self.root, path) for part, path in sources if part == "content.xml")
+        return [p for p in found if p is not None]
 
     def changed_regions(self) -> dict:
         """The document's changed regions, by id."""
@@ -896,7 +898,7 @@ class OdtRedline:
         change = odfdo.TextInsertion() if kind == "ins" else odfdo.TextDeletion()
         change.set_change_info(creator=self.author, date=self.date)
         for el in content:
-            lxml_of(change).append(lxml_of(el) if hasattr(el, "_Element__element") else el)
+            lxml_of(change).append(lxml_of(el) if isinstance(el, odfdo.Element) else el)
         region = odfdo.TextChangedRegion()
         region.set_id(name)
         region.append(change)
@@ -913,20 +915,12 @@ class OdtRedline:
         """The words start to end of a line, in their styles, in element (a
         new paragraph when none)."""
         p = odfdo.Paragraph() if element is None else element
-
-        def style(n):
-            return line_styles(line, n)
-
-        k = start
-        while k < end:
-            n = k
-            while n < end and style(n) == style(k):
-                n += 1
-            text = plain_text(line[k:n])
+        styles = [line_styles(line, n) for n in range(start, end)]
+        for a, b in runs(styles):
+            text = plain_text(line[start + a : start + b])
             if text:
-                name = self.styles.name(style(k))
+                name = self.styles.name(styles[a])
                 p.append(odfdo.Span(text, style=name) if name else text)
-            k = n
         return p
 
     def edited(self, i: int, j: int) -> None:
@@ -934,8 +928,7 @@ class OdtRedline:
         paragraphs = self.new_paragraphs[j]
         if not paragraphs or a == b:
             return
-        text, at = odf_atoms(paragraphs)
-        where = aligned(b, text)
+        _, at, where = odf_located(paragraphs, b)
         points = []  # (x, order, element): at one place, ends, deletions, starts
         for op, o1, o2, n1, n2 in word_ops(a, b):
             if op == "equal":

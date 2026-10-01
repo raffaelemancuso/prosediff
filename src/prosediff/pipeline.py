@@ -12,6 +12,7 @@ from pathlib import Path
 
 from prosediff.assess import Assessment, AssessRequest
 from prosediff.diff import (
+    AUTO_ENCODING,
     CONTEXT,
     Comparison,
     Options,
@@ -20,6 +21,7 @@ from prosediff.diff import (
     review_diff,
     review_file,
 )
+from prosediff.language import DEFAULT
 from prosediff.render import assess_comparison, write_output
 from prosediff.sources import FOLDER_FILES
 
@@ -82,6 +84,30 @@ def request_of(src: object) -> AssessRequest | None:
         writing_system=src.assess_writing_prompt or "",
         edits=src.assess_edits,
     )
+
+
+def options_of(src: object, comparing: bool = True, **more) -> Options:
+    """The Options src's fields say, the command line's arguments and the
+    window's settings naming them alike: those that read the files and,
+    comparing, those of a comparison named the same; more, the others (the
+    context, the moved lines and passages), each front end's own way. A
+    field left empty takes its default."""
+    options = {
+        "md_filter": src.md_filter or None,
+        "comments": src.comments or "markers",
+        "empty_comments": src.empty_comments,
+        "skip_resolved": src.skip_resolved,
+        "docx_changes": src.docx_changes,
+        "language": src.language or DEFAULT,
+        "encoding": src.encoding or AUTO_ENCODING,
+    }
+    if comparing:
+        options |= {
+            "ignore_whitespace": src.ignore_whitespace,
+            "max_hidden": src.max_hidden,
+            "move_passages": src.move_passages,
+        }
+    return Options(**options, **more)
 
 
 @dataclass

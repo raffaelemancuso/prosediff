@@ -16,6 +16,7 @@ import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
+from itertools import groupby
 
 # The styles a run of text can have, as classes of the HTML report: s-strong, ...
 STRONG, EM, UNDERLINE, STRIKE, SUP, SUB = "strong", "em", "u", "strike", "sup", "sub"
@@ -552,6 +553,15 @@ def concat(*parts: str) -> str:
     for p in parts:
         styles += p.styles if isinstance(p, Line) else [frozenset()] * len(p)
     return first.replaced("".join(parts), styles)
+
+
+def runs(values: Iterable) -> Iterator[tuple[int, int]]:
+    """Where each run of equal values (a line's styles, character by
+    character) starts, and where it ends (excluded)."""
+    end = 0
+    for _, run in groupby(values):
+        start, end = end, end + sum(1 for _ in run)
+        yield start, end
 
 
 class Builder:

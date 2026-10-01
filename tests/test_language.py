@@ -5,7 +5,7 @@ import zipfile
 from html import unescape
 
 import pytest
-from helpers import docx_xml, odt_xml, strip_tags, two_folders
+from helpers import docx_xml, odt_xml, run, strip_tags, two_folders
 
 from prosediff import Options, compare_paths, render
 from prosediff.cli import main
@@ -108,12 +108,7 @@ def word_pair(tmp_path, runs_old, runs_new, styles=None):
 
     def body(runs):
         return (
-            "<w:p>"
-            + "".join(
-                f"<w:r>{W_LANG.format(lang) if lang else ''}<w:t>{t}</w:t></w:r>"
-                for lang, t in runs
-            )
-            + "</w:p>"
+            f"<w:p>{''.join(run(t, W_LANG.format(lang) if lang else '') for lang, t in runs)}</w:p>"
         )
 
     old = docx_xml(tmp_path / "old.docx", body(runs_old))
@@ -211,7 +206,7 @@ def test_word_paragraph_languages(tmp_path):
     is hyphenated by that language's rules, in a cell that says so."""
 
     def para(lang, text):
-        return f'<w:p><w:r>{W_LANG.format(lang)}<w:t xml:space="preserve">{text}</w:t></w:r></w:p>'
+        return f"<w:p>{run(text, W_LANG.format(lang))}</w:p>"
 
     old = docx_xml(tmp_path / "old.docx", para("it-IT", ITALIAN) + para("de-DE", GERMAN))
     new = docx_xml(

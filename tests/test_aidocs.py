@@ -10,30 +10,28 @@ from pathlib import Path
 
 import docx
 import pytest
-from test_tracked import lines, pair
+from helpers import (
+    ADVICE,
+    DC,
+    FIXED,
+    W,
+    assessment,
+    authors_of,
+    co_authored,
+    comments_of,
+    lines,
+    odt_content,
+    pair,
+    revisions,
+)
 
 from prosediff.aidocs import Place, downloads, fix_of, haystack, locate
 from prosediff.assess import Annotation, Assessment
 from prosediff.diff import Options, compare_paths
 from prosediff.render import render
 
-MARKDOWN = (
-    "## Verdict\n**Mixed**. The effect grew, unsupported.\n\n## What changed\n- One.\n\n"
-    "## Improvements\n- None.\n\n## Problems to fix\n1. The effect."
-)
-FIXED = Annotation(
-    "new", "a large and", "significant effect.", "Nothing supports a large effect.",
-    "Say a small effect.", "a small and significant effect.",
-)  # fmt: skip
-ADVICE = Annotation(
-    "new", "Robustness checks confirm", "every result.", "Which checks?", "Name them."
-)
 MISSING = Annotation("new", "words nowhere in it", "", "Not there.", "", "none")
 OLD_SIDE = Annotation("old", "Limitations are discussed", "", "Removed.", "Keep it.")
-
-
-def assessment(notes):
-    return Assessment("claude", MARKDOWN, model="opus", annotations=list(notes))
 
 
 def made(tmp_path, fmt, notes=(FIXED, ADVICE, MISSING, OLD_SIDE)):
@@ -152,30 +150,6 @@ def test_the_report_carries_them(tmp_path):
     assert 'class="ai-document"' not in plain and "_e.deflateSync" not in plain
     off = render(c, assessment=assessment([FIXED]), documents=False)
     assert 'class="ai-document"' not in off
-
-
-W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-
-
-def revisions(path):
-    body = docx.Document(str(path)).element.body
-    return [el for el in body.iter() if el.tag in (W + "ins", W + "del")]
-
-
-def comments_of(path, fmt):
-    """Each comment's text, its paragraphs one a line, in the order they
-    were made."""
-    if fmt == "docx":
-        return ["\n".join(p.text for p in c.paragraphs) for c in docx.Document(str(path)).comments]
-    from lxml import etree
-
-    root = etree.parse(BytesIO(zipfile.ZipFile(path).read("content.xml")))
-    office = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
-    text = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-    out = []
-    for a in root.iter(f"{{{office}}}annotation"):
-        out.append("\n".join("".join(p.itertext()) for p in a.iter(f"{{{text}}}p")))
-    return sorted(out, key=lambda t: not t.startswith("AI assessment"))
 
 
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
@@ -350,85 +324,6 @@ def test_a_fix_keeps_the_documents_quotes_and_dashes():
     assert fix_of(line, locate([line], note), note) == [(33, 40, "kept")]
 
 
-ODF_TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-ODF_OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
-DC = "http://purl.org/dc/elements/1.1/"
-
-
-def co_authored(path, fmt):
-    """The new version as a co-author left it: in the passage FIXED fixes,
-    "large and " a tracked insertion of theirs and "very " a deletion, and
-    a comment of theirs; read with them accepted, it is NEW still."""
-    if fmt == "docx":
-        d = docx.Document(str(path))
-        p = next(p for p in d.paragraphs if p.text.startswith("We find"))
-        p.runs[0].text = "We find a "
-        added, gone, rest = (
-            p.add_run("large and "),
-            p.add_run("very "),
-            p.add_run("significant effect."),
-        )
-        for run, tag in ((added, "ins"), (gone, "del")):
-            mark = docx.oxml.OxmlElement(f"w:{tag}")
-            mark.set(W + "id", "90" if tag == "ins" else "91")
-            mark.set(W + "author", "Anna Rossi")
-            mark.set(W + "date", "2026-09-01T10:00:00Z")
-            run._r.addprevious(mark)
-            mark.append(run._r)
-        gone._r.find(W + "t").tag = W + "delText"
-        d.add_comment(rest, text="Which effect?", author="Anna Rossi")
-        d.save(str(path))
-        return path
-    from lxml import etree
-
-    z = zipfile.ZipFile(path)
-    files = {n: z.read(n) for n in z.namelist()}
-    z.close()
-    root = etree.fromstring(files["content.xml"])
-    t = f"{{{ODF_TEXT}}}"
-    p = next(p for p in root.iter(t + "p") if "".join(p.itertext()).startswith("We find"))
-    for child in list(p):
-        p.remove(child)
-    p.text = "We find a "
-    start = etree.SubElement(p, t + "change-start", {t + "change-id": "ct1"})
-    start.tail = "large and "
-    etree.SubElement(p, t + "change-end", {t + "change-id": "ct1"})
-    change = etree.SubElement(p, t + "change", {t + "change-id": "ct2"})
-    note = etree.SubElement(p, f"{{{ODF_OFFICE}}}annotation")
-    etree.SubElement(note, f"{{{DC}}}creator").text = "Anna Rossi"
-    etree.SubElement(note, t + "p").text = "Which effect?"
-    change.tail = "significant effect."
-    body = root.find(f".//{{{ODF_OFFICE}}}text")
-    tracked = etree.Element(t + "tracked-changes")
-    body.insert(0, tracked)
-    for name, kind, words in (("ct1", "insertion", None), ("ct2", "deletion", "very ")):
-        region = etree.SubElement(tracked, t + "changed-region", {t + "id": name})
-        what = etree.SubElement(region, t + kind)
-        info = etree.SubElement(what, f"{{{ODF_OFFICE}}}change-info")
-        etree.SubElement(info, f"{{{DC}}}creator").text = "Anna Rossi"
-        etree.SubElement(info, f"{{{DC}}}date").text = "2026-09-01T10:00:00"
-        if words:
-            etree.SubElement(what, t + "p").text = words
-    files["content.xml"] = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
-    with zipfile.ZipFile(path, "w") as out:
-        out.writestr(zipfile.ZipInfo("mimetype"), files.pop("mimetype"))
-        for name, data in files.items():
-            out.writestr(name, data, zipfile.ZIP_DEFLATED)
-    return path
-
-
-def authors_of(path, fmt):
-    """Who made the document's tracked changes."""
-    if fmt == "docx":
-        return {r.get(W + "author") for r in revisions(path)}
-    from lxml import etree
-
-    root = etree.parse(BytesIO(zipfile.ZipFile(path).read("content.xml")))
-    return {
-        c.text for c in root.iter(f"{{{DC}}}creator") if c.getparent().tag.endswith("change-info")
-    }
-
-
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
 @pytest.mark.parametrize("alone", [True, False], ids=["review", "compared"])
 def test_the_co_authors_changes_and_comments_are_kept(tmp_path, fmt, alone):
@@ -478,12 +373,9 @@ def test_the_ais_changes_and_comments_by_the_author_chosen(tmp_path, fmt):
     if fmt == "docx":
         assert {x.author for x in docx.Document(str(out)).comments} == {"Referee 2"}
     else:
-        from lxml import etree
-
-        root = etree.parse(BytesIO(zipfile.ZipFile(out).read("content.xml")))
         notes = {
             x.text
-            for x in root.iter(f"{{{DC}}}creator")
+            for x in odt_content(out).iter(f"{{{DC}}}creator")
             if x.getparent().tag.endswith("annotation")
         }
         assert notes == {"Referee 2"}

@@ -15,12 +15,12 @@ from pathlib import Path
 from jinja2 import Environment, PackageLoader, select_autoescape
 from markupsafe import Markup
 
-from prosediff.assess import Assessment, AssessRequest, assess
+from prosediff.assess import REACH, TYPOGRAPHIC, Assessment, AssessRequest, assess
 from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text, context_for
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
 from prosediff.language import file_language_note, flag_code, paragraph_language_note
-from prosediff.sources import is_document
+from prosediff.sources import FILE_STAMP, is_document, suffix_of
 from prosediff.tracked import TRACKED_FORMATS, write_tracked
 from prosediff.unified import unified
 
@@ -50,6 +50,9 @@ _env.filters["comma"] = lambda n: f"{n:,}"
 _env.globals["flag"] = lambda tag, title=None: flag_html(flag_code(tag), tag, title)
 _env.globals["file_language_note"] = file_language_note
 _env.globals["paragraph_language_note"] = paragraph_language_note
+# the report's script finds the AI's passages as prosediff.aidocs does
+_env.globals["typographic"] = TYPOGRAPHIC
+_env.globals["reach"] = REACH
 
 
 ALIGNMENTS = ("left", "justify")
@@ -87,7 +90,7 @@ def format_of(path: Path | str | None) -> str:
     """The format a file name asks for: a unified diff for .diff and .patch,
     a word diff for .wdiff, a document of tracked changes for .docx and .odt,
     else the HTML report."""
-    return TEXT_SUFFIXES.get(Path(path).suffix.lower(), "html") if path else "html"
+    return TEXT_SUFFIXES.get(suffix_of(path), "html")
 
 
 def default_output(fmt: str = "html") -> Path:
@@ -97,7 +100,7 @@ def default_output(fmt: str = "html") -> Path:
     folder = Path(tempfile.gettempdir()) / "prosediff"
     folder.mkdir(exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        prefix=f"prosediff_{datetime.now():%Y%m%d_%H%M%S}_",
+        prefix=f"prosediff_{datetime.now().strftime(FILE_STAMP)}_",
         suffix=FORMATS[fmt],
         dir=folder,
         delete=False,
