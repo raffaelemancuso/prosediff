@@ -30,13 +30,20 @@ Markdown too.**
   one.
 - **It reviews a single file too**, with no older version to compare, and
   can check whether the added text reads as AI-written.
+- **It finds moved paragraphs even when they were edited**: a paragraph,
+  sentence or passage moved elsewhere is shown at both ends as a move, the
+  words changed on the way highlighted, where code diffs see an unrelated
+  deletion and insertion ([how](https://github.com/raffaelemancuso/prosediff/blob/master/docs/moves.md)).
+- **It is a git diff tool for Word files**: after `prosediff --setup-git`,
+  `git diff`, `git log -p` and `git show` print .docx and .odt files as
+  text instead of "Binary files differ", and `git difftool -t prosediff`
+  opens the side-by-side report ([git integration](https://github.com/raffaelemancuso/prosediff/blob/master/docs/cli.md#with-gits-own-commands)).
 
 Underneath is a diff made for prose, not code: a self-contained HTML report
 of two versions side by side, each paragraph facing the one it came from,
-changed words highlighted inside it, and text that moved followed to its
-new place **even when it was edited on the way**. The versions are two Word
-or OpenDocument documents, two Markdown or text files, two folders, or
-commits of a git repository.
+changed words highlighted inside it. The versions are two Word or
+OpenDocument documents, two Markdown or text files, two folders, or commits
+of a git repository.
 
 ![An HTML report made by prosediff: the AI's verdict in the top bar; below, two versions of a short text on free fall side by side, the second a revision with errors in it, changed words highlighted, and beside them a margin of cards for the comments and the problems the AI marked, one of them pinned, its passage highlighted in the text](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
@@ -51,8 +58,6 @@ commits of a git repository.
 - **It lines the versions up correctly**: an edited paragraph faces the one
   it came from, however rewritten; an inserted or split paragraph does not
   shift the ones below.
-- **It follows moved text**, paragraphs, sentences and passages, even when
-  edited on the way ([how](https://github.com/raffaelemancuso/prosediff/blob/master/docs/moves.md)).
 - **It can put tracked changes back**: from a draft and a version returned
   without them, it writes the returned document with each change a tracked
   change, to accept or reject in Word or LibreOffice.
