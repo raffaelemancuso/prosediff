@@ -1237,40 +1237,24 @@ class App:
             "journal's guidelines, a reviewer's report, a cited paper (PDF, Word, "
             "OpenDocument, Markdown or text).",
         )
-        # the files, one a row (their name, their folder), with the buttons
-        # that add and remove them; kept in assess_files, separated by ";"
-        listed = ttk.Frame(card)
-        listed.grid(row=4, column=1, sticky="ew", **PAD)
-        listed.columnconfigure(0, weight=1)
-        self.files_list = ttk.Treeview(
-            listed, columns=("name", "folder"), show="headings", height=4, selectmode="extended"
-        )
-        self.files_list.heading("name", text="File", anchor="w")
-        self.files_list.heading("folder", text="Folder", anchor="w")
-        self.files_list.column("name", width=180, stretch=False, anchor="w")
-        self.files_list.column("folder", width=320, anchor="w")
-        self.files_list.grid(row=0, column=0, sticky="ew")
-        scroll = ttk.Scrollbar(listed, orient="vertical", command=self.files_list.yview)
-        scroll.grid(row=0, column=1, sticky="ns")
-        self.files_list.configure(yscrollcommand=scroll.set)
-        self.files_list.bind("<Delete>", lambda e: self.remove_files())
-        hint(self.files_list, "The files sent to the AI with the text, one a row.")
-        buttons = ttk.Frame(card)
-        buttons.grid(row=4, column=2, sticky="nw", **PAD)
-        self.files_add = ttk.Button(
-            buttons, text="Add…", command=self.pick_files, bootstyle="secondary-outline", width=9
-        )
-        self.files_add.pack(fill="x")
-        hint(self.files_add, "Add files to send (several at once)")
-        self.files_remove = ttk.Button(
-            buttons,
-            text="Remove",
-            command=self.remove_files,
+        # the files in a line (how many, their names), and the button that
+        # opens their list in a window of its own (edit_files); kept in
+        # assess_files, separated by ";"
+        self.files_summary = tk.StringVar()
+        summary = ttk.Label(card, textvariable=self.files_summary, bootstyle="secondary")
+        summary.grid(row=4, column=1, sticky="w", **PAD)
+        self.files_button = ttk.Button(
+            card,
+            text="Files…",
+            image=ttk.Icon("files", size=16),
+            compound="left",
+            command=self.edit_files,
             bootstyle="secondary-outline",
-            width=9,
         )
-        self.files_remove.pack(fill="x", pady=(6, 0))
-        hint(self.files_remove, "Remove the files chosen in the list (Delete)")
+        self.files_button.grid(row=4, column=2, sticky="w", **PAD)
+        hint(self.files_button, "The files to send, in a list of their own: add and remove them")
+        self.files_window: tk.Toplevel | None = None
+        self.files_list: ttk.Treeview | None = None
         self.show_files()
         self.assess_files.trace_add("write", lambda *_: self.show_files())
         self.assess_send_files.trace_add("write", lambda *_: self.update_ai_switches())
@@ -1426,15 +1410,65 @@ class App:
                 on = on and not self.reviewing()
             enable(switch, on)
         # the files to send, while sending them
-        if hasattr(self, "files_list"):
-            sending = active and self.assess_send_files.get()
-            for w in (self.files_list, self.files_add, self.files_remove):
-                enable(w, sending)
+        if hasattr(self, "files_button"):
+            enable(self.files_button, active and self.assess_send_files.get())
+
+    def edit_files(self) -> None:
+        """The files to send the AI, in a window of their own: one a row,
+        their name and their folder, with Add and Remove; the same window
+        raised when it is open."""
+        if self.files_window is not None and self.files_window.winfo_exists():
+            self.files_window.lift()
+            return
+        top = self.files_window = tk.Toplevel(self.root)
+        top.title("prosediff: files to send the AI")
+        top.transient(self.root)
+        frame = ttk.Frame(top, padding=(14, 12, 14, 12))
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        listed = ttk.Treeview(
+            frame, columns=("name", "folder"), show="headings", height=12, selectmode="extended"
+        )
+        listed.heading("name", text="File", anchor="w")
+        listed.heading("folder", text="Folder", anchor="w")
+        listed.column("name", width=220, stretch=False, anchor="w")
+        listed.column("folder", width=460, anchor="w")
+        listed.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=listed.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        listed.configure(yscrollcommand=scroll.set)
+        listed.bind("<Delete>", lambda e: self.remove_files())
+        self.files_list = listed
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=0, column=2, sticky="n", padx=(10, 0))
+        for text, command, tip in (
+            ("Add…", self.pick_files, "Add files to send (several at once)"),
+            ("Remove", self.remove_files, "Remove the files chosen in the list (Delete)"),
+        ):
+            b = ttk.Button(
+                buttons, text=text, command=command, bootstyle="secondary-outline", width=10
+            )
+            b.pack(fill="x", pady=(0, 6))
+            hint(b, tip)
+
+        def close() -> None:
+            self.files_list = None
+            self.files_window = None
+            top.destroy()
+
+        ttk.Button(frame, text="Close", command=close).grid(
+            row=1, column=0, columnspan=3, sticky="e", pady=(10, 0)
+        )
+        top.protocol("WM_DELETE_WINDOW", close)
+        top.bind("<Escape>", lambda e: close())
+        self.show_files()
+        dark_title_bar(top)
 
     def pick_files(self) -> None:
         """Add files to those sent to the AI as context."""
         chosen = filedialog.askopenfilenames(
-            parent=self.root,
+            parent=self.files_window or self.root,
             title="Files to send the AI",
             filetypes=[
                 ("Documents", "*.pdf *.docx *.odt *.md *.txt"),
@@ -1451,15 +1485,24 @@ class App:
         return [f.strip() for f in self.assess_files.get().split(";") if f.strip()]
 
     def show_files(self) -> None:
-        """The list of files to send, as assess_files holds them."""
+        """The files to send, as assess_files holds them: in a line on the
+        card ("4 files: appendix.docx, bibliography.docx, …"), and in their
+        window's list when it is open."""
+        files = self.files_chosen()
+        names = ", ".join(Path(f).name for f in files[:3]) + (", …" if len(files) > 3 else "")
+        self.files_summary.set(
+            f"{counted(len(files), 'file')}: {names}" if files else "None chosen"
+        )
+        if self.files_list is None:
+            return
         self.files_list.delete(*self.files_list.get_children())
-        for f in self.files_chosen():
+        for f in files:
             p = Path(f)
             self.files_list.insert("", "end", iid=f, values=(p.name, str(p.parent)))
 
     def remove_files(self) -> None:
         """Take the files chosen in the list off it."""
-        gone = set(self.files_list.selection())
+        gone = set(self.files_list.selection()) if self.files_list is not None else set()
         if gone:
             self.assess_files.set(";".join(f for f in self.files_chosen() if f not in gone))
 

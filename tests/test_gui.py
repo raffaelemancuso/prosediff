@@ -1175,16 +1175,27 @@ def test_the_one_file_tab(root):
 def test_the_window_greys_out_the_files_while_not_sending_them(root):
     app = App(root, Settings(mode="files", assess="claude"))
     app.update_ai_switches()
-    assert app.files_list.instate(["disabled"]) and app.files_add.instate(["disabled"])
+    assert app.files_button.instate(["disabled"])
     app.assess_send_files.set(True)
-    assert not app.files_list.instate(["disabled"])
-    # the list shows the files, one a row, and Remove takes the chosen off
+    assert not app.files_button.instate(["disabled"])
+    # the card says how many and which; their window lists them, one a row,
+    # and Remove takes the chosen off
     app.assess_files.set(r"C:\docs\guide.pdf;C:\docs\report.docx")
+    assert app.files_summary.get() == "2 files: guide.pdf, report.docx"
+    app.edit_files()
     rows = [app.files_list.item(i, "values") for i in app.files_list.get_children()]
     assert [r[0] for r in rows] == ["guide.pdf", "report.docx"]
     app.files_list.selection_set(r"C:\docs\guide.pdf")
     app.remove_files()
     assert app.assess_files.get() == r"C:\docs\report.docx"
+    assert app.files_summary.get() == "1 file: report.docx"
+    (close,) = [
+        w
+        for w in within(app.files_window)
+        if isinstance(w, tk_ttk.Button) and w.cget("text") == "Close"
+    ]
+    close.invoke()
+    assert app.files_window is None and app.files_list is None
 
 
 def test_the_window_never_shrinks_when_the_status_gets_shorter(root):
