@@ -5,3 +5,23 @@ __pycache__/
 dist/
 diff.html
 .playwright-mcp/
+# Lock, swap and temp files of open documents
+# Microsoft Office (Word, Excel, PowerPoint)
+~$*
+~WRL*.tmp
+# LibreOffice
+.~lock.*#
+# Vim
+.*.sw[a-p]
+# Emacs
+.#*
+\#*\#
+# Kate
+.*.kate-swp
+
+# Editor backup files
+# Emacs, Vim, gedit, Kate, nano
+*~
+# Word ("Backup of X.wbk"), and generic
+*.wbk
+*.bak
