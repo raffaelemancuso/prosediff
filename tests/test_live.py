@@ -102,6 +102,25 @@ def test_the_run_says_the_estimate_and_what_the_model_does(tmp_path, monkeypatch
         options=Options(),
         request=AssessRequest("claude"),
     )
-    execute(run, stages.append, live=heard.append)
+    execute(run, stages.append, live=lambda detail, news: heard.append(detail))
     assert "Asking claude to assess the changes (usually about 2 minutes)…" in stages
     assert "thinking" in heard
+
+
+def test_the_progress_log_tells_each_thing_once():
+    """news gives what happened since it was last asked: the phase moved to,
+    each whole sentence of the thinking, every 500 tokens, each problem."""
+    tracked = Live()
+    tracked.update(phase="thinking")
+    tracked.wrote("Reading the diff. The claim is unsupp", thinking=True)
+    assert tracked.news() == ["Thinking", "  Reading the diff."]
+    tracked.wrote("orted here.", thinking=True)
+    assert tracked.news() == ["  The claim is unsupported here."]
+    tracked.wrote('[{"problem": "a"}, {"problem": "b"}' + "x" * 2_000)
+    assert tracked.news() == [
+        "Writing the answer",
+        "  about 508 tokens written",
+        "  problem 1 marked",
+        "  problem 2 marked",
+    ]
+    assert tracked.news() == []

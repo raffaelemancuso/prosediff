@@ -665,11 +665,14 @@ class _LiveLine:
     def __init__(self) -> None:
         self.started, self.width = 0.0, 0
 
-    def __call__(self, detail: str) -> None:
+    def __call__(self, detail: str, news: list[str] = ()) -> None:
         if not sys.stderr.isatty():
             return
         if not self.width:
             self.started = time.monotonic()
+        # what happened, above the line, which is written again below it
+        for said in news:
+            sys.stderr.write("\r" + f"{PROG}: {said}".ljust(self.width) + "\n")
         line = f"{PROG}: {duration(time.monotonic() - self.started)}, {detail}"
         sys.stderr.write("\r" + line.ljust(self.width))
         sys.stderr.flush()

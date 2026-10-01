@@ -511,7 +511,7 @@ def run_job(s: Settings, messages, replies) -> None:
             run,
             lambda stage: messages.put(("stage", stage)),
             approve if s.assess_preview else None,
-            live=lambda detail: messages.put(("live", detail)),
+            live=lambda detail, news: messages.put(("live", (detail, news))),
             saved=saved,
         )
     except JOB_ERRORS as e:
@@ -1634,10 +1634,18 @@ class App:
 
     def build_bottom(self, page: ttk.Frame) -> None:
         """The status line and the buttons."""
-        bottom = ttk.Frame(page)
+        bottom = self.bottom_bar = ttk.Frame(page)
         # laid out before the cards, so a window too short for them never
         # hides the Compare button
         bottom.pack(fill="x", side="bottom", pady=(12, 0), before=page.winfo_children()[0])
+        # what happened while comparing and asking the AI, a line each, kept
+        # until the next run: shown once the first one starts (log)
+        self.progress_card = ttk.Labelframe(page, text="Progress", padding=(8, 6))
+        self.progress_log = ttk.ScrolledText(
+            self.progress_card, height=7, wrap="word", auto_hide=True, font="TkFixedFont"
+        )
+        self.progress_log.pack(fill="both", expand=True)
+        self.progress_log.text.configure(state="disabled")
         self.status = tk.StringVar(value=READY)
         ttk.Label(bottom, textvariable=self.status, bootstyle="secondary").pack(side="left")
         self.compare_icon = ttk.Icon("play-fill", size=16, color="white")
@@ -2209,6 +2217,10 @@ class App:
             except AssessError as e:
                 messagebox.showerror("prosediff", f"AI assessment: {e}")
                 return
+        box = self.progress_log.text  # the last run's lines gone
+        box.configure(state="normal")
+        box.delete("1.0", "end")
+        box.configure(state="disabled")
         self.set_stage("Starting…")
         self.progress.pack(side="right", padx=12)
         self.progress.start(12)
@@ -2268,6 +2280,18 @@ class App:
     def set_stage(self, stage: str) -> None:
         self.stage, self.stage_started, self.live = stage, time.monotonic(), ""
         self.status.set(stage)
+        self.log(stage)
+
+    def log(self, line: str) -> None:
+        """A line at the end of the progress log, with the time, scrolled to;
+        the log shown once there is something in it."""
+        if not self.progress_card.winfo_manager():
+            self.progress_card.pack(fill="both", expand=True, pady=(10, 0), before=self.bottom_bar)
+        box = self.progress_log.text
+        box.configure(state="normal")
+        box.insert("end", f"{time.strftime('%H:%M:%S')}  {line}\n")
+        box.see("end")
+        box.configure(state="disabled")
 
     def poll(self, job: multiprocessing.process.BaseProcess | None) -> None:
         """Pick up what job, the comparison's process, says: each stage,
@@ -2311,7 +2335,9 @@ class App:
             self.root.after(100, self.poll, self.job)
             return
         if kind == "live":
-            self.live = value
+            self.live, news = value
+            for line in news:
+                self.log(line)
             self.root.after(100, self.poll, self.job)
             return
         if kind == "preview":

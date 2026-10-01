@@ -167,13 +167,14 @@ def execute(
     run: Run,
     progress: Callable[[str], None] = lambda stage: None,
     approve: Callable[[Path], bool] | None = None,
-    live: Callable[[str], None] | None = None,
+    live: Callable[[str, list[str]], None] | None = None,
     saved: tuple[Assessment, Assessment | None] | None = None,
 ) -> Result:
     """Do run, telling progress each stage as it starts ("Comparing…"):
     asking the AI, with how long it usually takes (prosediff.history), and
     telling live, given, what the model is doing meanwhile ("thinking, about
-    3,481 tokens written"). With approve, an HTML report with an AI to
+    3,481 tokens written") and what happened since it last told it (the
+    lines of a progress log, Live.news). With approve, an HTML report with an AI to
     assess the changes is first written without the assessment, and
     approve, given its path, says whether the text goes to the AI; a file
     reviewed alone has no preview. The AI's answers are kept beside the HTML
@@ -231,7 +232,9 @@ def execute(
     assessment, writing = saved or (None, None)
     if ask:
         ai = run.request.spec
-        report = (lambda tracked: live(tracked.describe())) if live is not None else None
+        report = (
+            (lambda tracked: live(tracked.describe(), tracked.news())) if live is not None else None
+        )
 
         def asked(what: str, kind: str) -> Assessment:
             # what kind of assessment it makes, as history.record notes it

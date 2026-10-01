@@ -386,6 +386,10 @@ LIVE_EVERY_S = 0.5
 # About how many characters a token holds, to count the tokens of a text
 # still being written.
 CHARS_PER_TOKEN = 4
+# The tokens written between two lines of the progress log.
+LOG_TOKENS = 500
+# The whole sentences of a text being written (the last, unfinished, not).
+SENTENCE = re.compile(r"[^.!?\n]*[^.!?\s][^.!?\n]*[.!?](?=\s|$)")
 
 
 @dataclass
@@ -406,6 +410,9 @@ class Live:
     # its thinking as the backend summarizes it (Claude Code), for what it
     # is thinking about
     thoughts: str = ""
+    # what news() has told already: the phase, the sentences of the
+    # thinking, the tokens written (in steps of LOG_TOKENS), the problems
+    told: tuple = ("", 0, 0, 0)
     cost_usd: float | None = None
     report: Callable[["Live"], None] | None = None
     reported: float = 0.0
@@ -443,9 +450,27 @@ class Live:
         characters at a time)."""
         if headings := re.findall(r"\*\*(.+?)\*\*", self.thoughts):
             return headings[-1].strip()
-        sentences = re.findall(r"[^.!?\n]*\S[^.!?\n]*[.!?](?=\s|$)", self.thoughts)
+        sentences = SENTENCE.findall(self.thoughts)
         last = sentences[-1].strip() if sentences else ""
         return last if len(last) <= 80 else last[:79] + "…"
+
+    def news(self) -> list[str]:
+        """What happened since it was last asked, a line each, for a log:
+        the phase it moved to, each whole sentence of its thinking, every
+        LOG_TOKENS tokens written, each problem marked."""
+        phase, said, tokens, problems = self.told
+        lines = []
+        if self.phase != phase:
+            lines.append(self.phase.capitalize())
+        sentences = [s.strip() for s in SENTENCE.findall(self.thoughts)]
+        lines += [f"  {s}" for s in sentences[said:]]
+        step = self.output_tokens // LOG_TOKENS
+        if step > tokens:
+            about = "" if self.counted else "about "
+            lines.append(f"  {about}{self.output_tokens:,} tokens written")
+        lines += [f"  problem {n:,} marked" for n in range(problems + 1, self.problems + 1)]
+        self.told = (self.phase, len(sentences), max(step, tokens), max(self.problems, problems))
+        return lines
 
     def describe(self) -> str:
         """It in words: "thinking: Checking the citations", "writing the

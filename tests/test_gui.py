@@ -2,6 +2,7 @@
 
 import json
 import queue
+import re
 import sys
 from dataclasses import fields, replace
 from pathlib import Path
@@ -1234,3 +1235,16 @@ def test_the_rebuild_tab(root, tmp_path):
     app.show_mode()
     assert app.compared_card.winfo_manager() == "pack" and app.ai_card.winfo_manager() == "pack"
     assert app.button.cget("text") == "Compare"
+
+
+def test_the_progress_log(root):
+    """The progress log shows once there is a line to show; each line has
+    its time; the AI's news go in as they come."""
+    app = App(root, Settings(mode="files"))
+    assert app.progress_card.winfo_manager() == ""
+    app.set_stage("Asking claude to assess the changes…")
+    app.handle("live", ("thinking", ["Thinking", "  The claim is unsupported."]))
+    text = app.progress_log.text.get("1.0", "end")
+    assert app.progress_card.winfo_manager() == "pack"
+    assert "Asking claude to assess the changes…" in text
+    assert "  The claim is unsupported." in text and re.search(r"^\d\d:\d\d:\d\d  ", text, re.M)
