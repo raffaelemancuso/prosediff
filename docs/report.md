@@ -27,7 +27,11 @@
 The margin holds a card for each comment and each problem the AI marked,
 beside its paragraph. A comment's card gives its status (new or removed),
 author, date and formatted text; a problem's card, what is wrong and the
-fix proposed. A paragraph with a card is never folded away.
+fix proposed. A paragraph with a card is never folded away. Comments
+marked resolved in Word or LibreOffice, and their replies, have no card
+and no marker: by default they are left out of the report, and the AI is
+never sent them, both when comparing and when reviewing one file
+(`--no-skip-resolved` keeps them; see [How it works](how_it_works.md)).
 
 In the text, a comment is a 💬 balloon, green with + when added, red with −
 when removed; a problem is a numbered ⚠ badge. Clicking a card or its mark

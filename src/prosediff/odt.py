@@ -115,6 +115,31 @@ _OWN = "[not(ancestor::office:annotation) and not(ancestor::text:note)]"
 CELL_PARAGRAPHS = f".//text:p{_OWN}|.//text:h{_OWN}"
 
 
+def _resolved_names(document: Document) -> set[str]:
+    """The office:name of each annotation marked resolved, or replying to
+    one: LibreOffice's extension to ODF (loext:resolved, a boolean, and
+    loext:parent-name on a reply, in its OpenDocument+libreoffice schema),
+    a reply written before the annotation it answers."""
+    resolved, parent = set(), {}
+    for a in document.body.get_elements("//office:annotation"):
+        name = a.get_attribute_string("office:name")
+        if not name:
+            continue
+        if a.get_attribute_string("loext:resolved") == "true":
+            resolved.add(name)
+        if p := a.get_attribute_string("loext:parent-name"):
+            parent[name] = p
+    out = set()
+    for name in parent.keys() | resolved:
+        seen, n = set(), name
+        while n is not None and n not in resolved and n not in seen:
+            seen.add(n)
+            n = parent.get(n)
+        if n in resolved:
+            out.add(name)
+    return out
+
+
 class OdtError(RuntimeError):
     """The file is not an OpenDocument text odfdo can read."""
 
@@ -161,6 +186,8 @@ class Reader(DocumentReader):
         self.comment_count = 0
         # an annotation's office:name -> the id of its CommentMark
         self.comment_names: dict[str, str] = {}
+        # the office:name of each annotation marked resolved, or replying to one
+        self.resolved_names = _resolved_names(document)
         self.styles: dict[str, frozenset[str]] = {}
 
     def language_of(self, paragraphs: list[Element]) -> str | None:
@@ -307,8 +334,12 @@ class Reader(DocumentReader):
         paragraphs = el.get_elements("text:p")
         texts = [p.text_recursive for p in paragraphs]
         cid = str(self.comment_count - 1)
-        if name := el.get_attribute_string("office:name"):
+        name = el.get_attribute_string("office:name")
+        if name:
             self.comment_names[name] = cid
+        resolved = el.get_attribute_string("loext:resolved") == "true" or (
+            bool(name) and name in self.resolved_names
+        )
         # its paragraphs read as the body's are, in their styles, outside
         # any insertion the annotation sits in
         with self.outside_insertions():
@@ -319,6 +350,7 @@ class Reader(DocumentReader):
             spaced(" ".join(texts)),
             _text_of(el, "dc:date")[:19],
             rich,
+            resolved,
         )
 
     def text(self, text: str | None, styles: frozenset[str]) -> list[Tagged]:

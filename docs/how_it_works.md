@@ -65,6 +65,21 @@ Unicode private-use character, so it is compared like a word and matches on both
 Comments present on both sides are removed before alignment and never
 shown; a paragraph with a new or removed comment is shown.
 
+Comments marked resolved are skipped by default (`--skip-resolved`, the
+window's **Skip resolved comments**): when a Word or OpenDocument file is
+read, each comment marked resolved, and each reply to one, is dropped
+before anything else sees it. A skipped comment is therefore never shown
+in the HTML report (neither as a marker nor as a card in the margin),
+never written into the diffs, and never sent to the AI, whether two
+versions are compared or one file is reviewed. Word records the mark in
+the `word/commentsExtended.xml` part (`w15:done` on the comment's
+`w15:commentEx`, a reply linked by `w15:paraIdParent`, as [MS-DOCX]
+specifies); LibreOffice in its ODF extension, `loext:resolved` and
+`loext:parent-name` on `office:annotation`. A comment open in the old
+version and resolved in the new one is shown as removed.
+`--no-skip-resolved` keeps every comment. Markdown comments have no
+resolved state and are always kept.
+
 In a Markdown file, the formatted view recognises common inline Markdown
 with regular expressions, since no Markdown parser reports where each
 inline element sits in the source.

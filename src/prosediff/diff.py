@@ -2329,7 +2329,9 @@ class Options:
     ([note]{.comment-start ...}), as a marker whose tooltip is the comment,
     and lists the comments in a panel; "text" compares the comment markup
     as text; "none" leaves every comment out, in every format. Comments
-    without text are left out, unless empty_comments. docx_changes settles
+    without text are left out, unless empty_comments; the comments of Word
+    and OpenDocument files marked resolved, and the replies to them, unless
+    not skip_resolved. docx_changes settles
     the tracked changes of Word and OpenDocument documents: "accept-all",
     "reject-all" or "show" (kept as markup).
 
@@ -2361,6 +2363,7 @@ class Options:
     ignore_whitespace: bool = False
     comments: str = "markers"
     empty_comments: bool = False
+    skip_resolved: bool = True
     docx_changes: str = "accept-all"
     by_sentence: bool = False
     paragraph_moves: MoveSettings = MoveSettings()
@@ -2455,13 +2458,19 @@ def build_files(
     def document_lines(doc: Document | None) -> list[Line]:
         # the ids of the comments are the document's own
         folder = Folder(comments, options.empty_comments)
+        skipped: set[str] = set()  # the ids of the resolved comments left out
 
         def comment(c: CommentMark | CommentEnd) -> str:
             """What a document's comment, or the end of its text, is in its
             text: a placeholder, folded; nothing, when it has no text to
-            show; or the span pandoc writes."""
+            show or is resolved and skipped; or the span pandoc writes."""
             if isinstance(c, CommentEnd):
+                if c.id in skipped:
+                    return ""
                 return folder.end(c.id) if fold else comment_end_markdown(c)
+            if c.resolved and options.skip_resolved:
+                skipped.add(c.id)
+                return ""
             if not fold:
                 return comment_markdown(c)
             mark = folder.start(c.id, quoted_author(c.author), c.text, short_date(c.date), c.rich)

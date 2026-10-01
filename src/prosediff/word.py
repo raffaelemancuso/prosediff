@@ -119,6 +119,7 @@ class Reader(DocumentReader):
     note_order: list = field(default_factory=list)  # [(kind, id)] as referenced
     shown_comments: set = field(default_factory=set)
     ended_comments: set = field(default_factory=set)
+    resolved_comments: set = field(default_factory=set)  # ids
     # The styles of the paragraph being read that its runs do not restate:
     # a heading's own (its text is bold as a heading, not as bold text).
     plain: frozenset = frozenset()
@@ -135,7 +136,11 @@ class Reader(DocumentReader):
         # a date without a time midnight
         date = c._comment_elm.get(qn("w:date")) or ""
         rich = comment_runs(comment_inlines(p) for p in c.paragraphs)
-        return [CommentMark(cid, c.author or "", spaced(c.text), date, rich)]
+        return [
+            CommentMark(
+                cid, c.author or "", spaced(c.text), date, rich, cid in self.resolved_comments
+            )
+        ]
 
     def comment_end(self, cid: str) -> list:
         """Where the text of a comment ends, once, after where it starts."""
@@ -444,6 +449,44 @@ def _notes(document) -> dict:
     return notes
 
 
+W14 = "{http://schemas.microsoft.com/office/word/2010/wordml}"
+W15 = "{http://schemas.microsoft.com/office/word/2012/wordml}"
+COMMENTS_EXTENDED = "http://schemas.microsoft.com/office/2011/relationships/commentsExtended"
+
+
+def _resolved(document, comments: dict) -> set[str]:
+    """The ids of the comments marked resolved, and of the replies to them.
+    Word keeps the mark apart from the comment, in the commentsExtended part
+    ([MS-DOCX] CT_CommentEx): w15:done on the entry whose w15:paraId is that
+    of the comment's last paragraph (w14:paraId), w15:paraIdParent naming
+    the comment it replies to. A document without that part has none."""
+    part = next(
+        (r.target_part for r in document.part.rels.values() if r.reltype == COMMENTS_EXTENDED),
+        None,
+    )
+    if part is None:
+        return set()
+    done, parent = set(), {}
+    for entry in parse_xml(part.blob).iter(f"{W15}commentEx"):
+        pid = entry.get(f"{W15}paraId")
+        if entry.get(f"{W15}done") in ("1", "true", "on"):
+            done.add(pid)
+        if entry.get(f"{W15}paraIdParent"):
+            parent[pid] = entry.get(f"{W15}paraIdParent")
+    resolved = set()
+    for cid, c in comments.items():
+        paragraphs = c._comment_elm.findall(qn("w:p"))
+        pid = paragraphs[-1].get(f"{W14}paraId") if paragraphs else None
+        # up the thread: a reply to a resolved comment is resolved with it
+        seen = set()
+        while pid is not None and pid not in done and pid not in seen:
+            seen.add(pid)
+            pid = parent.get(pid)
+        if pid is not None and pid in done:
+            resolved.add(cid)
+    return resolved
+
+
 def read_docx(data: bytes, changes: str = "accept-all") -> Document:
     """A Word document as prosediff reads it (prosediff.document), its
     tracked changes settled ("accept-all", "reject-all") or kept as markup ("show"),
@@ -460,6 +503,7 @@ def read_docx(data: bytes, changes: str = "accept-all") -> Document:
         reader.comments = {str(c.comment_id): c for c in document.comments}
     except (KeyError, ValueError):
         reader.comments = {}
+    reader.resolved_comments = _resolved(document, reader.comments)
     reader.notes = _notes(document)
     blocks = reader.body()
     notes = reader.note_blocks()

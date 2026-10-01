@@ -40,6 +40,7 @@ or named by `GIT_PYTHON_GIT_EXECUTABLE`.
 | `--align left\|justify`    | alignment of wrapped lines (default left) |
 | `--comments markers\|text\|none` | comments in documents. `markers` (default): only those added or removed, shown apart from the text. `text`: compared as part of the text. `none`: left out |
 | `--empty-comments`         | also show comments with no text (left out by default) |
+| `--skip-resolved`, `--no-skip-resolved` | leave out the comments of Word and OpenDocument files marked resolved, and their replies: not shown, not sent to the AI (default: on) |
 | `--docx-changes accept-all\|reject-all\|show` | tracked changes in Word and OpenDocument files: accept them all (default), reject them all, or show them as Word does |
 | `--md-filter COMMAND`      | shell command (cmd.exe on Windows, sh elsewhere) that both versions of each Markdown file are piped through before comparing; not applied to Word or OpenDocument files |
 | `--split paragraph\|sentence\|both` | compare the prose of Markdown, Word and OpenDocument files by paragraph, by sentence, or both (switched with `s` in the report). Default: `both` for HTML, `paragraph` for a diff |

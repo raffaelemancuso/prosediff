@@ -50,13 +50,16 @@ class Span:
 @dataclass
 class CommentMark:
     """Where a comment starts. text: its text in one line; rich: its
-    paragraphs as written, for the HTML report to show (comment_runs)."""
+    paragraphs as written, for the HTML report to show (comment_runs);
+    resolved: marked resolved (Word's "Resolve", LibreOffice's "Resolved"),
+    or a reply to one so marked."""
 
     id: str
     author: str
     text: str
     date: str = ""
     rich: tuple = ()
+    resolved: bool = False
 
 
 # A comment as written: its paragraphs, each a tuple of runs, each run its

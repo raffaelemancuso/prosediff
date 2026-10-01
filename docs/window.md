@@ -47,7 +47,9 @@ The Files and Folders views have a button to swap the two.
 The **Comparison** card holds the options that change what is found; each
 field has a tooltip. They are: Word and OpenDocument tracked changes; the
 comments (markers, text or none); the document language, which splits
-sentences and hyphenates lines; ignoring whitespace; and "Compare by"
+sentences and hyphenates lines; ignoring whitespace; skipping resolved
+comments (on by default: comments marked resolved in Word or LibreOffice,
+and their replies, are neither shown nor sent to the AI); and "Compare by"
 (paragraphs, sentences, or both, the default). A split the output cannot
 hold is greyed out: Both for a diff, Sentences for a tracked-changes
 document. It gives way to Paragraphs until the output can hold it again.

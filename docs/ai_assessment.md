@@ -85,7 +85,8 @@ effort starred, as the window does. Three more settings:
   and OpenDocument documents; by default the AI and its model.
 
 **Privacy.** The AI is sent the word diff of the changed paragraphs
-(comments included), the whole new version (unless `--assess-context
+(comments included, except those marked resolved, unless
+`--no-skip-resolved`), the whole new version (unless `--assess-context
 changes`) and your instructions; no files, and no tools to run. With
 `claude`, `codex` or an API, this text goes to Anthropic's, OpenAI's
 or the API's servers under your account; with Ollama it stays on the

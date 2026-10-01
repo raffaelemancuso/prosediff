@@ -39,6 +39,17 @@ Markdown too.**
   text instead of "Binary files differ", and `git difftool -t prosediff`
   opens the side-by-side report ([git integration](https://github.com/raffaelemancuso/prosediff/blob/master/docs/cli.md#with-gits-own-commands)).
 
+**What the AI reads.** Comparing two versions, the AI is sent prosediff's
+own word diff between them (`[-removed-]`, `{+added+}`), computed from the
+two texts and not from the files' Track Changes, and, by default, the whole
+new version. Reviewing one file, it is sent the file. Either way, a Word or
+OpenDocument file is read with its tracked changes accepted, so the AI sees
+the final text, not who changed what: `--docx-changes reject-all` reads the
+text before them, and `--docx-changes show` keeps them in the text as
+marked insertions and deletions, with author and date, for the AI to see
+(in the window, **Tracked changes**). Comments marked resolved are never
+sent unless `--no-skip-resolved`.
+
 Underneath is a diff made for prose, not code: a self-contained HTML report
 of two versions side by side, each paragraph facing the one it came from,
 changed words highlighted inside it. The versions are two Word or
@@ -55,6 +66,11 @@ of a git repository.
   marks, and cannot compare folders, git history or Markdown.
 - **prosediff reads Word and OpenDocument files directly**, whether or not
   Track Changes was on, and shows only the comments added or removed.
+  Comments marked resolved in Word or LibreOffice, and their replies, are
+  skipped by default: hidden from the report and never sent to the AI,
+  whether two versions are compared or one file is reviewed
+  (`--no-skip-resolved`, or the window's **Skip resolved comments**
+  switch, keeps them).
 - **It lines the versions up correctly**: an edited paragraph faces the one
   it came from, however rewritten; an inserted or split paragraph does not
   shift the ones below.

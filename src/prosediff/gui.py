@@ -157,6 +157,7 @@ class Settings:
     # report, CriticMarkup in the diffs); "text": compared as text; "none"
     comments: str = "markers"
     empty_comments: bool = False
+    skip_resolved: bool = True
     docx_changes: str = "accept-all"
     align: str = "justify"
     # "auto": 0 for Markdown files and Word documents, 3 for the others; a
@@ -379,6 +380,7 @@ def run_of(s: Settings) -> Run:
         ignore_whitespace=s.ignore_whitespace,
         comments=s.comments,
         empty_comments=s.empty_comments,
+        skip_resolved=s.skip_resolved,
         max_hidden=s.max_hidden,
         docx_changes=s.docx_changes,
         paragraph_moves=moves_of(s, False),
@@ -783,6 +785,15 @@ class App:
                 self.ignore_ws,
                 "Lines that differ only in spacing are the same, as git diff -w.",
             )
+        )
+        self.skip_resolved = self.setting("skip_resolved")
+        switch_row(
+            right,
+            2,
+            "Skip resolved comments",
+            self.skip_resolved,
+            "Leave out the comments of Word and OpenDocument files marked resolved, and the "
+            "replies to them: not shown in the report, and not sent to the AI.",
         )
 
     def build_report_card(self, card: ttk.Labelframe) -> None:

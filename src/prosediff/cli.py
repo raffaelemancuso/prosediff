@@ -242,6 +242,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="show the comments that have no text too (left out by default)",
     )
     ap.add_argument(
+        "--skip-resolved",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="leave out the comments of Word and OpenDocument files marked resolved, and "
+        "the replies to them: not shown, and not sent to the AI (default: on)",
+    )
+    ap.add_argument(
         "--docx-changes",
         choices=CHANGES,
         default="accept-all",
@@ -618,6 +625,7 @@ def _reading_options(args: argparse.Namespace) -> dict:
         "md_filter": args.md_filter,
         "comments": args.comments or "markers",
         "empty_comments": args.empty_comments,
+        "skip_resolved": args.skip_resolved,
         "docx_changes": args.docx_changes,
         "language": args.language,
         "encoding": args.encoding,
