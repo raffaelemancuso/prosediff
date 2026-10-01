@@ -489,7 +489,10 @@ document language (`default`: the one Word and OpenDocument files mark, the
 others guessed; `document`; `guess`, guessed from each file; or a code such
 as `it`), which splits sentences and hyphenates lines, a switch to ignore
 whitespace, and how prose is compared ("Compare by": paragraphs, sentences
-or both, the default).
+or both, the default). A split the output cannot hold is greyed out: Both
+for a diff, which holds one, Sentences for a Word or OpenDocument document
+of tracked changes; one chosen gives way to Paragraphs, and comes back when
+the output can hold it again.
 
 The **Advanced settings** button, in the bar at the bottom, opens the rest
 in a window of its own, beside the main one (Close, or Escape, hides it

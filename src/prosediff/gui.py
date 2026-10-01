@@ -850,8 +850,14 @@ class App:
         split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
         # what only a comparison has, greyed out reviewing one file (show_mode)
         self.comparing_only: list[tk_ttk.Widget] = []
+        # each split's button, greyed out for an output that cannot hold it
+        # (update_splits); the split given up for the output's default, to
+        # come back with an output that can
+        self.split_buttons: dict[str, ttk.Radiobutton] = {}
+        self.split_given_up: tuple[str, str] | None = None
         for value, text in split_names:
-            self.comparing_only.append(segment(splits, self.split, value, text))
+            self.split_buttons[value] = segment(splits, self.split, value, text)
+            self.comparing_only.append(self.split_buttons[value])
         field_row(
             compared,
             2,
@@ -1069,7 +1075,7 @@ class App:
                 text,
                 tip,
                 padding=(12, 4),
-                command=self.rename_output,
+                command=self.on_format,
             )
         ttk.Label(out, text="Save to").grid(row=1, column=0, sticky="w", **PAD)
         self.output = tk.StringVar(value=self.s.output)
@@ -1615,6 +1621,7 @@ class App:
         if self.reviewing() and self.output_format.get() != "html":
             self.output_format.set("html")
             self.rename_output()
+        self.update_splits()
         self.update_tracked_formats()
         self.update_ai_switches()
         if self.job is None:
@@ -1637,6 +1644,42 @@ class App:
         )
         if f:
             var.set(f)
+
+    def on_format(self) -> None:
+        """A format chosen: the Save to file renamed, the splits it cannot
+        hold greyed out."""
+        self.rename_output()
+        self.update_splits()
+
+    def update_splits(self) -> None:
+        """Compare by offers the splits the output can hold (check_split):
+        both for the HTML report only, which switches between them;
+        sentences not for a document of tracked changes, whose paragraphs are
+        paragraphs. One it cannot hold is greyed out and, chosen, given up for
+        the output's default (default_split), to come back with an output that
+        can hold it."""
+        fmt = self.output_format.get()
+
+        def fits(split: str) -> bool:
+            try:
+                check_split(split, fmt)
+            except ValueError:
+                return False
+            return True
+
+        for value, button in self.split_buttons.items():
+            enable(button, fits(value) and not self.reviewing())
+        if self.split_given_up is not None:
+            given_up, put = self.split_given_up
+            if self.split.get() != put:  # chosen since: it stays
+                self.split_given_up = None
+            elif fits(given_up):
+                self.split.set(given_up)
+                self.split_given_up = None
+        if not fits(self.split.get()):
+            put = default_split(fmt)
+            self.split_given_up = (self.split.get(), put)
+            self.split.set(put)
 
     def rename_output(self) -> None:
         """Give the Save to file the extension of the format chosen."""
@@ -1922,7 +1965,8 @@ class App:
             var.set(value)
         self.move_passages.set(d.move_passages)
         self.reset_passage_settings()
-        self.rename_output()
+        self.split_given_up = None
+        self.on_format()
         self.update_untracked()
         self.update_empty_comments()
         self.status.set("Options reset to their defaults (not saved).")

@@ -1050,3 +1050,36 @@ def test_a_number_box_steps_the_number_it_shows(root):
     var.set("none")
     box.event_generate("<<Increment>>")
     assert var.get() == "100"
+
+
+def test_compare_by_offers_the_splits_the_output_can_hold(root, tmp_path):
+    """Both greyed out while a diff is chosen, Sentences while a document of
+    tracked changes is: one chosen gives way to Paragraphs, and comes back
+    with an output that can hold it, unless another was chosen since."""
+    old, new = tmp_path / "a.docx", tmp_path / "b.docx"
+    app = App(root, Settings(mode="files", old=str(old), new=str(new)))
+    buttons = app.split_buttons
+
+    def choose(fmt):
+        app.output_format.set(fmt)
+        app.on_format()
+
+    assert app.split.get() == "both" and not buttons["both"].instate(["disabled"])
+    choose("diff")
+    assert buttons["both"].instate(["disabled"]) and app.split.get() == "paragraph"
+    assert not buttons["sentence"].instate(["disabled"])
+    choose("html")
+    assert app.split.get() == "both" and not buttons["both"].instate(["disabled"])
+    app.split.set("sentence")
+    choose("docx")
+    assert buttons["sentence"].instate(["disabled"]) and buttons["both"].instate(["disabled"])
+    assert app.split.get() == "paragraph"
+    choose("wdiff")
+    assert app.split.get() == "sentence"  # a word diff holds sentences
+    choose("diff")
+    app.split.set("paragraph")
+    choose("html")
+    assert app.split.get() == "paragraph"  # chosen since: it stays
+    # settings saved with a split the output cannot hold
+    other = App(root, Settings(mode="files", split="both", output_format="diff"))
+    assert other.split.get() == "paragraph" and other.split_buttons["both"].instate(["disabled"])
