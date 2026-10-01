@@ -414,13 +414,17 @@ def save_settings(s: Settings, path: Path | None = None) -> bool:
 
 
 def context_of(s: Settings) -> Context:
-    """The context for compare(), from the Context lines box."""
+    """The context for compare(), from the Context lines box; ValueError
+    for a negative number of lines, refused as the command line refuses it."""
     if s.full:
         return None
     try:
-        return max(0, int(s.context_lines))
+        lines = int(s.context_lines)
     except ValueError:  # "auto", or anything that is not a number
         return "auto"
+    if lines < 0:
+        raise ValueError("Context lines must be 0 or more (or auto).")
+    return lines
 
 
 def generate(
@@ -1770,7 +1774,8 @@ class App:
     def collect(self) -> Settings:
         """The settings the window shows."""
         context = self.context.get().strip()
-        if not context.isdigit():
+        # a number as typed, negative too, for run to refuse (context_of)
+        if not context.lstrip("-").isdigit():
             context = "auto"
         moves = {}
         for sentences, similarity, algorithm in (
@@ -1935,6 +1940,11 @@ class App:
         if self.job is not None:
             return  # one comparison at a time
         s = self.collect()
+        try:
+            context_of(s)
+        except ValueError as e:
+            self.complain(str(e))
+            return
         if s.mode == "review" and not s.assess:
             self.complain("Choose an AI, under AI assessment, to review the file.")
             return

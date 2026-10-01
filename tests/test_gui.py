@@ -143,6 +143,9 @@ def test_context_lines_box():
     assert context_of(Settings(context_lines="2")) == 2
     assert context_of(Settings(context_lines="nonsense")) == "auto"
     assert context_of(Settings(context_lines="2", full=True)) is None
+    with pytest.raises(ValueError, match="0 or more"):
+        context_of(Settings(context_lines="-2"))
+    assert context_of(Settings(context_lines="-2", full=True)) is None
 
 
 def test_list_choices_and_default_sides(history):
@@ -957,6 +960,11 @@ def test_one_file_reviewed(root, tmp_path, monkeypatch):
     app.assess_ai.set(gui.NO_ASSESSMENT)
     app.run()
     assert app.job is None and "Choose an AI" in root.shown[-1]
+    # a negative number of context lines refused, as the command line does
+    app.context.set("-3")
+    app.run()
+    assert app.job is None and "Context lines must be 0 or more" in root.shown[-1]
+    app.context.set("auto")
     app.mode.set("files")
     app.show_mode()
     assert app.button.cget("text") == "Compare"
