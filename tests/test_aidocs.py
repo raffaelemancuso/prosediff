@@ -444,9 +444,12 @@ def test_the_co_authors_changes_and_comments_are_kept(tmp_path, fmt, alone):
     old, new = pair(tmp_path, fmt)
     co_authored(new, fmt)
     c = review_file(new, Options()) if alone else compare_paths(str(old), str(new), Options())
-    got = downloads(c, assessment([FIXED, ADVICE]))
-    out = tmp_path / got[-1].name
-    out.write_bytes(got[-1].data)
+    # compared, no document of the changes since the old version: the
+    # co-author's are tracked in the new one already
+    (got,) = downloads(c, assessment([FIXED, ADVICE]))
+    assert got.name == f"new_with_AI_fixes.{fmt}"
+    out = tmp_path / got.name
+    out.write_bytes(got.data)
     accepted = lines(out, "accept-all")
     assert "We find a small and significant effect." in accepted
     assert accepted == [s.replace("a large and", "a small and") for s in lines(new, "accept-all")]

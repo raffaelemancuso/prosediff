@@ -289,12 +289,15 @@ through them.
 
 When a Word document is compared with another (or an OpenDocument text with
 another) and the AI marked problems, the assessment's drawer, and a button
-for each in the top bar, offer two documents to download, made from the new
+for each in the top bar, offer the documents to download, made from the new
 version:
 
 - **The changes, tracked, with the AI's comments**: the document of
   [tracked changes](#tracked-changes), each problem a comment of the AI's
-  on its passage, what is wrong and the change it proposes;
+  on its passage, what is wrong and the change it proposes. Only when the
+  new version has no tracked changes of its own: those already show what
+  the co-authors changed, under their names, and would be marked again,
+  under another;
 - **The new version with the AI's fixes, tracked**: where the AI wrote out
   how the passage should read, its fix is a tracked change of its own, to
   accept or reject in Word or LibreOffice, what is wrong a comment on it;
@@ -316,7 +319,7 @@ version:
 Each opens with a comment on the first paragraph giving the AI's verdict;
 the comments and the changes are the AI's, under its name ("Claude Code
 (claude-opus-5-5)"). Review mode (`r`) has a box beside each problem:
-unticked, the problem is left out of both documents when they are saved, its
+unticked, the problem is left out of the documents when they are saved, its
 comment taken out and its fix rejected. A problem in text only the old
 version has stays in the report. Word takes no comment in a footnote or an
 endnote, so a problem in one has its comment on the note's number in the

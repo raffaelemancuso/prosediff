@@ -794,8 +794,9 @@ def notes_in(red, notes, author: str, assessment: Assessment, fixes: bool) -> di
 def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Download]:
     """The documents the report offers when the AI marked problems in a Word
     document or an OpenDocument text: the tracked changes with the AI's
-    comments, and the new version with its fixes (a document reviewed
-    alone, that one only: it has no changes); none for anything else.
+    comments (when the new version has no tracked changes of its own), and
+    the new version with its fixes (a document reviewed alone, that one
+    only: it has no changes); none for anything else.
     A document that cannot be made is left out, with a warning: the report
     must not cost it."""
     if assessment is None or assessment.error or not assessment.annotations:
@@ -809,43 +810,49 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
     stem = PurePosixPath((f.new_path or "document").replace("\\", "/")).stem
     red_of = WordRedline if fmt == "docx" else OdtRedline
     out = []
-    if not comparison.single:  # a document alone has no changes to track
+
+    def made(what, red_of_it, fixes: bool, name: str, label: str, short: str) -> None:
+        """The document of red_of_it() with the AI's comments (and its fixes),
+        added to out; left out with a warning when it cannot be made: the
+        report must not cost it."""
         try:
-            red = red_of(f, author_of(comparison))
-            red.run()
-            ids = notes_in(red, notes, ai, assessment, fixes=False)
+            red = red_of_it()
+            if red is None:
+                return
+            ids = notes_in(red, notes, ai, assessment, fixes)
             data = (WordNotes if fmt == "docx" else OdtNotes)(red, ai).save()
-            out.append(
-                Download(
-                    f"{stem}_tracked_with_AI_comments.{fmt}",
-                    "The changes, tracked, with the AI's comments",
-                    data,
-                    fmt,
-                    ids,
-                    "Tracked changes",
-                )
-            )
+            out.append(Download(name, label, data, fmt, ids, short))
         except Exception as e:  # a document the redline cannot take
-            warnings.warn(
-                f"the tracked changes with the AI's comments could not be made: {e}", stacklevel=2
-            )
+            warnings.warn(f"{what} could not be made: {e}", stacklevel=3)
+
+    def tracked():
+        # the changes since the old version: only when the new one has no
+        # tracked changes of its own, which would be marked a second time,
+        # under another name
+        red = red_of(f, author_of(comparison))
+        if red.pending:
+            return None
+        red.run()
+        return red
+
+    if not comparison.single:  # a document alone has no changes to track
+        made(
+            "the tracked changes with the AI's comments",
+            tracked,
+            False,
+            f"{stem}_tracked_with_AI_comments.{fmt}",
+            "The changes, tracked, with the AI's comments",
+            "Tracked changes",
+        )
     which = "document" if comparison.single else "new version"
-    try:
+    made(
+        f"the {which} with the AI's fixes",
         # the file itself, its own tracked changes (the co-authors') kept as
         # they are, unless the text was read with them rejected or shown
-        red = red_of(f, ai, own=f.document_changes == "accept-all")
-        ids = notes_in(red, notes, ai, assessment, fixes=True)
-        data = (WordNotes if fmt == "docx" else OdtNotes)(red, ai).save()
-        out.append(
-            Download(
-                f"{stem}_with_AI_fixes.{fmt}",
-                f"The {which} with the AI's fixes, tracked",
-                data,
-                fmt,
-                ids,
-                "With AI fixes",
-            )
-        )
-    except Exception as e:
-        warnings.warn(f"the {which} with the AI's fixes could not be made: {e}", stacklevel=2)
+        lambda: red_of(f, ai, own=f.document_changes == "accept-all"),
+        True,
+        f"{stem}_with_AI_fixes.{fmt}",
+        f"The {which} with the AI's fixes, tracked",
+        "With AI fixes",
+    )
     return out

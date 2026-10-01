@@ -125,6 +125,32 @@ POINTERS = {
 }
 
 
+# The marks of a Word document's tracked changes (ECMA-376 Part 1, revisions):
+# text put in, taken out or moved, and formatting, numbering, sections and
+# table cells changed.
+WORD_REVISIONS = {
+    qn(f"w:{t}")
+    for t in (
+        "ins",
+        "del",
+        "moveFrom",
+        "moveTo",
+        "rPrChange",
+        "pPrChange",
+        "sectPrChange",
+        "tblPrChange",
+        "tblPrExChange",
+        "tblGridChange",
+        "trPrChange",
+        "tcPrChange",
+        "numberingChange",
+        "cellIns",
+        "cellDel",
+        "cellMerge",
+    )
+}
+
+
 class WordFile:
     """A Word document opened for the redline: its parts' XML by name, those
     python-docx keeps as bytes parsed, to be written back."""
@@ -250,6 +276,10 @@ class WordRedline:
         # settled (which may merge paragraphs away)
         self.new_paragraphs = [self.found(self.new, line) for line in f.new_text]
         self.old_paragraphs = [self.found(self.old, line) for line in f.old_text]
+        # whether the new version has tracked changes of its own, unsettled
+        self.pending = any(
+            el.tag in WORD_REVISIONS for root in self.new.roots.values() for el in root.iter()
+        )
         if not own:
             self.new.settle()
         if self.old is not None:
@@ -755,6 +785,7 @@ class OdtRedline:
         self.doc = odfdo.Document(BytesIO(f.new_data))
         self.root = lxml_of(self.doc.get_part("content").root)
         self.new_paragraphs = [self.found(line) for line in f.new_text]
+        self.pending = next(self.root.iter(odf("text:changed-region")), None) is not None
         if not own:
             self.accept_own()
         # the ids of the document's own changes, not to be given again

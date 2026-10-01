@@ -1305,10 +1305,11 @@ class App:
                     "Documents to download",
                     self.assess_documents,
                     "Comparing a Word document with another (or an OpenDocument text with "
-                    "another), put two documents in the HTML report, to download from the AI "
-                    "assessment: the tracked changes with the AI's comments, and the new "
-                    "version with the AI's fixes as its own tracked changes, to accept or "
-                    "reject. Review mode chooses which problems they hold. They make the "
+                    "another), put in the HTML report the documents to download from the AI "
+                    "assessment: the new version with the AI's fixes as tracked changes, to "
+                    "accept or reject, its own (the co-authors') kept; and, when it has none, "
+                    "the tracked changes with the AI's comments. Review mode chooses which "
+                    "problems they hold. They make the "
                     "report larger: about 2.7 times the document's size. Needs \"Mark "
                     'individual changes".',
                 ),

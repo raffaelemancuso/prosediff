@@ -387,9 +387,10 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="when the AI marked problems in a Word document (or an OpenDocument text) "
-        "compared with another, put in the HTML report two documents to download: the "
-        "tracked changes with the AI's comments, and the new version with the AI's fixes "
-        "as its tracked changes; review mode chooses which problems they hold. They make "
+        "compared with another, put in the HTML report the documents to download: the new "
+        "version with the AI's fixes as its tracked changes, its own (the co-authors') kept, "
+        "and, when it has none, the tracked changes with the AI's comments; review mode "
+        "chooses which problems they hold. They make "
         "the report as large again as the document, and more (default: on)",
     )
     ai_group.add_argument(
