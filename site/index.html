@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>prosediff</title>
-<meta name="description" content="Side-by-side comparison of Word, OpenDocument and Markdown documents: each paragraph facing the one it came from, moved passages followed even when rewritten, and an AI that reads the changes and marks what the revision got wrong.">
+<meta name="description" content="Side-by-side comparison of Word, LibreOffice and Markdown documents: each paragraph facing the one it came from, moved passages followed even when rewritten, and an AI that reviews the changes, or a single document, and hands its fixes back as tracked changes and comments.">
 <meta property="og:title" content="prosediff: a diff for prose, not code">
-<meta property="og:description" content="Compare two versions of a Word document side by side, follow the passages that moved, and have an AI assess the changes.">
+<meta property="og:description" content="Compare two versions of a Word or LibreOffice document side by side, follow the passages that moved, and have an AI review the changes or a single document, its fixes returned as tracked changes.">
 <meta property="og:image" content="https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -235,7 +235,7 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
     <div class="wrap hero-grid">
       <div>
         <h1>A diff for <del>code</del> <ins>prose</ins>.</h1>
-        <p class="lede">Put two versions of a <strong>Word</strong>, <strong>LibreOffice</strong> or <strong>Markdown</strong> document side by side, each paragraph facing the one it came from. <strong>Passages that moved are followed</strong>, even when they were rewritten on the way. Then <strong>let an AI read the changes</strong> and mark what the revision got wrong.</p>
+        <p class="lede">Put two versions of a <strong>Word</strong>, <strong>LibreOffice</strong> or <strong>Markdown</strong> document side by side, each paragraph facing the one it came from. <strong>Passages that moved are followed</strong>, even when they were rewritten on the way. Then <strong>let an AI read the changes</strong>, or a single document, mark what is wrong, and hand its fixes back as tracked changes in Word or LibreOffice.</p>
         <div class="install">
           <code id="install-cmd">uv tool install prosediff</code>
           <button type="button" id="copy-btn" aria-label="Copy the install command">Copy</button>
@@ -338,6 +338,9 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
           <li>Claims no longer supported, results misstated, broken sentences.</li>
           <li>Placeholders left in, dangling citations, inconsistent terms or spelling.</li>
           <li>Reviewers' comments left unanswered.</li>
+          <li><strong>One document on its own</strong> works too, with no earlier version to compare: the AI reviews the whole text and gives a verdict of <em>Good</em>, <em>Fair</em> or <em>Poor</em>.</li>
+          <li>Optionally, a second opinion on whether the new text reads as written by an AI, with the signs for and against. It is an indication, not proof.</li>
+          <li><strong>The AI's work, back in Word or LibreOffice</strong>: for a comparison and for a single document alike, download the document with each fix the AI proposes as a tracked change to accept or reject, and each problem as a comment on its passage. Your co-authors' own tracked changes and comments are kept.</li>
           <li>Runs with Claude, ChatGPT through Codex, a local model through Ollama, or any provider any-llm supports. You can preview the prompt before anything is sent.</li>
         </ul>
       </div>
@@ -374,7 +377,7 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
         </div>
         <div class="feature">
           <h3>Files, folders or git</h3>
-          <p>Compare two files, two folders file by file, or two commits of a git repository. <code>prosediff --setup-git</code> also makes <code>git diff</code> show Word files as text.</p>
+          <p>Compare two files, two folders file by file, or two commits of a git repository. <code>prosediff --setup-git</code> makes <code>git diff</code> show Word and LibreOffice documents as text, not as changed binary files, and sets prosediff up as a git difftool: <code>git difftool -d -t prosediff</code> opens the side-by-side report.</p>
         </div>
         <div class="feature">
           <h3>A report you can send</h3>
@@ -389,10 +392,10 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
       <div class="spot-text">
         <p class="eyebrow">No command line needed</p>
         <h2>A window for choosing what to compare</h2>
-        <p class="intro">Run <code>prosediff-gui</code>, pick two files, two folders or two commits, choose whether an AI should assess the changes, and press Compare. The report opens in your browser.</p>
+        <p class="intro">Run <code>prosediff-gui</code>, pick two files, two folders or two commits, choose whether an AI should assess the changes, and press Compare. To have one document reviewed instead, use the One file tab. The report opens in your browser.</p>
       </div>
       <figure class="spot-fig spot-narrow">
-        <img src="screenshot_window.png" width="780" height="815" loading="lazy" alt="The prosediff window, with tabs for Git repository, Files and Folders, and options for tracked changes, comments, output format and AI assessment.">
+        <img src="screenshot_window.png" width="780" height="815" loading="lazy" alt="The prosediff window, with tabs for Git repository, Files, Folders and One file, and options for tracked changes, comments, output format and AI assessment.">
       </figure>
     </div>
   </section>
@@ -410,6 +413,8 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
             <tr><td>Shows the versions side by side</td><td class="part">Line by line</td><td class="part">A third document of revision marks</td><td class="yes">Paragraph by paragraph</td></tr>
             <tr><td>Follows edited text that moved</td><td class="no">No</td><td class="part">Only unedited moves</td><td class="yes">Yes</td></tr>
             <tr><td>AI review of the revision</td><td class="no">No</td><td class="no">No</td><td class="yes">Optional</td></tr>
+            <tr><td>AI review of a single document</td><td class="no">No</td><td class="no">No</td><td class="yes">Optional</td></tr>
+            <tr><td>AI fixes as tracked changes, problems as comments</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes, for Word and LibreOffice</td></tr>
             <tr><td>Reads Word files</td><td class="no">No, shown as binary</td><td class="yes">Yes</td><td class="yes">Yes, and .odt and Markdown</td></tr>
             <tr><td>Lists new and removed comments</td><td class="no">No</td><td class="no">No</td><td class="yes">Yes</td></tr>
             <tr><td>Compares folders and git history</td><td class="yes">Yes</td><td class="no">No</td><td class="yes">Yes</td></tr>
@@ -431,14 +436,19 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
           <p>Install <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>, then:</p>
 <pre><code>uv tool install prosediff
 <span class="c"># with AI assessment through Claude</span>
-uv tool install "prosediff[claude]"</code></pre>
+uv tool install "prosediff[claude]"
+<span class="c"># or through ChatGPT (Codex), or Ollama and other providers</span>
+uv tool install "prosediff[codex]"
+uv tool install "prosediff[models]"</code></pre>
         </div>
         <div>
           <h3>Then compare</h3>
           <p>Open the window, or use the command line:</p>
 <pre><code>prosediff-gui
 prosediff --files draft.docx returned.docx
-prosediff --git . HEAD~1</code></pre>
+prosediff --git . HEAD~1
+<span class="c"># one document, reviewed by an AI</span>
+prosediff --review paper.docx --assess claude</code></pre>
         </div>
       </div>
       <p class="intro">pip and pipx work too: <code>pipx install prosediff</code>. Every option is described in the <a href="https://github.com/raffaelemancuso/prosediff#readme">documentation</a>.</p>
