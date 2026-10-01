@@ -89,3 +89,13 @@ def history(tmp_path_factory):
     (builder.path / "sub").mkdir()
     yield builder, shas
     builder.repo.close()
+
+
+@pytest.fixture(autouse=True)
+def history_apart(tmp_path_factory, monkeypatch):
+    """How long the AI took, noted in a folder of the test's own, not in the
+    user's settings."""
+    import prosediff.history
+
+    folder = tmp_path_factory.mktemp("settings")
+    monkeypatch.setattr(prosediff.history, "config_dir", lambda: folder)

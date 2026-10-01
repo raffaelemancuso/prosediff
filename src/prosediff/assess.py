@@ -28,6 +28,7 @@ import re
 import tempfile
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
 from datetime import timedelta
 from functools import cache
@@ -380,6 +381,75 @@ class AssessError(RuntimeError):
     model, a timeout."""
 
 
+# How often what the model is doing is reported, at most (seconds).
+LIVE_EVERY_S = 0.5
+# About how many characters a token holds, to count the tokens of a text
+# still being written.
+CHARS_PER_TOKEN = 4
+
+
+@dataclass
+class Live:
+    """What the model is doing while it answers, as its backend tells:
+    "sending", "thinking", "writing the answer" or "working" (Codex, which
+    says no more), the tokens read and written so far (written estimated
+    from the characters, until the backend counts them), the answer so far,
+    and, at the end, what it cost (Claude Code: at API prices). report,
+    given, hears of it at most every LIVE_EVERY_S."""
+
+    phase: str = "sending"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    counted: bool = False
+    chars: int = 0
+    answer: str = ""
+    cost_usd: float | None = None
+    report: Callable[["Live"], None] | None = None
+    reported: float = 0.0
+
+    def update(self, force: bool = False, **changes) -> None:
+        for name, value in changes.items():
+            setattr(self, name, value)
+        now = time.monotonic()
+        if self.report is not None and (force or now - self.reported >= LIVE_EVERY_S):
+            self.reported = now
+            self.report(self)
+
+    def wrote(self, text: str, thinking: bool = False) -> None:
+        """More text written: thought, or part of the answer."""
+        self.chars += len(text)
+        if not thinking:
+            self.answer += text
+        if not self.counted:
+            self.output_tokens = self.chars // CHARS_PER_TOKEN
+        self.update(phase="thinking" if thinking else "writing the answer")
+
+    @property
+    def problems(self) -> int:
+        """The problems marked so far, counted in the answer's list."""
+        return self.answer.count('"problem"')
+
+    def describe(self) -> str:
+        """It in words: "thinking, about 3,481 tokens written"."""
+        parts = [self.phase]
+        if self.output_tokens:
+            about = "" if self.counted else "about "
+            parts.append(f"{about}{self.output_tokens:,} tokens written")
+        if self.problems:
+            parts.append(f"{self.problems:,} problem{'s' if self.problems != 1 else ''} marked")
+        return ", ".join(parts)
+
+
+# The Live of the assessment being made: the backends write to it.
+_LIVE: ContextVar[Live | None] = ContextVar("prosediff_live", default=None)
+
+
+def live() -> Live:
+    """The Live of the assessment being made (one that tells no one, when
+    none is)."""
+    return _LIVE.get() or Live()
+
+
 @dataclass(frozen=True)
 class AssessRequest:
     """What to ask an AI: which (spec: "claude", "claude/opus",
@@ -440,6 +510,11 @@ class Assessment:
     markdown: str = ""
     model: str = ""  # the model that answered, when the backend says
     seconds: float = 0.0
+    # the tokens read and written, and the cost (Claude Code: at API prices;
+    # None when not said)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None
     error: str = ""  # why there is none
     effort: str = ""
     context: str = ""
@@ -493,6 +568,23 @@ class Assessment:
     def took(self) -> str:
         """How long the model took: "20 seconds", "1 minute and 3 seconds"."""
         return duration(self.seconds)
+
+    @property
+    def usage(self) -> str:
+        """The tokens and the cost in words: "12,345 tokens read, 2,345
+        written, $0.31 at API prices"; "" when not known."""
+        parts = []
+        if self.input_tokens:
+            parts.append(f"{self.input_tokens:,} tokens read")
+        if self.output_tokens:
+            parts.append(
+                f"{self.output_tokens:,} written"
+                if parts
+                else f"{self.output_tokens:,} tokens written"
+            )
+        if self.cost_usd:
+            parts.append(f"${self.cost_usd:,.2f} at API prices")
+        return ", ".join(parts)
 
     @property
     def how(self) -> str:
@@ -669,7 +761,13 @@ def _missing(extra: str, what: str) -> AssessError:
 
 def _claude(system: str, prompt: str, model: str, effort: str, timeout: float) -> tuple[str, str]:
     try:
-        from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, query
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            ResultMessage,
+            StreamEvent,
+            query,
+        )
     except ImportError as e:
         raise _missing("claude", "The Claude Agent SDK") from e
 
@@ -687,19 +785,61 @@ def _claude(system: str, prompt: str, model: str, effort: str, timeout: float) -
             effort=effort or None,
             cwd=cwd,
             setting_sources=[],
+            # the API's stream events, for what the model is doing (Live)
+            include_partial_messages=True,
         )
         answered, text = "", ""
+        tracked = live()
         async for m in query(prompt=messages(), options=options):
-            if isinstance(m, AssistantMessage):
+            if isinstance(m, StreamEvent):
+                claude_event(tracked, m.event)
+            elif isinstance(m, AssistantMessage):
                 answered = m.model or answered
             elif isinstance(m, ResultMessage):
                 if m.is_error:
                     raise AssessError(f"Claude Code: {m.result or m.subtype}")
                 text = m.result or ""
+                usage = m.usage or {}
+                tracked.update(
+                    force=True,
+                    input_tokens=sum(usage.get(k) or 0 for k in INPUT_USAGE),
+                    output_tokens=usage.get("output_tokens") or tracked.output_tokens,
+                    counted=True,
+                    cost_usd=m.total_cost_usd,
+                )
         return text, answered
 
     with tempfile.TemporaryDirectory() as cwd:
         return _within(run(cwd), timeout)
+
+
+# The input tokens of Anthropic's usage: read anew, and from the cache.
+INPUT_USAGE = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def claude_event(tracked: Live, event: dict) -> None:
+    """One of the Anthropic API's stream events (Claude Code's StreamEvent),
+    told to tracked: the tokens read, what the model starts (thinking, the
+    answer), what it writes, the tokens written once counted."""
+    kind = event.get("type")
+    if kind == "message_start":
+        usage = (event.get("message") or {}).get("usage") or {}
+        tracked.update(input_tokens=sum(usage.get(k) or 0 for k in INPUT_USAGE))
+    elif kind == "content_block_start":
+        block = (event.get("content_block") or {}).get("type", "")
+        if block in ("thinking", "redacted_thinking"):
+            tracked.update(phase="thinking")
+        elif block == "text":
+            tracked.update(phase="writing the answer")
+    elif kind == "content_block_delta":
+        delta = event.get("delta") or {}
+        if delta.get("type") == "thinking_delta":
+            tracked.wrote(delta.get("thinking") or "", thinking=True)
+        elif delta.get("type") == "text_delta":
+            tracked.wrote(delta.get("text") or "")
+    elif kind == "message_delta":
+        if out := (event.get("usage") or {}).get("output_tokens"):
+            tracked.update(output_tokens=out, counted=True)
 
 
 def _codex(system: str, prompt: str, model: str, effort: str, timeout: float) -> tuple[str, str]:
@@ -723,9 +863,18 @@ def _codex(system: str, prompt: str, model: str, effort: str, timeout: float) ->
                 model=model or None,
                 cwd=cwd,
             )
+            live().update(phase="working")
             result = await thread.run(prompt, effort=level)
         if result.error is not None:
             raise AssessError(f"Codex: {getattr(result.error, 'message', result.error)}")
+        if result.usage is not None:
+            total = result.usage.total
+            live().update(
+                force=True,
+                input_tokens=total.input_tokens,
+                output_tokens=total.output_tokens,
+                counted=True,
+            )
         return result.final_response or "", model
 
     # the SDK's errors: no login, no binary, a refusal
@@ -748,18 +897,31 @@ def _any_llm(
         extra["num_ctx"] = min(131_072, (len(system) + len(prompt)) // 3 + 8_192)
     if effort:
         extra["reasoning_effort"] = effort
+    tracked, parts, answered = live(), [], model
     try:
-        response = any_llm.completion(
+        # streamed, for what the model writes as it writes it (Live)
+        for chunk in any_llm.completion(
             model=model,
             provider=provider,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
             # on the client: some providers (Ollama) take no timeout per call
             client_args={"timeout": timeout},
+            stream=True,
             **extra,
-        )
+        ):
+            answered = chunk.model or answered
+            if chunk.choices and (text := chunk.choices[0].delta.content):
+                parts.append(text)
+                tracked.wrote(text)
+            if usage := getattr(chunk, "usage", None):
+                tracked.update(
+                    input_tokens=usage.prompt_tokens or 0,
+                    output_tokens=usage.completion_tokens or tracked.output_tokens,
+                    counted=bool(usage.completion_tokens),
+                )
     except Exception as e:  # any-llm's errors, a connection refused, an unknown provider
         raise AssessError(f"{provider}/{model}: {e}") from e
-    return response.choices[0].message.content or "", response.model or model
+    return "".join(parts), answered
 
 
 def _within_as(label: str, coroutine, timeout: float, hint: str = ""):
@@ -807,6 +969,7 @@ def assess(
     documents: bool = False,
     kind: str = "value",
     single: bool = False,
+    report: Callable[[Live], None] | None = None,
 ) -> Assessment:
     """An assessment of the changes of a word diff by the AI request names;
     subject names what changed ("paper.docx"), document is the whole new
@@ -819,7 +982,8 @@ def assess(
     (SYSTEM_REVIEW): what a file reviewed alone is worth, its problems
     marked when asked; kind "writing" with single asks of document alone
     whether it reads as written by an AI (SYSTEM_WRITING_REVIEW). It never
-    raises: a failure is its error."""
+    raises: a failure is its error. report, given, hears what the model is
+    doing while it answers (Live)."""
     runner = runner or run_backend
     started = time.monotonic()
     # the document read alone, whole, diff unused
@@ -856,7 +1020,15 @@ def assess(
             prompt = prompt_for(diff, subject, document, instructions, references)
         system = system_of(request, kind, single) + (DOCUMENTS if documents else "") + marks
         made.system, made.prompt = system, prompt  # kept even if the model then fails
-        text, answered = runner(backend, system, prompt, model, request.effort, request.timeout)
+        tracked = Live(report=report)
+        token = _LIVE.set(tracked)
+        try:
+            tracked.update(force=True)
+            text, answered = runner(backend, system, prompt, model, request.effort, request.timeout)
+        finally:
+            _LIVE.reset(token)
+            made.input_tokens, made.output_tokens = tracked.input_tokens, tracked.output_tokens
+            made.cost_usd = tracked.cost_usd
         if not text.strip():
             raise AssessError("the model gave no answer")
     except (AssessError, OSError) as e:

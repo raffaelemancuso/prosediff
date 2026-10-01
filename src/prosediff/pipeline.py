@@ -5,6 +5,7 @@ and, apart, say whether the new text reads as written by an AI; write the
 output. Each front end turns its own input into a Run, and reports the
 Result, and the errors, its own way."""
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -21,6 +22,7 @@ from prosediff.diff import (
     review_diff,
     review_file,
 )
+from prosediff.history import estimate, record, usually
 from prosediff.language import DEFAULT
 from prosediff.render import assess_comparison, write_output
 from prosediff.sources import FOLDER_FILES
@@ -134,6 +136,8 @@ class Result:
     comparison: Comparison
     assessment: Assessment | None = None
     writing: Assessment | None = None
+    # where the AI's answers were kept (prosediff.saved); None when not
+    saved: Path | None = None
 
 
 def fixes_shown(run: Run, assessment: Assessment) -> tuple[Comparison, Assessment] | None:
@@ -163,11 +167,18 @@ def execute(
     run: Run,
     progress: Callable[[str], None] = lambda stage: None,
     approve: Callable[[Path], bool] | None = None,
+    live: Callable[[str], None] | None = None,
+    saved: tuple[Assessment, Assessment | None] | None = None,
 ) -> Result:
-    """Do run, telling progress each stage as it starts ("Comparing…").
-    With approve, an HTML report with an AI to assess the changes is first
-    written without the assessment, and approve, given its path, says whether
-    the text goes to the AI; a file reviewed alone has no preview."""
+    """Do run, telling progress each stage as it starts ("Comparing…"):
+    asking the AI, with how long it usually takes (prosediff.history), and
+    telling live, given, what the model is doing meanwhile ("thinking, about
+    3,481 tokens written"). With approve, an HTML report with an AI to
+    assess the changes is first written without the assessment, and
+    approve, given its path, says whether the text goes to the AI; a file
+    reviewed alone has no preview. The AI's answers are kept beside the HTML
+    report (prosediff.saved); saved, answers kept so before, are used in
+    place of asking the AI again."""
     reviewing = run.mode == "review"
     if reviewing:
         progress("Reading the file…")
@@ -211,21 +222,30 @@ def execute(
     )
     write = partial(writer, comparison)
     # no other format has a place for the assessment
-    ask = run.request is not None and run.fmt == "html"
+    ask = run.request is not None and run.fmt == "html" and saved is None
     if ask and approve is not None and not reviewing:
         progress("Writing the preview…")
         write()
         if not approve(run.output):
             return Result(run.output, comparison)
-    assessment = writing = None
+    assessment, writing = saved or (None, None)
     if ask:
         ai = run.request.spec
-        progress(f"Asking {ai} to {'review the file' if reviewing else 'assess the changes'}…")
-        assessment = assess_comparison(comparison, run.request)
+        report = (lambda tracked: live(tracked.describe())) if live is not None else None
+
+        def asked(what: str, kind: str) -> Assessment:
+            # what kind of assessment it makes, as history.record notes it
+            noted = "review" if reviewing and kind == "value" else kind
+            span = usually(estimate(ai, run.request.effort, noted))
+            progress(f"Asking {ai} {what}{f' ({span})' if span else ''}…")
+            made = assess_comparison(comparison, run.request, kind=kind, report=report)
+            record(made, len(made.system) + len(made.prompt))
+            return made
+
+        assessment = asked("to review the file" if reviewing else "to assess the changes", "value")
         if run.ai_writing:
             what = "the file" if reviewing else "the new text"
-            progress(f"Asking {ai} whether {what} reads as written by an AI…")
-            writing = assess_comparison(comparison, run.request, kind="writing")
+            writing = asked(f"whether {what} reads as written by an AI", "writing")
     assessment_shown = assessment
     if (
         reviewing
@@ -247,4 +267,10 @@ def execute(
         path = write(assessment=assessment_shown, writing=writing)
     except ValueError as e:  # a .docx or .odt of anything but two such documents
         raise OutputError(str(e)) from e
-    return Result(path, comparison, assessment, writing)
+    kept = None
+    if assessment is not None and run.fmt == "html" and saved is None:
+        from prosediff.saved import save  # it reads Run from here
+
+        with contextlib.suppress(OSError):  # the report stands without it
+            kept = save(run, path, assessment, writing)
+    return Result(path, comparison, assessment, writing, kept)

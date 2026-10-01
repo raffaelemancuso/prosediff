@@ -876,7 +876,7 @@ thead.print, .print-note { display: none; }
 <aside class="drawer" id="{{ id }}" aria-labelledby="{{ id }}-title" hidden>
   <div class="drawer-head"><h2 id="{{ id }}-title">{{ title }}</h2>
     {% if a.verdict %}<span class="verdict verdict-{{ a.verdict }}">{{ a.verdict | capitalize }}</span>{% endif %}
-    <span class="role">by {{ a.title }}{% if a.how %}, {{ a.how }}{% endif %}{% if a.seconds %}, in {{ a.took }}{% endif %}</span>
+    <span class="role">by {{ a.title }}{% if a.how %}, {{ a.how }}{% endif %}{% if a.seconds %}, in {{ a.took }}{% endif %}{% if a.usage %}; {{ a.usage }}{% endif %}</span>
     <button type="button" class="btn close" data-drawer="{{ id }}" aria-label="Close the {{ title }}">Close</button></div>
   {% if a.error %}
   <p class="assess-error">The assessment failed: {{ a.error }}</p>

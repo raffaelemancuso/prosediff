@@ -22,7 +22,6 @@ import ctypes
 import functools
 import json
 import multiprocessing
-import os
 import queue
 import subprocess
 import sys
@@ -66,6 +65,7 @@ from prosediff.diff import (
     stop_process_tree,
 )
 from prosediff.document import CHANGES as DOCX_CHANGES
+from prosediff.history import config_dir
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
 from prosediff.pipeline import Run, execute, options_of, request_of
 from prosediff.render import (
@@ -149,6 +149,8 @@ class Settings:
     old_folder: str = ""  # the two folders
     new_folder: str = ""
     single: str = ""  # the one file an AI reviews alone (the tab "review")
+    # the AI's answers kept beside a report, to make it again (the tab "rebuild")
+    rebuild_file: str = ""
     # the files of two folders compared: glob patterns separated by "|"
     include: str = FOLDER_FILES
     # "markers": set apart from the text (a marker and a panel in the HTML
@@ -234,13 +236,14 @@ class Settings:
 
 READY = "Choose what to compare, then Compare."
 REVIEW_READY = "Choose the file, and the AI to review it, then Review."
+REBUILD_READY = "Choose the AI's answers saved beside a report (.ai.json), then Rebuild."
 # The tooltips: their width in pixels, and how long the pointer must rest.
 HINT_WIDTH = 360
 HINT_DELAY_MS = 400
 # How long the notification of a finished comparison stays up.
 TOAST_MS = 4000
 # The tabs, in their order: the last reviews one file, nothing compared.
-MODES = ("git", "files", "folders", "review")
+MODES = ("git", "files", "folders", "review", "rebuild")
 PREFILLED_FILES = (".md", ".docx", ".odt")
 # The space around the fields of the window.
 PAD = {"padx": 6, "pady": 4}
@@ -306,8 +309,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
 
 
 def settings_file() -> Path:
-    base = os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
-    return Path(base) / "prosediff" / "gui.json"
+    return config_dir() / "gui.json"
 
 
 # The settings that are one of a list of choices: a value saved that is no
@@ -473,6 +475,20 @@ JOB_ERRORS = (
 )
 
 
+def rebuild_run(s: Settings, messages):
+    """The run kept with the answers s names, and the answers (prosediff.saved),
+    its warnings sent as stages; written where Save to says, else over the
+    report they were saved beside."""
+    from prosediff.saved import load
+
+    run, assessment, writing, warnings = load(s.rebuild_file.strip())
+    for warning in warnings:
+        messages.put(("stage", f"Warning: {warning}"))
+    if s.output.strip():
+        run = replace(run, output=Path(with_format(s.output.strip(), "html")))
+    return run, (assessment, writing)
+
+
 def run_job(s: Settings, messages, replies) -> None:
     """Compare as the settings say and write the output (pipeline.execute),
     in a process of its own that the window can stop: each
@@ -490,10 +506,13 @@ def run_job(s: Settings, messages, replies) -> None:
             return False
 
     try:
+        run, saved = rebuild_run(s, messages) if s.mode == "rebuild" else (run_of(s), None)
         done = execute(
-            run_of(s),
+            run,
             lambda stage: messages.put(("stage", stage)),
             approve if s.assess_preview else None,
+            live=lambda detail: messages.put(("live", detail)),
+            saved=saved,
         )
     except JOB_ERRORS as e:
         messages.put(("error", str(e) or type(e).__name__))
@@ -561,6 +580,8 @@ class App:
         self.messages = self.replies = None
         self.job_settings: Settings | None = None
         self.stage, self.stage_started = "", 0.0
+        # what the model is doing, while it is asked (pipeline.execute's live)
+        self.live = ""
         root.title("prosediff: compare two versions")
         root.minsize(780, 0)
         # The window takes the size its content asks for, but never shrinks
@@ -581,6 +602,7 @@ class App:
             ("files", "Files", "files"),
             ("folders", "Folders", "folder2"),
             ("review", "One file", "file-earmark-text"),
+            ("rebuild", "Rebuild", "arrow-repeat"),
         ):
             segment(
                 switch,
@@ -601,10 +623,11 @@ class App:
         self.build_git_side(self.sides["git"])
         self.build_path_sides(self.sides["files"], self.sides["folders"])
         self.build_review_side(self.sides["review"])
+        self.build_rebuild_side(self.sides["rebuild"])
 
         # The options that change what the comparison finds, in one card; how
         # the report shows it goes with the advanced settings
-        compared = ttk.Labelframe(page, text="Comparison", padding=(10, 8))
+        compared = self.compared_card = ttk.Labelframe(page, text="Comparison", padding=(10, 8))
         compared.pack(fill="x", pady=(10, 0))
         compared.columnconfigure((0, 1), weight=1, uniform="half")
         self.build_compared_card(compared)
@@ -706,6 +729,37 @@ class App:
             "A Word or OpenDocument file comes back with the AI's comments and fixes.",
             bootstyle="secondary",
         ).grid(row=1, column=1, sticky="w", padx=6)
+
+    def build_rebuild_side(self, side: ttk.Frame) -> None:
+        """The field of the AI's answers kept beside a report, to make it again."""
+        self.rebuild_file = self.setting("rebuild_file")
+        ttk.Label(side, text="Saved answers").grid(row=0, column=0, sticky="w", **PAD)
+        entry = ttk.Entry(side, textvariable=self.rebuild_file)
+        entry.grid(row=0, column=1, sticky="ew", **PAD)
+        hint(entry, "The NAME.ai.json prosediff saves beside every report the AI assessed.")
+        browse(side, self.pick_saved, "Choose the AI's saved answers (.ai.json)").grid(
+            row=0, column=2, **PAD
+        )
+        ttk.Label(
+            side,
+            text="The report made again as this prosediff writes it, from the AI's answers "
+            "kept beside it: the files compared again as then, the AI not asked again.",
+            bootstyle="secondary",
+        ).grid(row=1, column=1, sticky="w", padx=6)
+
+    def pick_saved(self) -> None:
+        chosen = filedialog.askopenfilename(
+            parent=self.root,
+            title="The AI's saved answers",
+            filetypes=[("Saved answers", "*.ai.json"), ("All", "*.*")],
+        )
+        if chosen:
+            self.rebuild_file.set(chosen)
+
+    def rebuilding(self) -> bool:
+        """Whether a report is made again from saved answers (the tab
+        "rebuild"): no comparison options, no AI to ask."""
+        return self.mode.get() == "rebuild"
 
     def build_compared_card(self, card: ttk.Labelframe) -> None:
         """The options that change what the comparison finds, in two columns."""
@@ -960,7 +1014,7 @@ class App:
 
     def build_output(self, page: ttk.Frame) -> None:
         """The output: its format, where it goes, whether it opens."""
-        out = ttk.Labelframe(page, text="Output", padding=(10, 8))
+        out = self.output_card = ttk.Labelframe(page, text="Output", padding=(10, 8))
         out.pack(fill="x", pady=(10, 0))
         out.columnconfigure(1, weight=1)
         ttk.Label(out, text="Format").grid(row=0, column=0, sticky="w", **PAD)
@@ -1011,7 +1065,15 @@ class App:
         )
         # Save to, while it is the default: it follows the sides (follow_sides)
         self.auto_output = ""
-        for var in (self.mode, self.old, self.new, self.old_folder, self.new_folder, self.single):
+        for var in (
+            self.mode,
+            self.old,
+            self.new,
+            self.old_folder,
+            self.new_folder,
+            self.single,
+            self.rebuild_file,
+        ):
             var.trace_add("write", lambda *_: self.follow_sides())
         self.follow_sides()
         save = ttk.Button(
@@ -1033,7 +1095,7 @@ class App:
     def build_assessment(self, page: ttk.Frame) -> None:
         """The AI assessment: the AI, its model and effort, among those it
         reports; what it reads; the instructions of the person asking."""
-        card = ttk.Labelframe(page, text="AI assessment", padding=(10, 8))
+        card = self.ai_card = ttk.Labelframe(page, text="AI assessment", padding=(10, 8))
         card.pack(fill="x", pady=(10, 0))
         self.ai_card = card
         card.columnconfigure(1, weight=1)
@@ -1576,13 +1638,32 @@ class App:
         """Show the fields of what is compared: a repository, files or
         folders; or of the one file reviewed, the options of a comparison
         greyed out, the output an HTML report."""
+        rebuild = self.rebuilding()
         if self.mode.get() != "git":
-            self.status.set(REVIEW_READY if self.reviewing() else READY)
+            self.status.set(
+                REBUILD_READY if rebuild else REVIEW_READY if self.reviewing() else READY
+            )
+        # remaking a report needs neither the comparison's options nor an AI
+        for card, after in (
+            (self.compared_card, self.source_card),
+            (self.ai_card, self.output_card),
+        ):
+            if rebuild:
+                card.pack_forget()
+            elif not card.winfo_manager():
+                card.pack(fill="x", pady=(10, 0), after=after)
         # one file is reviewed, not compared
-        self.root.title(
-            f"prosediff: {'review one file' if self.reviewing() else 'compare two versions'}"
+        what = (
+            "rebuild a report"
+            if rebuild
+            else "review one file"
+            if self.reviewing()
+            else "compare two versions"
         )
-        self.source_card.configure(text="File" if self.reviewing() else "Versions")
+        self.root.title(f"prosediff: {what}")
+        self.source_card.configure(
+            text="Saved report" if rebuild else "File" if self.reviewing() else "Versions"
+        )
         for mode, side in self.sides.items():
             if mode == self.mode.get():
                 side.pack(fill="x")
@@ -1591,12 +1672,12 @@ class App:
         for w in self.comparing_only:
             w.state(["disabled"] if self.reviewing() else ["!disabled"])
         for w in self.review_hidden:
-            if self.reviewing():
+            if self.reviewing() or rebuild:
                 w.grid_remove()
             else:
                 w.grid()
         self.layout_switches()
-        if self.reviewing() and self.output_format.get() != "html":
+        if (self.reviewing() or rebuild) and self.output_format.get() != "html":
             self.output_format.set("html")
             self.rename_output()
         self.update_splits()
@@ -1668,6 +1749,13 @@ class App:
         folder, the file reviewed (page_of); "" comparing git versions, or sides
         not yet chosen."""
         mode = self.mode.get()
+        if mode == "rebuild":  # over the report the answers were saved beside
+            saved = self.rebuild_file.get().strip()
+            return (
+                str(Path(saved[: -len(".ai.json")] + ".html").resolve())
+                if saved.endswith(".ai.json")
+                else ""
+            )
         old, new = {
             "review": (self.single, self.single),
             "folders": (self.old_folder, self.new_folder),
@@ -2017,10 +2105,13 @@ class App:
         except ValueError as e:
             self.complain(str(e))
             return
+        if s.mode == "rebuild" and not s.rebuild_file.strip():
+            self.complain("Choose the AI's saved answers (.ai.json).")
+            return
         if s.mode == "review" and not s.assess:
             self.complain("Choose an AI, under AI assessment, to review the file.")
             return
-        if s.assess and s.output_format == "html":
+        if s.assess and s.output_format == "html" and s.mode != "rebuild":
             try:
                 parse_backend(s.assess)
             except AssessError as e:
@@ -2062,6 +2153,13 @@ class App:
                 text="Cancel", image=self.cancel_icon, command=self.cancel, bootstyle="danger"
             )
             self.button_tip.text = "Stop this comparison and the AI assessment (Esc)"
+        elif self.rebuilding():
+            self.button.configure(
+                text="Rebuild", image=self.compare_icon, command=self.run, bootstyle="primary"
+            )
+            self.button_tip.text = (
+                "Make the report again from the AI's saved answers, and open it (Ctrl+Enter)"
+            )
         elif self.reviewing():
             self.button.configure(
                 text="Review", image=self.compare_icon, command=self.run, bootstyle="primary"
@@ -2076,7 +2174,7 @@ class App:
             self.button_tip.text = "Compare, write the output and open it (Ctrl+Enter)"
 
     def set_stage(self, stage: str) -> None:
-        self.stage, self.stage_started = stage, time.monotonic()
+        self.stage, self.stage_started, self.live = stage, time.monotonic(), ""
         self.status.set(stage)
 
     def poll(self, job: multiprocessing.process.BaseProcess | None) -> None:
@@ -2106,7 +2204,9 @@ class App:
                 return
             seconds = time.monotonic() - self.stage_started
             if seconds >= 1:
-                self.status.set(f"{self.stage} {duration(seconds)}")
+                # what the model is doing, when it says
+                live = f" · {self.live}" if self.live else ""
+                self.status.set(f"{self.stage} {duration(seconds)}{live}")
             self.root.after(100, self.poll, self.job)
             return
         self.handle(kind, value)
@@ -2116,6 +2216,10 @@ class App:
         its error."""
         if kind == "stage":
             self.set_stage(value)
+            self.root.after(100, self.poll, self.job)
+            return
+        if kind == "live":
+            self.live = value
             self.root.after(100, self.poll, self.job)
             return
         if kind == "preview":

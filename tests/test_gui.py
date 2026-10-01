@@ -280,7 +280,11 @@ def test_the_ai_reads_only_an_approved_preview(tmp_path, monkeypatch):
     preview shown; the AI is asked only once it is approved."""
     old, new = two_files(tmp_path, "One.\n", "Two.\n")
     asked = []
-    monkeypatch.setattr(pipeline, "assess_comparison", lambda c, request: asked.append(request))
+    monkeypatch.setattr(
+        pipeline,
+        "assess_comparison",
+        lambda c, request, **kw: asked.append(request) or Assessment("claude"),
+    )
     s = Settings(mode="files", old=str(old), new=str(new), assess="claude", split="paragraph")
     previews = []
 
@@ -865,7 +869,7 @@ def test_documents_to_download(tmp_path, monkeypatch, root):
     switched off; the switch is greyed out while the problems are not
     marked in the text."""
     old, new = pair(tmp_path, "docx")
-    monkeypatch.setattr(pipeline, "assess_comparison", lambda c, request: assessment([FIXED]))
+    monkeypatch.setattr(pipeline, "assess_comparison", lambda c, request, **kw: assessment([FIXED]))
     s = Settings(mode="files", old=str(old), new=str(new), assess="claude", assess_preview=False)
     path = execute(run_of(s)).path
     assert path.read_text(encoding="utf-8").count('class="ai-document"') == 2
@@ -891,7 +895,7 @@ def test_one_file_reviewed(root, tmp_path, monkeypatch):
     path = word_file(tmp_path / "paper.docx", NEW)
     asked = []
 
-    def assessed(c, request):
+    def assessed(c, request, **kw):
         asked.append((c, request))
         return Assessment("claude", "## Verdict\n**Good**.", annotations=[FIXED], kind="review")
 
@@ -974,7 +978,7 @@ def test_a_failed_ai_writing_assessment_is_shown(root, tmp_path, monkeypatch):
     it: its error goes back with the result, and the window shows it."""
     from prosediff.gui import run_job
 
-    def assessed(c, request, kind="value"):
+    def assessed(c, request, kind="value", **kw):
         if kind == "writing":
             return Assessment("claude", error="no login")
         return Assessment("claude", "## Verdict\n**Mixed**: fine.")
@@ -1040,7 +1044,9 @@ def test_a_review_has_no_preview(tmp_path, monkeypatch):
     old, _ = two_files(tmp_path, "One.\n", "Two.\n")
     asked = []
     monkeypatch.setattr(
-        pipeline, "assess_comparison", lambda c, request, **kw: asked.append(request)
+        pipeline,
+        "assess_comparison",
+        lambda c, request, **kw: asked.append(request) or Assessment("claude"),
     )
     s = Settings(mode="review", single=str(old), assess="claude", open_page=False)
     execute(run_of(s), approve=lambda path: pytest.fail("a preview was asked"))
@@ -1163,3 +1169,43 @@ def test_the_one_file_tab(root):
     assert app.preview_switch.grid_info()["column"] == 0
     assert app.comments.get() == "text"
     assert all(t.text == gui.COMMENTS_TIP for t in app.comments_tips)
+
+
+def test_the_window_greys_out_the_files_while_not_sending_them(root):
+    app = App(root, Settings(mode="files", assess="claude"))
+    app.update_ai_switches()
+    assert app.files_entry.instate(["disabled"]) and app.files_pick.instate(["disabled"])
+    app.assess_send_files.set(True)
+    assert not app.files_entry.instate(["disabled"])
+
+
+def test_the_window_never_shrinks_when_the_status_gets_shorter(root):
+    """A longer status widens the window; a shorter one leaves it as wide."""
+    app = App(root, Settings(mode="files"))
+    root.update()
+    app.status.set("Asking claude to assess the changes… " + "x" * 200)
+    root.update()
+    wide = root.winfo_width()
+    app.status.set("Ready.")
+    root.update()
+    assert root.winfo_width() >= wide and root.minsize()[0] >= wide
+
+
+def test_the_rebuild_tab(root, tmp_path):
+    """Rebuilding a report from saved answers: no comparison options, no AI
+    card, its button Rebuild, the report by default over the one the
+    answers were saved beside; all back on another tab."""
+    saved = tmp_path / "paper_review.ai.json"
+    app = App(root, Settings(mode="files"))
+    root.update_idletasks()
+    app.mode.set("rebuild")
+    app.show_mode()
+    assert app.compared_card.winfo_manager() == "" and app.ai_card.winfo_manager() == ""
+    assert app.button.cget("text") == "Rebuild"
+    assert root.title() == "prosediff: rebuild a report"
+    app.rebuild_file.set(str(saved))
+    assert app.output.get() == str((tmp_path / "paper_review.html").resolve())
+    app.mode.set("files")
+    app.show_mode()
+    assert app.compared_card.winfo_manager() == "pack" and app.ai_card.winfo_manager() == "pack"
+    assert app.button.cget("text") == "Compare"

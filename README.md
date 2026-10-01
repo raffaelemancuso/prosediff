@@ -52,7 +52,9 @@ the final text, not who changed what: `--docx-changes reject-all` reads the
 text before them, and `--docx-changes show` keeps them in the text as
 marked insertions and deletions, with author and date, for the AI to see
 (in the window, **Tracked changes**). Comments marked resolved are never
-sent unless `--no-skip-resolved`.
+sent unless `--no-skip-resolved`. The AI's answers are saved beside the
+report (`NAME.ai.json`), and `--rebuild` (the window's **Rebuild** tab)
+remakes the report from them without asking the AI again.
 
 Underneath is a diff made for prose, not code: a self-contained HTML report
 of two versions side by side, each paragraph facing the one it came from,

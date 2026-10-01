@@ -40,7 +40,11 @@ The segmented button at the top chooses what is compared:
 - **One file**: a file reviewed whole by the AI (see
   [Reviewing one file](ai_assessment.md#reviewing-one-file)). Compare
   becomes **Review**, the output is `NAME_review.html` next to the file,
-  and the options only a comparison has are greyed out.
+  and the options only a comparison has are left out.
+- **Rebuild**: a report made again from the AI's answers saved beside it
+  (`NAME.ai.json`), without asking the AI (`--rebuild`): the Comparison
+  and AI cards are left out, the run's own settings used; the report is
+  written over the old one unless **Save to** says otherwise.
 
 The Files and Folders views have a button to swap the two.
 

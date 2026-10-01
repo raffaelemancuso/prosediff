@@ -84,10 +84,37 @@ effort starred, as the window does. Three more settings:
   **Author**): the name on the AI's comments and tracked-change fixes in the Word
   and OpenDocument documents; by default the AI and its model.
 
+- **Other files** (`--assess-file FILE`, repeatable; in the window, the
+  **Other files** switch and its list): sent as context, to draw on, not
+  to assess: a journal's guidelines, a reviewer's report, a cited paper.
+  A PDF is read through its text layer (pypdfium2; a scanned PDF without
+  one is refused, with a message), a Word or OpenDocument file as
+  Markdown with its tracked changes accepted, anything else as text; in
+  all, up to 200,000 characters, the rest cut.
+
+**While it works**, the window's status line (and, in a terminal, the
+command line) says what the model is doing: thinking, writing the answer,
+about how many tokens written, how many problems marked so far, with the
+time taken. Once the same AI, effort and kind of assessment have run a few
+times, asking it says how long it usually takes ("usually 2–4 minutes"),
+from the last runs, noted in `assess_history.jsonl` in prosediff's
+settings folder. The report then gives the tokens read and written and,
+for Claude Code, the cost at API prices. Codex says only that it is
+working, and its tokens at the end.
+
+**The answers are kept.** Beside every HTML report the AI assessed,
+prosediff writes `NAME.ai.json`: how the files were compared and
+everything the AI answered (and, for the record, the text it was sent).
+`prosediff --rebuild NAME.ai.json` (in the window, the **Rebuild** tab)
+makes the report again from it, as the prosediff installed then writes
+reports, without asking the AI a second time: the files are compared
+again, so they must still be where they were; one that changed since is
+warned of, since the AI's marks may no longer fit it.
+
 **Privacy.** The AI is sent the word diff of the changed paragraphs
 (comments included, except those marked resolved, unless
 `--no-skip-resolved`), the whole new version (unless `--assess-context
-changes`) and your instructions; no files, and no tools to run. With
+changes`), the other files you add and your instructions; no files, and no tools to run. With
 `claude`, `codex` or an API, this text goes to Anthropic's, OpenAI's
 or the API's servers under your account; with Ollama it stays on the
 computer. The HTML report needs no network to read. `--assess-save-prompt`

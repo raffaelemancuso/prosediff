@@ -261,7 +261,7 @@ def open_output(path: Path) -> None:
 
 
 def assess_comparison(
-    comparison: Comparison, request: AssessRequest, kind: str = "value"
+    comparison: Comparison, request: AssessRequest, kind: str = "value", report=None
 ) -> Assessment:
     """The assessment of a comparison's changes by the AI request names
     (prosediff.assess): its word diff, the changed lines alone, comments
@@ -280,6 +280,7 @@ def assess_comparison(
             documents=documents,
             kind="writing" if kind == "writing" else "review",
             single=True,
+            report=report,
         )
     return assess(
         unified(comparison, 0, "wdiff"),
@@ -288,6 +289,7 @@ def assess_comparison(
         document=new_version(comparison) if request.context == "document" else "",
         documents=documents,
         kind=kind,
+        report=report,
     )
 
 

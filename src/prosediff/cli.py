@@ -5,7 +5,8 @@ commands."""
 
 import argparse
 import sys
-from dataclasses import fields
+import time
+from dataclasses import fields, replace
 from pathlib import Path
 
 import git
@@ -15,6 +16,7 @@ from prosediff.assess import (
     CONTEXTS,
     AssessError,
     Assessment,
+    duration,
     login_codex,
     models_of,
     parse_backend,
@@ -122,6 +124,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--folders",
         action="store_true",
         help="two folders, OLD and NEW, file by file, outside git",
+    )
+    modes.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="no AI asked: the HTML report made again from the AI's answers kept beside an "
+        "earlier one (FILE, its NAME.ai.json, written with every report the AI assessed), "
+        "the files compared again as then; -o to write it elsewhere than over that report",
     )
     modes.add_argument(
         "--review",
@@ -492,7 +501,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     args = ap.parse_intermixed_args(argv)
 
-    mode = next((m for m in ("git", "files", "folders", "review") if getattr(args, m)), None)
+    mode = next(
+        (m for m in ("git", "files", "folders", "review", "rebuild") if getattr(args, m)), None
+    )
     for name, act in (
         ("list_models", lambda: _list_models(args.list_models)),
         ("login_codex", _login_codex),
@@ -520,6 +531,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     if mode == "review":
         return _review(ap, args)
+    if mode == "rebuild":
+        if not args.repo or args.base or args.target:
+            ap.error("--rebuild takes one FILE, the NAME.ai.json saved beside a report")
+        return _from_saved(args)
     if not args.base:
         ap.error("--git takes REPO and BASE" if args.git else f"--{mode} takes OLD and NEW")
 
@@ -592,7 +607,7 @@ def main(argv: list[str] | None = None) -> int:
         documents=args.assess_documents,
     )
     try:
-        done = execute(run, _say)
+        done = execute(run, _say, live=_said_live)
     # OutputError: a .docx or .odt of anything but two such documents
     except (OutputError, FilterError, SourceError) as e:
         return _fail(str(e))
@@ -624,6 +639,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _fail(message: str) -> int:
     """An error on stderr; the exit status of a run that failed."""
+    _said_live.end()
     print(f"{PROG}: {message}", file=sys.stderr)
     return 1
 
@@ -635,9 +651,61 @@ def _verdict(a: Assessment) -> str:
 
 def _say(stage: str) -> None:
     """A stage of the run, on stderr: only asking the AI, which takes long."""
+    _said_live.end()
     if stage.startswith("Asking"):
         stage = stage.replace("…", "...")
         print(f"{PROG}: {stage[0].lower()}{stage[1:]}", file=sys.stderr)
+
+
+class _LiveLine:
+    """What the model is doing, on one line of a terminal's stderr, written
+    over as it changes, with the time so far; nothing when stderr is not a
+    terminal (a log, a pipe)."""
+
+    def __init__(self) -> None:
+        self.started, self.width = 0.0, 0
+
+    def __call__(self, detail: str) -> None:
+        if not sys.stderr.isatty():
+            return
+        if not self.width:
+            self.started = time.monotonic()
+        line = f"{PROG}: {duration(time.monotonic() - self.started)}, {detail}"
+        sys.stderr.write("\r" + line.ljust(self.width))
+        sys.stderr.flush()
+        self.width = max(self.width, len(line))
+
+    def end(self) -> None:
+        """The line left as it is, the next written below it."""
+        if self.width:
+            sys.stderr.write("\n")
+            self.width = 0
+
+
+_said_live = _LiveLine()
+
+
+def _from_saved(args: argparse.Namespace) -> int:
+    """--rebuild FILE: the HTML report made again from the AI's answers
+    kept in FILE, the AI not asked again."""
+    from prosediff.saved import SavedError, load
+
+    try:
+        run, assessment, writing, warnings = load(args.repo)
+    except SavedError as e:
+        return _fail(str(e))
+    if args.output:
+        run = replace(run, output=Path(args.output))
+    for warning in warnings:
+        print(f"{PROG}: warning: {warning}", file=sys.stderr)
+    try:
+        done = execute(run, _say, saved=(assessment, writing))
+    except (OutputError, FilterError, SourceError) as e:
+        return _fail(str(e))
+    print(f"{PROG}: report made again from {Path(args.repo).name} -> {done.path}")
+    if args.open:
+        open_output(done.path)
+    return 0
 
 
 def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
@@ -677,7 +745,7 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         ai_writing=args.assess_ai_writing,
     )
     try:
-        done = execute(run, _say)
+        done = execute(run, _say, live=_said_live)
     except (FilterError, SourceError) as e:
         return _fail(str(e))
     assessment = done.assessment
