@@ -305,7 +305,12 @@ def test_cli_assess_writes_the_report(tmp_path, monkeypatch, capsys):
     assert "verdict-improves" in html
     assert "by Claude Code (claude-opus-5-5), effort max, from the changes and the new" in html
     assert "The text prosediff sent to the model (claude, effort max, from the" in html
-    assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == ["a.md", "b.md", "r.ai.json", "r.html"]
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == [
+        "a.md",
+        "b.md",
+        "r.ai.json",
+        "r.html",
+    ]
     assert "assessment (improves), at the top of the HTML report" in capsys.readouterr().out
     assert main([*args, "--assess-context", "changes"]) == 0
     assert "<document>" not in runner.asked[1][2]

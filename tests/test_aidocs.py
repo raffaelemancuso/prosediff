@@ -25,10 +25,11 @@ from helpers import (
     revisions,
 )
 
-from prosediff.aidocs import Place, downloads, fix_of, haystack, locate
+from prosediff.aidocs import FIX_APPLIED, Place, downloads, fix_of, haystack, locate
 from prosediff.assess import Annotation, Assessment
 from prosediff.diff import Options, compare_paths
 from prosediff.render import render
+from prosediff.word import read_docx
 
 MISSING = Annotation("new", "words nowhere in it", "", "Not there.", "", "none")
 OLD_SIDE = Annotation("old", "Limitations are discussed", "", "Removed.", "Keep it.")
@@ -105,7 +106,9 @@ def test_the_two_documents_with_the_ais_comments_and_fixes(tmp_path, fmt):
     assert got[1].notes[0]["changes"] and not got[1].notes[1]["changes"]
     texts = comments_of(out, fmt)
     assert "fixes it wrote out are tracked changes" in texts[0]
-    assert "Nothing supports a large effect." in texts
+    assert (
+        f"Nothing supports a large effect.\nProposed: Say a small effect.\n{FIX_APPLIED}" in texts
+    )
     assert "Which checks?\nProposed: Name them." in texts
     if fmt == "docx":
         authors = {r.get(W + "author") for r in revisions(out)}
@@ -290,13 +293,15 @@ def test_fixes_in_a_rich_document(tmp_path, fmt):
         assert put["a small part"].find(f".//{W}b") is not None
         assert put["more"].find(f".//{W}i") is not None
         # Word takes no comment in a footnote: the footnote's is on its number
-        assert "In the footnote: Wrong." in texts
+        firsts = [t.split("\n")[0] for t in texts]
+        assert "In the footnote: Wrong." in firsts
         notes_xml = zipfile.ZipFile(out).read("word/footnotes.xml").decode()
         assert "commentRangeStart" not in notes_xml
-        assert texts.count("Wrong.") == 8
+        # every fix applied, the footnote's (on its number) too
+        assert sum(t.endswith(FIX_APPLIED) for t in texts) == 9
     else:
         assert 0 not in notes and 10 not in notes
-        assert texts.count("Wrong.") == 9
+        assert sum(t.endswith(FIX_APPLIED) for t in texts) == 9
 
 
 @pytest.mark.parametrize(
@@ -396,3 +401,23 @@ def test_the_ais_changes_and_comments_dated_alike_in_local_time(tmp_path, fmt):
     (date,) = dates
     when = dt.datetime.fromisoformat(date.removesuffix("Z"))
     assert abs(dt.datetime.now() - when) < dt.timedelta(minutes=5)
+
+
+def test_the_ais_comments_can_be_marked_resolved_in_word(tmp_path):
+    """Each of the AI's comments in a Word document has its entry in
+    commentsExtended, not done (for the report to mark it resolved): the
+    part made, related to the document, its content type declared; prosediff
+    reads none of them as resolved."""
+    _, _, got = made(tmp_path, "docx")
+    for d in got:
+        z = zipfile.ZipFile(BytesIO(d.data))
+        extended = z.read("word/commentsExtended.xml").decode()
+        assert "commentsExtended+xml" in z.read("[Content_Types].xml").decode()
+        assert "commentsExtended" in z.read("word/_rels/document.xml.rels").decode()
+        entries = re.findall(r'w15:paraId="([0-9A-F]{8})" w15:done="0"', extended)
+        ai = sum(len(v["comments"]) for v in d.notes.values())
+        assert len(entries) == ai and len(set(entries)) == ai
+        assert all(int(e, 16) < 0x80000000 for e in entries)
+        doc = read_docx(d.data)
+        marks = [m for b in doc.blocks for m in getattr(b, "inlines", []) if hasattr(m, "resolved")]
+        assert not any(m.resolved for m in marks)

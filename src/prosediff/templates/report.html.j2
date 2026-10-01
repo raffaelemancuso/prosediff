@@ -90,6 +90,11 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
   border-radius: 8px; background: var(--bg); color: var(--fg); cursor: pointer; }
 .card:last-child { margin-bottom: 0; }
 .card.problem { border-color: color-mix(in srgb, var(--current) 45%, var(--border)); }
+/* a problem whose fix is applied (the version with the AI's fixes holds it) */
+.card.problem.applied { border-color: color-mix(in srgb, var(--add) 55%, var(--border));
+  background: color-mix(in srgb, var(--ins-line) 45%, var(--bg)); }
+.card .applied-note { color: var(--add); font-weight: 600; }
+.card .keep input:disabled + span, .card .keep:has(input:disabled) { opacity: .5; cursor: default; }
 .card.active { border-color: var(--current); box-shadow: 0 0 0 2px var(--current); }
 .card .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
 .card .go { font: inherit; color: inherit; background: none; border: 0; padding: 0;
@@ -1336,6 +1341,9 @@ thead.print, .print-note { display: none; }
   // and the comment markers among them. aiOrder: the notes' indices in
   // reading order; each note's num, its number in that order.
   var aiNotes = [], aiOrder = [], findAgain = function () {};
+  // a review shown as the file beside the file with the AI's fixes: a
+  // problem marked on the original's side has its fix applied
+  var FIXES_SHOWN = {{ c.reviewed | tojson }};
   (function () {
     var data = document.getElementById("ai-notes-data");
     if (!data) return;
@@ -1534,6 +1542,23 @@ thead.print, .print-note { display: none; }
     label.appendChild(document.createTextNode("In the download"));
     return label;
   }
+  // A problem's box: whether its comment is marked resolved in the documents
+  // to download (Word's Resolve, LibreOffice's Resolved); greyed out while the
+  // problem is left out of them.
+  function resolveBox(k, note) {
+    var label = el("label", "keep"), box = el("input");
+    box.type = "checkbox";
+    box.className = "resolve-box";
+    box.dataset.note = k;
+    var out = typeof leftOut === "object" && leftOut && leftOut[k];
+    box.checked = !!(typeof resolvedNotes === "object" && resolvedNotes && resolvedNotes[k]);
+    box.disabled = !!out;
+    box.title = "Its comment marked resolved in the documents to download";
+    box.setAttribute("aria-label", "Problem " + note.num + " resolved in the downloaded documents");
+    label.appendChild(box);
+    label.appendChild(document.createTextNode("Resolved"));
+    return label;
+  }
   function card(m) {
     var c = el("article", "card"), head = el("div", "head"), button = el("button", "go");
     var body = el("div", "body");
@@ -1544,13 +1569,22 @@ thead.print, .print-note { display: none; }
       c.dataset.note = m.dataset.note;
       button.appendChild(el("span", "chip", "⚠ Problem " + note.num));
       button.appendChild(el("span", "when", note.side === "old" ? {{ ('"AI, original"' if c.reviewed else '"AI, old version"') | safe }} : "AI"));
-      if (document.querySelector("script.ai-document")) head.appendChild(keepBox(m.dataset.note, note));
+      if (document.querySelector("script.ai-document")) {
+        head.appendChild(keepBox(m.dataset.note, note));
+        head.appendChild(resolveBox(m.dataset.note, note));
+      }
+      var applied = FIXES_SHOWN && note.side === "old" && note.replacement;
+      if (applied) c.classList.add("applied");
       body.appendChild(el("span", "line", note.problem));
       if (note.solution) {
         var s = el("span", "line solution");
         s.appendChild(el("b", null, "Proposed: "));
         s.appendChild(document.createTextNode(note.solution));
         body.appendChild(s);
+      }
+      if (applied) {
+        body.appendChild(el("span", "line applied-note",
+          "✓ Fix already applied: the version with AI fixes has it."));
       }
     } else {
       var status = m.classList.contains("new") ? "new" : m.classList.contains("removed") ? "removed" : "";
@@ -1804,13 +1838,57 @@ thead.print, .print-note { display: none; }
     document.querySelectorAll('.keep-box[data-note="' + k + '"]').forEach(function (b) {
       b.checked = on;
     });
+    // resolved or not, only while it is in the documents
+    document.querySelectorAll('.resolve-box[data-note="' + k + '"]').forEach(function (b) {
+      b.disabled = !on;
+    });
     countIncluded();
   }
+  // The problems whose comments are marked resolved in the documents.
+  var resolvedNotes = {};
   document.addEventListener("change", function (e) {
-    if (e.target.classList && e.target.classList.contains("keep-box")) {
-      keep(e.target.dataset.note, e.target.checked);
+    var t = e.target;
+    if (!t.classList) return;
+    if (t.classList.contains("keep-box")) keep(t.dataset.note, t.checked);
+    if (t.classList.contains("resolve-box")) {
+      if (t.checked) resolvedNotes[t.dataset.note] = true;
+      else delete resolvedNotes[t.dataset.note];
+      document.querySelectorAll('.resolve-box[data-note="' + t.dataset.note + '"]').forEach(function (b) {
+        b.checked = t.checked;
+      });
     }
   });
+  var W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml";
+  var W15_NS = "http://schemas.microsoft.com/office/word/2012/wordml";
+  var LOEXT_NS = "urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0";
+  // The comments ids marked resolved: in Word, w15:done on the entry of each
+  // one's last paragraph in commentsExtended ([MS-DOCX] CT_CommentEx, each
+  // given its entry by prosediff); in LibreOffice, loext:resolved on the
+  // annotation (its OpenDocument extension).
+  function resolveWord(files, ids) {
+    var comments = xmlOf(files["word/comments.xml"]), extended = files["word/commentsExtended.xml"];
+    if (!extended) return;
+    var paraIds = {};
+    Array.prototype.forEach.call(comments.getElementsByTagNameNS(W_NS, "comment"), function (c) {
+      if (ids.indexOf(Number(c.getAttributeNS(W_NS, "id"))) < 0) return;
+      var ps = c.getElementsByTagNameNS(W_NS, "p");
+      if (ps.length) paraIds[ps[ps.length - 1].getAttributeNS(W14_NS, "paraId")] = true;
+    });
+    var doc = xmlOf(extended);
+    Array.prototype.forEach.call(doc.getElementsByTagNameNS(W15_NS, "commentEx"), function (e) {
+      if (paraIds[e.getAttributeNS(W15_NS, "paraId")]) e.setAttributeNS(W15_NS, "w15:done", "1");
+    });
+    files["word/commentsExtended.xml"] = bytesOfXml(doc);
+  }
+  function resolveOdt(files, ids) {
+    var doc = xmlOf(files["content.xml"]);
+    Array.prototype.forEach.call(doc.getElementsByTagNameNS(OFFICE_NS, "annotation"), function (a) {
+      if (ids.indexOf(a.getAttributeNS(OFFICE_NS, "name")) >= 0) {
+        a.setAttributeNS(LOEXT_NS, "loext:resolved", "true");
+      }
+    });
+    files["content.xml"] = bytesOfXml(doc);
+  }
   function countIncluded() {
     var out = document.querySelector(".ai-documents .ai-included");
     if (!out) return;
@@ -1925,16 +2003,24 @@ thead.print, .print-note { display: none; }
     var holder = aiDocuments[k], spec = JSON.parse(holder.dataset.spec);
     var raw = atob(holder.textContent.trim()), bytes = new Uint8Array(raw.length);
     for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-    var comments = [], changes = [];
+    var comments = [], changes = [], resolved = [];
     Object.keys(spec.notes).forEach(function (note) {
-      if (!leftOut[note]) return;
+      if (!leftOut[note]) {
+        if (resolvedNotes[note]) resolved = resolved.concat(spec.notes[note].comments);
+        return;
+      }
       comments = comments.concat(spec.notes[note].comments);
       changes = changes.concat(spec.notes[note].changes);
     });
-    if (comments.length || changes.length) {
+    if (comments.length || changes.length || resolved.length) {
       var files = fflate.unzipSync(bytes);
-      if (spec.fmt === "docx") leaveOutWord(files, comments, changes);
-      else leaveOutOdt(files, comments, changes);
+      if (spec.fmt === "docx") {
+        leaveOutWord(files, comments, changes);
+        if (resolved.length) resolveWord(files, resolved);
+      } else {
+        leaveOutOdt(files, comments, changes);
+        if (resolved.length) resolveOdt(files, resolved);
+      }
       bytes = zipOf(files, spec.fmt === "odt");
     }
     var type = spec.fmt === "docx"

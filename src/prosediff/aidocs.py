@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import PurePosixPath
 
+from docx.opc.packuri import PackURI
+from docx.opc.part import Part
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.text.run import Run
@@ -63,6 +65,7 @@ from prosediff.redline import (
 )
 from prosediff.sources import suffix_of
 from prosediff.tracked import TRACKED_FORMATS, author_of, check_tracked, settled
+from prosediff.word import COMMENTS_EXTENDED, W14, W15
 
 # A passage is found whatever typographic variants (TYPOGRAPHIC) it quotes,
 # and a fix never changes one into the other.
@@ -692,12 +695,15 @@ def document_file(comparison: Comparison) -> tuple[FileDiff, str] | None:
     return None
 
 
+# The end of the comment of a problem whose fix is in the file.
+FIX_APPLIED = "Fix already applied: it is the tracked change on this passage."
+
+
 def comment_text(note: Annotation, fixed: bool) -> list[str]:
-    """A problem's comment: what is wrong, and the change proposed unless
-    the fix is in the text as a tracked change."""
-    if fixed or not note.solution:
-        return [note.problem]
-    return [note.problem, f"Proposed: {note.solution}"]
+    """A problem's comment: what is wrong, the change proposed, and, when
+    the fix is in the text as a tracked change, that it is applied."""
+    proposed = [f"Proposed: {note.solution}"] if note.solution else []
+    return [note.problem, *proposed, *([FIX_APPLIED] if fixed else [])]
 
 
 def summary(assessment: Assessment, fixes: bool) -> list[str]:
@@ -712,6 +718,52 @@ def summary(assessment: Assessment, fixes: bool) -> list[str]:
         *([verdict] if verdict else []),
         f"{where}. Written by an AI: check it against the text.",
     ]
+
+
+COMMENTS_EXTENDED_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"
+)
+
+
+def resolvable(doc, ids: list) -> None:
+    """Each of the comments ids of a Word document given its entry in the
+    commentsExtended part ([MS-DOCX] CT_CommentEx), not done: the w14:paraId
+    of its last paragraph, for the report to mark it resolved (w15:done) when
+    asked. The part is made when the document has none, added to when it
+    has one (its co-authors' comments keep theirs)."""
+    wanted = {str(i) for i in ids}
+    rel = next((r for r in doc.part.rels.values() if r.reltype == COMMENTS_EXTENDED), None)
+    if rel is not None:
+        part = rel.target_part
+        root = part._element if hasattr(part, "_element") else etree.fromstring(part.blob)
+    else:
+        part = None
+        root = etree.Element(f"{W15}commentsEx", nsmap={"w15": W15[1:-1], "w14": W14[1:-1]})
+    taken = {e.get(f"{W15}paraId") for e in root.iter(f"{W15}commentEx")}
+    serial = 0x1A000000
+    for c in doc.comments:
+        if str(c.comment_id) not in wanted:
+            continue
+        paragraphs = c._comment_elm.findall(qn("w:p"))
+        if not paragraphs:
+            continue
+        pid = paragraphs[-1].get(f"{W14}paraId")
+        if pid is None:
+            while f"{serial:08X}" in taken:
+                serial += 1
+            pid = f"{serial:08X}"  # below 0x80000000, as MS-DOCX asks
+            paragraphs[-1].set(f"{W14}paraId", pid)
+        if pid not in taken:
+            etree.SubElement(root, f"{W15}commentEx", {f"{W15}paraId": pid, f"{W15}done": "0"})
+            taken.add(pid)
+    if part is None:
+        blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+        part = Part(
+            PackURI("/word/commentsExtended.xml"), COMMENTS_EXTENDED_TYPE, blob, doc.part.package
+        )
+        doc.part.relate_to(part, COMMENTS_EXTENDED)
+    elif not hasattr(part, "_element"):
+        part._blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
 def notes_in(red, notes, author: str, assessment: Assessment, fixes: bool) -> dict:
@@ -785,6 +837,8 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
             if red is None:
                 return
             ids = notes_in(red, notes, author, assessment, fixes)
+            if isinstance(red, WordRedline):
+                resolvable(red.new.doc, [c for v in ids.values() for c in v["comments"]])
             data = BytesIO()
             red.save(data)
             out.append(Download(name, label, data.getvalue(), fmt, ids, short))

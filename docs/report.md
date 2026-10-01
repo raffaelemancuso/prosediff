@@ -84,7 +84,13 @@ remembers the views, the spacing and the column widths.
   card, and its line in Review mode's list, has a box, **In the
   download**; unticked, the problem's comment is left out of the Word or
   OpenDocument file and its fix rejected. The download buttons' tooltip
-  says how many of the problems the files hold.
+  says how many of the problems the files hold. Beside it, **Resolved**
+  marks the problem's comment resolved in the file (Word's Resolve,
+  LibreOffice's Resolved); it is greyed out while the problem is left out.
+- **A fix already applied:** in the report of one file's fixes, a
+  problem whose fix the version on the right holds has a green card that
+  says so; in the documents, its comment ends "Fix already applied: it is
+  the tracked change on this passage."
 - **Highlights off** removes the colour of changed words and lines; the
   gutters stay tinted and signed.
 - **Formatted** hides Markdown syntax and shows emphasis, headings, links

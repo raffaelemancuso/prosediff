@@ -19,6 +19,9 @@ from helpers import (
 )
 
 from prosediff import Options, compare, compare_paths, render
+from prosediff.aidocs import FIX_APPLIED
+from prosediff.odt import read_odt
+from prosediff.word import read_docx
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
@@ -967,7 +970,8 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     assert "2 of the 2 problems" in included.inner_text()
     fixed = save("fixes", f"all.{fmt}")
     assert "We find a small and significant effect." in lines(fixed, "accept-all")
-    assert "Nothing supports a large effect." in comments_of(fixed, fmt)
+    fixed_note = f"Nothing supports a large effect.\nProposed: Say a small effect.\n{FIX_APPLIED}"
+    assert fixed_note in comments_of(fixed, fmt)
     # the fixed problem left out in review mode
     page.keyboard.press("r")
     page.locator("#review-list .with-check", has_text="Nothing supports").locator("input").uncheck()
@@ -976,7 +980,7 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     fewer = save("fixes", f"fewer.{fmt}")
     assert lines(fewer, "accept-all") == lines(new, "accept-all")
     texts = comments_of(fewer, fmt)
-    assert "Nothing supports a large effect." not in texts
+    assert not any(t.startswith("Nothing supports") for t in texts)
     assert "Which checks?\nProposed: Name them." in texts
     tracked = save("comments", f"tracked.{fmt}")
     # the same from the top bar, the drawer closed
@@ -1046,4 +1050,64 @@ def test_a_problem_left_out_from_its_card_and_the_review_list_resized(browser, t
     assert page.evaluate("localStorage.getItem('prosediff-review-width')") is not None
     handle.dblclick()
     assert page.evaluate("localStorage.getItem('prosediff-review-width')") is None
+    page.context.close()
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+def test_a_problems_comment_marked_resolved_in_the_download(browser, tmp_path, fmt):
+    """Its card's Resolved box marks the problem's comment resolved in the
+    downloaded document (Word's w15:done, LibreOffice's loext:resolved), the
+    others not; the box is greyed out while the problem is left out."""
+    old, new = pair(tmp_path, fmt)
+    c = compare_paths(str(old), str(new), Options())
+    page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
+    card = page.locator(".card.problem", has_text="Which checks?")
+    card.locator(".resolve-box").check()
+    card.locator(".keep-box").uncheck()
+    assert card.locator(".resolve-box").is_disabled()
+    card.locator(".keep-box").check()
+    assert card.locator(".resolve-box").is_enabled() and card.locator(".resolve-box").is_checked()
+    with page.expect_download() as d:
+        page.click(f".toolbar .ai-download:has-text('With AI fixes .{fmt}')")
+    out = tmp_path / f"resolved.{fmt}"
+    d.value.save_as(out)
+    page.context.close()
+    reader = read_docx if fmt == "docx" else read_odt
+    found = {}
+
+    def walk(o):
+        if hasattr(o, "resolved") and hasattr(o, "text"):
+            found[o.text] = o.resolved
+        elif isinstance(o, (list, tuple)):
+            for x in o:
+                walk(x)
+        elif hasattr(o, "__dict__"):
+            for x in vars(o).values():
+                walk(x)
+
+    walk(reader(out.read_bytes()))
+    assert found["Which checks? Proposed: Name them."] is True
+    assert not any(v for k, v in found.items() if not k.startswith("Which checks?"))
+
+
+def test_a_fix_applied_shown_on_its_card(browser, tmp_path):
+    """In the report of one file's fixes, a problem whose fix the version on
+    the right holds says so, its card set apart; one without a fix does not."""
+    from prosediff.pipeline import Run, fixes_shown, review_diff  # noqa: F401
+
+    path = tmp_path / "paper.md"
+    path.write_text(
+        "We find a large and significant effect.\n\nRobustness checks confirm every result.\n",
+        encoding="utf-8",
+    )
+    a = assessment([FIXED, ADVICE])
+    run = Run("review", str(path), tmp_path / "out.html")
+    comparison, shown = fixes_shown(run, a)
+    page = open_report(browser, tmp_path, comparison, assessment=shown)
+    applied = page.locator(".card.problem.applied")
+    assert applied.count() == 1
+    assert "Fix already applied" in applied.inner_text()
+    assert "Nothing supports" in applied.inner_text()
+    other = page.locator(".card.problem", has_text="Which checks?")
+    assert "applied" not in other.get_attribute("class")
     page.context.close()
