@@ -559,6 +559,11 @@ class App:
         self.stage, self.stage_started = "", 0.0
         root.title("prosediff: compare two versions")
         root.minsize(780, 0)
+        # The window takes the size its content asks for, but never shrinks
+        # back: a status line that gets shorter (6 minutes 59 seconds, then 7
+        # minutes) must not make it jump. Each size it grows to becomes its
+        # minimum.
+        root.bind("<Configure>", self.keep_largest_size, add="+")
         page = ttk.Frame(root, padding=(14, 12, 14, 12))
         page.pack(fill="both", expand=True)
 
@@ -1886,6 +1891,19 @@ class App:
         top.protocol("WM_DELETE_WINDOW", lambda: done(False))
         top.bind("<Escape>", lambda e: done(False))
         dark_title_bar(top)
+
+    def keep_largest_size(self, event: tk.Event) -> None:
+        """The window's minimum raised to the largest size its content has
+        asked for (not to a size dragged by hand, which may shrink again)."""
+        if event.widget is not self.root:
+            return
+        width, height = self.root.minsize()
+        wanted = (
+            max(width, self.root.winfo_reqwidth()),
+            max(height, self.root.winfo_reqheight()),
+        )
+        if wanted != (width, height):
+            self.root.minsize(*wanted)
 
     def toggle_advanced(self) -> None:
         """Open the advanced settings' window, or close it."""
