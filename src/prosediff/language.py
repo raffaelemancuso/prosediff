@@ -15,6 +15,7 @@ document that marks none, are guessed.
 import re
 import zipfile
 from collections import Counter
+from collections.abc import Callable
 from functools import cache
 from io import BytesIO
 
@@ -180,16 +181,32 @@ def most_letters(counts: Counter[str]) -> str | None:
     return counts.most_common(1)[0][0] if counts else None
 
 
-def languages_of(letters, paragraphs) -> tuple[str | None, Counter[str]]:
-    """The language most letters of the paragraphs are in, and the letters
-    in each language (letters: those of one paragraph, by language)."""
-    counts: Counter[str] = Counter()
-    for p in paragraphs:
-        counts += letters(p)
-    return most_letters(counts), counts
+class _Languages:
+    """What the Word and OpenDocument languages share: the marks of each
+    style (styles: key -> (parent's name, own marks)), followed through its
+    parents once; the language of paragraphs from their letters."""
+
+    styles: dict
+    _style_marks: dict
+
+    def _inherited(self, key, parent: Callable) -> Marks:
+        if key not in self._style_marks:
+            self._style_marks[key] = _inherited(self.styles, key, parent)
+        return self._style_marks[key]
+
+    def letters(self, p) -> Counter[str]:
+        raise NotImplementedError
+
+    def of(self, paragraphs) -> tuple[str | None, Counter[str]]:
+        """The language most letters of the paragraphs are in, and the
+        letters in each language."""
+        counts: Counter[str] = Counter()
+        for p in paragraphs:
+            counts += self.letters(p)
+        return most_letters(counts), counts
 
 
-class WordLanguages:
+class WordLanguages(_Languages):
     """The languages the runs of a Word document's paragraphs are marked with.
 
     A run's language is its own (w:lang), else its character style's, else
@@ -229,9 +246,7 @@ class WordLanguages:
         )
 
     def style_marks(self, sid: str | None) -> Marks:
-        if sid not in self._style_marks:
-            self._style_marks[sid] = _inherited(self.styles, sid, lambda name: name)
-        return self._style_marks[sid]
+        return self._inherited(sid, lambda name: name)
 
     @staticmethod
     def _ref(el, path: str) -> str | None:
@@ -257,11 +272,8 @@ class WordLanguages:
                 counts[tag] += letters
         return counts
 
-    def of(self, paragraphs) -> tuple[str | None, Counter[str]]:
-        return languages_of(self.letters, paragraphs)
 
-
-class OdtLanguages:
+class OdtLanguages(_Languages):
     """The languages the text of an OpenDocument's paragraphs is marked with.
 
     Text is in the language of the innermost span or paragraph whose style
@@ -299,10 +311,7 @@ class OdtLanguages:
         )
 
     def style_marks(self, family: str, name: str | None) -> Marks:
-        key = (family, name)
-        if key not in self._style_marks:
-            self._style_marks[key] = _inherited(self.styles, key, lambda parent: (family, parent))
-        return self._style_marks[key]
+        return self._inherited((family, name), lambda parent: (family, parent))
 
     def letters(self, p) -> Counter[str]:
         """The letters of a paragraph (text:p or text:h, an lxml element) in
@@ -326,9 +335,6 @@ class OdtLanguages:
 
         walk(p, self.base)
         return counts
-
-    def of(self, paragraphs) -> tuple[str | None, Counter[str]]:
-        return languages_of(self.letters, paragraphs)
 
 
 # How the HTML report shows a language ----------------------------------------------------

@@ -83,10 +83,9 @@ from prosediff.diff import (
     align,
     difflib_opcodes,
     line_pairs,
+    line_similarity,
     move_defaults,
     move_key,
-    similarity_tokens,
-    token_similarity,
     unpair_moved,
 )
 from prosediff.sentences import split_sentences
@@ -351,9 +350,7 @@ def score_trials(
             for _, i, j in base
             if i is not None
             and j is not None
-            and token_similarity(
-                similarity_tokens(old[i]), similarity_tokens(new[j]), PAIRING_THRESHOLD
-            )
+            and line_similarity(old[i], new[j], PAIRING_THRESHOLD)
         }
         # the moves to find: a paragraph's two versions not shown face to face
         for j, i in enumerate(source):

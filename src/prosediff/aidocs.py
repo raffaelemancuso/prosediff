@@ -42,6 +42,7 @@ from lxml import etree
 from prosediff.assess import Annotation, Assessment
 from prosediff.comments import ANY_PLACEHOLDER
 from prosediff.diff import Comparison, FileDiff, word_ops
+from prosediff.hyphenate import SOFT_HYPHEN
 from prosediff.redline import (
     XML_ID,
     OdtRedline,
@@ -50,15 +51,16 @@ from prosediff.redline import (
     aligned,
     atoms,
     by_run,
+    located,
     odf,
     odf_atoms,
     odf_drop,
     odf_insert,
+    run_like,
     split_before,
     text_element,
-    without_changes,
 )
-from prosediff.tracked import TRACKED_FORMATS, author_of, check_tracked
+from prosediff.tracked import TRACKED_FORMATS, author_of, check_tracked, settled
 
 # Typographic variants a model writes plainly: curly quotes and dashes. A
 # passage is found whatever of them it quotes, and a fix never changes one
@@ -69,7 +71,6 @@ TYPOGRAPHIC = {
     **dict.fromkeys("‐‑‒–—―−", "-"),
 }
 PLAIN = str.maketrans(TYPOGRAPHIC)
-SOFT_HYPHEN = "­"
 # How far after its start words a passage's end words are looked for (as the
 # report's script does), in characters.
 REACH = 20_000
@@ -146,8 +147,7 @@ def locate(lines: list[str], note: Annotation, hay=None) -> Place | None:
 
 def verdict_text(assessment: Assessment) -> str:
     """The Verdict section of an assessment, as plain text."""
-    section = re.search(r"#+\s*Verdict\s*\n(.*?)(?=\n#+\s|\Z)", assessment.markdown, re.S | re.I)
-    text = section[1] if section else ""
+    text = assessment.verdict_section or ""
     return re.sub(r"\s+", " ", re.sub(r"[*_`]", "", text)).strip()
 
 
@@ -238,28 +238,18 @@ def in_text(line: str, text: str, edits: list) -> bool:
 # Word ---------------------------------------------------------------------------
 
 
-def word_run_at(paragraphs, line: str, o: int):
-    """The w:r that starts at character o of line, split so that one does;
-    None past the paragraphs' text."""
-    text, at = atoms(paragraphs)
-    x = aligned(line, text)[o]
-    if x >= len(at):
-        return None
-    split_before(at[x])
-    return atoms(paragraphs)[1][x][0]
-
-
-def word_run_before(paragraphs, line: str, o: int):
-    """The w:r that ends just before character o of line, split so that one
-    does; None before the paragraphs' text."""
-    text, at = atoms(paragraphs)
-    x = aligned(line, text)[o]
-    if x <= 0:
+def word_run(paragraphs, line: str, o: int, before: bool = False):
+    """The w:r that starts at character o of line (before: that ends just
+    before it), split so that one does; None past (before: before) the
+    paragraphs' text."""
+    _, at, where = located(paragraphs, line)
+    x = where[o]
+    if x <= 0 if before else x >= len(at):
         return None
     if x < len(at):
         split_before(at[x])
         at = atoms(paragraphs)[1]
-    return at[x - 1][0]
+    return at[x - before][0]
 
 
 def note_reference(red: WordRedline, p):
@@ -333,8 +323,8 @@ class WordNotes:
             first = last = ref
             paragraphs = [f"In the {kind}: {paragraphs[0]}", *paragraphs[1:]]
         else:
-            first = word_run_at(starts, lines[place.j1], place.o1)
-            last = word_run_before(ends, lines[place.j2], place.o2)
+            first = word_run(starts, lines[place.j1], place.o1)
+            last = word_run(ends, lines[place.j2], place.o2, before=True)
         if first is not None and last is not None:
             c = red.new.doc.add_comment(
                 [Run(first, None), Run(last, None)], author=self.author, initials="AI"
@@ -359,8 +349,7 @@ class WordNotes:
         changes."""
         red, line = self.red, self.lines[j]
         paragraphs = red.new_paragraphs[j]
-        text, at = atoms(paragraphs)
-        where = aligned(line, text)
+        _, at, where = located(paragraphs, line)
         first = where[begin]
         ids = []
         # from the last: an edit moves only what comes after it
@@ -379,11 +368,7 @@ class WordNotes:
             # in the formatting of the words it replaces; else of the word
             # before (the first after, at the start)
             k = x1 if x2 > x1 or x1 == 0 else x1 - 1
-            like = at[k][0] if k < len(at) else None
-            run = OxmlElement("w:r")
-            rpr = like.find(qn("w:rPr")) if like is not None else None
-            if rpr is not None:
-                run.append(without_changes(copy.deepcopy(rpr)))
+            run = run_like(at[k][0] if k < len(at) else None)
             run.append(text_element("w:t", put))
             mark = red.revision("w:ins")
             mark.append(run)
@@ -669,7 +654,7 @@ def document_file(comparison: Comparison) -> tuple[FileDiff, str] | None:
     if comparison.single:
         f = next((f for f in comparison.files if f.new_data and not f.binary), None)
         fmt = PurePosixPath(f.new_path or "").suffix.lower().lstrip(".") if f else ""
-        if fmt not in TRACKED_FORMATS or (fmt == "odt" and f.document_changes != "accept-all"):
+        if fmt not in TRACKED_FORMATS or not settled(f, fmt):
             return None
         return f, fmt
     for fmt in TRACKED_FORMATS:
@@ -677,9 +662,7 @@ def document_file(comparison: Comparison) -> tuple[FileDiff, str] | None:
             f = check_tracked(comparison, fmt)
         except ValueError:
             continue
-        if fmt == "odt" and f.document_changes != "accept-all":
-            return None
-        return f, fmt
+        return (f, fmt) if settled(f, fmt) else None
     return None
 
 

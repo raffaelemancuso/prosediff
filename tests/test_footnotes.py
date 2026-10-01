@@ -4,7 +4,7 @@ from helpers import NOTE, strip_tags
 
 from prosediff import Options, compare_paths, render
 from prosediff.comments import PLACEHOLDER
-from prosediff.diff import footnote_similarity
+from prosediff.diff import line_similarity
 from prosediff.footnotes import STAND_IN, match_footnotes, set_aside
 
 NOTES = {
@@ -71,17 +71,17 @@ def test_real_edits_to_a_renumbered_footnote_are_shown(tmp_path):
 def test_matching_by_text():
     old = {"1": "alpha beta gamma delta", "2": "one two three four", "3": "x"}
     new = {"1": "one two three four", "2": "alpha beta gamma DELTA"}
-    assert match_footnotes(old, new, footnote_similarity) == {"2": "1", "1": "2"}
+    assert match_footnotes(old, new, line_similarity) == {"2": "1", "1": "2"}
 
 
 def test_files_without_footnotes_are_untouched():
     lines = ["No notes here.", "Nor here."]
-    out_old, out_new, notes = set_aside(lines, lines, footnote_similarity)
+    out_old, out_new, notes = set_aside(lines, lines, line_similarity)
     assert (out_old, out_new) == (lines, lines) and not notes.old and not notes.new
 
 
 def test_reference_without_definition_keeps_its_label():
-    old, new, notes = set_aside(["See [^x] here."], ["See [^x] there."], footnote_similarity)
+    old, new, notes = set_aside(["See [^x] here."], ["See [^x] there."], line_similarity)
     assert old[0][4] == new[0][4] and STAND_IN.match(old[0][4])
     assert notes.old[old[0][4]] == notes.new[new[0][4]] == "x"
 

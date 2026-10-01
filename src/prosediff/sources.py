@@ -25,6 +25,7 @@ __all__ = [
     "describe_side",
     "document_to_markdown",
     "is_document",
+    "page_of",
     "patterns",
     "read_document",
     "read_side",
@@ -118,6 +119,17 @@ def default_page(old: Path, new: Path, suffix: str = ".html") -> Path | None:
     if old.is_file() and new.is_file():
         return new.parent / f"{old.stem}_vs_{new.stem}{suffix}"
     return None
+
+
+def page_of(mode: str, old: str, new: str, suffix: str = ".html") -> Path | None:
+    """Where the output of mode ("git", "files", "folders" or "review",
+    old being the file reviewed) goes when none is given: review_page,
+    default_page; None comparing git versions, or a side not given."""
+    if mode == "review":
+        return review_page(Path(old)) if old else None
+    if mode == "git" or not old or not new:
+        return None
+    return default_page(Path(old), Path(new), suffix)
 
 
 def review_page(path: Path) -> Path:

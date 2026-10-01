@@ -31,6 +31,8 @@ image is written [image], with its description when it has one.
 """
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from itertools import groupby
@@ -57,7 +59,6 @@ from prosediff.document import (
     check_changes,
     comment_runs,
     comments_in,
-    join_paragraphs,
     markdown,
     spaced,
     strip,
@@ -146,9 +147,7 @@ def _text_of(el: Element, path: str) -> str:
 
 
 class Reader(DocumentReader):
-    def __init__(
-        self, document: Document, changes: str, languages: OdtLanguages | None = None
-    ) -> None:
+    def __init__(self, document: Document, changes: str, languages: OdtLanguages) -> None:
         super().__init__(changes=changes, languages=languages)
         self.document = document
         # change id -> ("insertion" | "deletion", author, date, region element)
@@ -230,19 +229,27 @@ class Reader(DocumentReader):
         """Whether the text being walked goes: a rejected insertion."""
         return bool(self.open) and self.changes == "reject-all"
 
+    @contextmanager
+    def outside_insertions(self) -> Iterator[None]:
+        """Read what the walk meets outside the insertions it is inside (a
+        deletion's text, a comment's, a note's)."""
+        saved, self.open = self.open, []
+        try:
+            yield
+        finally:
+            self.open = saved
+
     def deletion(self, cid: str | None) -> list[Tagged]:
         """What a deletion point leaves: the deleted text when rejecting, a
         deletion span when showing all, only its comments when accepting."""
         kind, author, date, change = self.regions.get(cid or "", ("", "", "", None))
         if kind != "deletion" or change is None:
             return []
-        saved = self.open
-        self.open = []
-        paragraphs = [
-            ([i for i, _ in self.inline(p, frozenset())], kind)
-            for p, kind in self.deleted_paragraphs(change)
-        ]
-        self.open = saved
+        with self.outside_insertions():
+            paragraphs = [
+                ([i for i, _ in self.inline(p, frozenset())], kind)
+                for p, kind in self.deleted_paragraphs(change)
+            ]
         if cid in self.stacked and not self.keeps("insertion"):
             # the insertion beneath rejected too: the words go
             return [(c, None) for inlines, _ in paragraphs for c in comments_in(inlines)]
@@ -304,9 +311,8 @@ class Reader(DocumentReader):
             self.comment_names[name] = cid
         # its paragraphs read as the body's are, in their styles, outside
         # any insertion the annotation sits in
-        saved, self.open = self.open, []
-        rich = comment_runs([i for i, _ in self.inline(p, frozenset())] for p in paragraphs)
-        self.open = saved
+        with self.outside_insertions():
+            rich = comment_runs([i for i, _ in self.inline(p, frozenset())] for p in paragraphs)
         return CommentMark(
             cid,
             _text_of(el, "dc:creator"),
@@ -344,21 +350,10 @@ class Reader(DocumentReader):
                 if not self.dropping():
                     body = child.get_element("text:note-body")
                     paragraphs = body.get_elements("text:p|text:h") if body is not None else []
-                    saved = self.open
-                    self.open = []
-                    note = self.cell(paragraphs)
-                    self.open = saved
+                    with self.outside_insertions():
+                        note = self.cell(paragraphs)
                     number = len(self.notes) + 1
-                    language = self.language_of(paragraphs)
-                    self.notes.append(
-                        Block(
-                            "note",
-                            note,
-                            number=number,
-                            language=language,
-                            source=tuple(source_of(p) for p in paragraphs),
-                        )
-                    )
+                    self.notes.append(self.note_block(paragraphs, number, note, source_of))
                     out.append((NoteRef(number), where))
             elif tag == "office:annotation":
                 out.append((self.comment(child), None))
@@ -401,10 +396,6 @@ class Reader(DocumentReader):
         by a space."""
         inlines = self.settle(self.inline(el, frozenset()))
         return strip([Text(" ") if isinstance(i, Break) else i for i in inlines])
-
-    def cell(self, paragraphs: list[Element]) -> list:
-        """The inlines of several paragraphs, as one, a space between them."""
-        return join_paragraphs(self.paragraph_inlines(p) for p in paragraphs)
 
     def kind_of(self, el: Element, item: bool = False) -> Kind:
         """A paragraph's kind: a heading (text:h, or of a heading's style),

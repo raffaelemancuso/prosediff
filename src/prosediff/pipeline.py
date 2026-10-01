@@ -63,6 +63,23 @@ class Run:
     documents: bool = True
 
 
+def request_of(src: object) -> AssessRequest | None:
+    """The AI src.assess names (none: None), asked as src's assess_*
+    fields say: the command line's arguments and the window's settings name
+    them alike."""
+    if not src.assess:
+        return None
+    return AssessRequest(
+        src.assess,
+        effort=src.assess_effort or "",
+        context=src.assess_context,
+        instructions=src.assess_instructions or "",
+        timeout=src.assess_timeout,
+        save_prompt=src.assess_save_prompt,
+        annotate=src.assess_annotate,
+    )
+
+
 @dataclass
 class Result:
     """What a run made: the output's path (another when it was locked),

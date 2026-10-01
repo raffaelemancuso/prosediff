@@ -89,22 +89,19 @@ def file_diff(f: FileDiff, context: int | None = CONTEXT, fmt: str = "diff") -> 
         before.append((seen_old, seen_new))
         seen_old += i is not None
         seen_new += j is not None
+    before.append((seen_old, seen_new))
     for h in hunks:
-        n_old = sum(f.pairs[k][0] is not None for k in h)
-        n_new = sum(f.pairs[k][1] is not None for k in h)
-        old_before, new_before = before[h.start]
-        out.append(f"@@ -{_side_range(old_before, n_old)} +{_side_range(new_before, n_new)} @@")
+        (old_before, new_before), (old_after, new_after) = before[h.start], before[h.stop]
+        out.append(
+            f"@@ -{_side_range(old_before, old_after - old_before)} "
+            f"+{_side_range(new_before, new_after - new_before)} @@"
+        )
         for k in h:
             i, j = f.pairs[k]
-            if fmt == "wdiff":
-                if not changed[k]:
-                    out.append(b[j])
-                else:
-                    out.append(
-                        word_line(a[i] if i is not None else "", b[j] if j is not None else "")
-                    )
-            elif not changed[k]:
-                out.append(f" {b[j]}")
+            if not changed[k]:
+                out.append(b[j] if fmt == "wdiff" else f" {b[j]}")
+            elif fmt == "wdiff":
+                out.append(word_line(a[i] if i is not None else "", b[j] if j is not None else ""))
             else:
                 if i is not None:
                     out.append(f"-{a[i]}")

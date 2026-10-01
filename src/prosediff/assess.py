@@ -365,13 +365,18 @@ class Assessment:
         return [asdict(a) for a in self.annotations]
 
     @property
+    def verdict_section(self) -> str | None:
+        """The text of the model's Verdict section; None for none."""
+        section = re.search(r"#+\s*Verdict\s*\n(.*?)(?=\n#+\s|\Z)", self.markdown, re.S | re.I)
+        return section[1] if section else None
+
+    @property
     def verdict(self) -> str:
         """ "improves", "mixed" or "worsens" (for a "writing" assessment,
         "likely", "possibly" or "unlikely"; for a "review", "good", "fair"
         or "poor"), from the Verdict section; "" when the model gave none of
         them."""
-        section = re.search(r"#+\s*Verdict\s*\n(.*?)(?=\n#+\s|\Z)", self.markdown, re.S | re.I)
-        words = re.findall(r"[A-Za-z]+", section[1] if section else self.markdown[:200])
+        words = re.findall(r"[A-Za-z]+", self.verdict_section or self.markdown[:200])
         verdicts = {"writing": WRITING_VERDICTS, "review": REVIEW_VERDICTS}.get(self.kind, VERDICTS)
         return next((w.lower() for w in words if w.lower() in verdicts), "")
 

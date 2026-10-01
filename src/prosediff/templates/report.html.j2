@@ -1673,11 +1673,16 @@ thead.print, .print-note { display: none; }
   }
   countComments();
   document.addEventListener("prosediff-layout", countComments);
+  // The place step (1 or -1) from at in a list of n, round from the end
+  // to the start; from none (-1), the first or the last.
+  function cycle(at, step, n) {
+    return at < 0 ? (step > 0 ? 0 : n - 1) : (at + step + n) % n;
+  }
   function goComment(step) {
     var list = shownCards("comment-card");
     if (!list.length) return;
     var at = list.indexOf(commentCurrent);
-    at = at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length;
+    at = cycle(at, step, list.length);
     commentCurrent = list[at];
     var mark = markOf(commentCurrent);
     reveal(commentCurrent);
@@ -1697,7 +1702,7 @@ thead.print, .print-note { display: none; }
     var found = aiOrder.filter(function (k) { return shownMark(aiNotes[k]); });
     if (!found.length) return;
     var at = found.indexOf(aiCurrent);
-    at = at < 0 ? (step > 0 ? 0 : found.length - 1) : (at + step + found.length) % found.length;
+    at = cycle(at, step, found.length);
     aiCurrent = found[at];
     var mark = shownMark(aiNotes[aiCurrent]);
     reveal(mark);

@@ -16,7 +16,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from markupsafe import Markup
 
 from prosediff.assess import Assessment, AssessRequest, assess
-from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text
+from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text, context_for
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
 from prosediff.language import file_language_note, flag_code, paragraph_language_note
@@ -223,7 +223,7 @@ def write_output(
     if fmt in TRACKED_FORMATS:
         return write_tracked(comparison, path, fmt)
     if fmt != "html":
-        text = unified(comparison, CONTEXT if context == "auto" else context, fmt)
+        text = unified(comparison, context_for(context, prose=False), fmt)
     else:
         text = render(
             comparison,

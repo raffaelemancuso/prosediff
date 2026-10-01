@@ -258,20 +258,34 @@ class DocumentReader:
     """What the Word and OpenDocument readers share: their tracked changes
     settled as changes says ("accept-all", "reject-all", or "show", kept as markup);
     the comments of a paragraph deleted as a whole carried to the next; and
-    the languages the paragraphs are marked with, when asked for (languages,
-    with an of(paragraphs) giving the language most of their letters are in
-    and the letters in each), and the letters of the whole in each."""
+    the languages the paragraphs are marked with (languages, with an
+    of(paragraphs) giving the language most of their letters are in and the
+    letters in each), and the letters of the whole in each."""
 
     changes: str
-    languages: object = None
+    languages: object
     letters: Counter = field(default_factory=Counter)
     # comments of a paragraph deleted as a whole, for the next paragraph
     carried: list = field(default_factory=list)
 
+    def cell(self, paragraphs, *args) -> list:
+        """The inlines of several paragraphs (args: what paragraph_inlines
+        takes besides one), as one, a space between them."""
+        return join_paragraphs(self.paragraph_inlines(p, *args) for p in paragraphs)
+
+    def note_block(self, paragraphs, number: int, inlines: list, source_of: Callable) -> Block:
+        """A footnote or endnote, of paragraphs (elements of the XML) read
+        as inlines; source_of: where a paragraph is."""
+        return Block(
+            "note",
+            inlines,
+            number=number,
+            language=self.language_of(paragraphs),
+            source=tuple(source_of(p) for p in paragraphs),
+        )
+
     def language_of(self, paragraphs) -> str | None:
         """The language the paragraphs (elements of the XML) are in."""
-        if self.languages is None:
-            return None
         language, counts = self.languages.of(paragraphs)
         self.letters += counts
         return language
@@ -484,10 +498,14 @@ def heading_level(line: str) -> int:
     anchored where the heading starts puts its placeholder, unstyled,
     first."""
     for styles in getattr(line, "styles", ()):
-        for s in styles:
-            if m := HEADING_LEVEL.fullmatch(s):
-                return int(m[1])
+        if level := styles_level(styles):
+            return level
     return 0
+
+
+def styles_level(styles: Iterable[str]) -> int:
+    """The heading level among a character's styles (h1 to h6); 0 for none."""
+    return next((int(m[1]) for s in styles if (m := HEADING_LEVEL.fullmatch(s))), 0)
 
 
 def sub(pattern: re.Pattern, repl: Callable[[re.Match], str], line: str, count: int = 0) -> str:

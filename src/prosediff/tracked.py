@@ -55,6 +55,12 @@ def check_tracked(comparison: Comparison, fmt: str) -> FileDiff:
     return f
 
 
+def settled(f: FileDiff, fmt: str) -> bool:
+    """Whether f can be written as fmt: an .odt only with the tracked
+    changes the files have accepted."""
+    return fmt != "odt" or f.document_changes == "accept-all"
+
+
 def author_of(comparison: Comparison) -> str:
     return comparison.target.author or AUTHOR
 
@@ -82,7 +88,7 @@ def write_tracked(comparison: Comparison, path: Path, fmt: str) -> Path:
     if fmt not in TRACKED_FORMATS:
         raise ValueError(f"format must be one of {tuple(TRACKED_FORMATS)}, not {fmt!r}")
     f = check_tracked(comparison, fmt)
-    if fmt == "odt" and f.document_changes != "accept-all":
+    if not settled(f, fmt):
         raise ValueError(
             "tracked changes as .odt accept the tracked changes the files have: "
             "--docx-changes must be accept-all"

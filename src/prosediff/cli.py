@@ -14,7 +14,7 @@ from prosediff.assess import (
     ASSESS_TIMEOUT,
     CONTEXTS,
     AssessError,
-    AssessRequest,
+    Assessment,
     login_codex,
     models_of,
     parse_backend,
@@ -41,7 +41,7 @@ from prosediff.diff import (
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
 from prosediff.language import DEFAULT, normalize_language
-from prosediff.pipeline import OutputError, Run, execute
+from prosediff.pipeline import OutputError, Run, execute, request_of
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
@@ -449,14 +449,14 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     mode = next((m for m in ("git", "files", "folders", "review") if getattr(args, m)), None)
-    if args.list_models:
-        if mode or args.repo:
-            ap.error("--list-models takes no other argument")
-        return _list_models(args.list_models)
-    if args.login_codex:
-        if mode or args.repo:
-            ap.error("--login-codex takes no other argument")
-        return _login_codex()
+    for name, act in (
+        ("list_models", lambda: _list_models(args.list_models)),
+        ("login_codex", _login_codex),
+    ):
+        if getattr(args, name):
+            if mode or args.repo:
+                ap.error(f"--{name.replace('_', '-')} takes no other argument")
+            return act()
     if args.global_ and not args.setup_git:
         ap.error("--global goes with --setup-git")
     if mode and (args.setup_git or args.to_markdown):
@@ -501,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
         check_split(split, fmt)
     except ValueError as e:
         ap.error(f"--split: {e}")
-    if fmt in TRACKED_FORMATS and args.files and args.base:
+    if fmt in TRACKED_FORMATS and args.files:
         try:
             check_paths(args.repo, args.base, fmt)
         except ValueError as e:
@@ -518,22 +518,15 @@ def main(argv: list[str] | None = None) -> int:
     except SettingError as e:
         ap.error(f"{passage_option(e.name)}: {e}")
     options = Options(
+        **_reading_options(args),
         context=None if args.full else ("auto" if args.context is None else args.context),
-        md_filter=args.md_filter,
         ignore_whitespace=args.ignore_whitespace,
-        comments=args.comments or "markers",
-        empty_comments=args.empty_comments,
         max_hidden=args.max_hidden,
-        docx_changes=args.docx_changes,
         paragraph_moves=MoveSettings(args.move_similarity, args.move_algorithm),
         sentence_moves=MoveSettings(args.sentence_move_similarity, args.sentence_move_algorithm),
         move_passages=args.move_passages,
         moved_passage_settings=passage_settings,
-        language=args.language,
-        encoding=args.encoding,
     )
-
-    mode = "git" if args.git else "folders" if args.folders else "files"
     run = Run(
         mode,
         args.repo,
@@ -548,31 +541,24 @@ def main(argv: list[str] | None = None) -> int:
         fmt=fmt,
         split=split,
         align=args.align,
-        request=_request(args),
+        request=request_of(args),
         ai_writing=args.assess_ai_writing,
         documents=args.assess_documents,
     )
     try:
         done = execute(run, _say)
-    except OutputError as e:  # a .docx or .odt of anything but two such documents
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
+    # OutputError: a .docx or .odt of anything but two such documents
+    except (OutputError, FilterError, SourceError) as e:
+        return _fail(str(e))
     except git.InvalidGitRepositoryError:
-        print(
-            f"{PROG}: not a git repository: {args.repo} "
-            "(--files or --folders compare files or folders outside git)",
-            file=sys.stderr,
+        return _fail(
+            f"not a git repository: {args.repo} "
+            "(--files or --folders compare files or folders outside git)"
         )
-        return 1
     except git.NoSuchPathError:
-        print(f"{PROG}: no such folder: {args.repo}", file=sys.stderr)
-        return 1
+        return _fail(f"no such folder: {args.repo}")
     except (git.BadName, ValueError) as e:
-        print(f"{PROG}: not a commit: {e}", file=sys.stderr)
-        return 1
-    except (FilterError, SourceError) as e:
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
+        return _fail(f"not a commit: {e}")
     assessment, writing, c = done.assessment, done.writing, done.comparison
     for what, a in (("the assessment", assessment), ("the AI-writing assessment", writing)):
         if a is not None and a.error:
@@ -582,30 +568,36 @@ def main(argv: list[str] | None = None) -> int:
         f"+{c.counts.additions:,} -{c.counts.deletions:,} -> {done.path}"
     )
     if assessment is not None:
-        verdict = f" ({assessment.verdict})" if assessment.verdict else ""
-        print(f"{PROG}: assessment{verdict}, at the top of the HTML report")
+        print(f"{PROG}: assessment{_verdict(assessment)}, at the top of the HTML report")
     if writing is not None and not writing.error:
-        verdict = f" ({writing.verdict})" if writing.verdict else ""
-        print(f"{PROG}: AI-writing assessment{verdict}, beside it")
+        print(f"{PROG}: AI-writing assessment{_verdict(writing)}, beside it")
     if args.open:
         open_output(done.path)
     return 0
 
 
-def _request(args: argparse.Namespace) -> AssessRequest | None:
-    """The AI --assess names, asked as the --assess-* options say; None
-    for none."""
-    if args.assess is None:
-        return None
-    return AssessRequest(
-        args.assess,
-        effort=args.assess_effort or "",
-        context=args.assess_context,
-        instructions=args.assess_instructions or "",
-        timeout=args.assess_timeout,
-        save_prompt=args.assess_save_prompt,
-        annotate=args.assess_annotate,
-    )
+def _fail(message: str) -> int:
+    """An error on stderr; the exit status of a run that failed."""
+    print(f"{PROG}: {message}", file=sys.stderr)
+    return 1
+
+
+def _verdict(a: Assessment) -> str:
+    """The AI's verdict in brackets, after a space; "" for none."""
+    return f" ({a.verdict})" if a.verdict else ""
+
+
+def _reading_options(args: argparse.Namespace) -> dict:
+    """The Options that read the files, as a comparison and a review share
+    them."""
+    return {
+        "md_filter": args.md_filter,
+        "comments": args.comments or "markers",
+        "empty_comments": args.empty_comments,
+        "docx_changes": args.docx_changes,
+        "language": args.language,
+        "encoding": args.encoding,
+    }
 
 
 def _say(stage: str) -> None:
@@ -639,14 +631,7 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
             ap.error(f"{option} picks what to compare: --review takes one file")
     _check_reading(ap, args)
     path = Path(args.repo)
-    options = Options(
-        md_filter=args.md_filter,
-        comments=args.comments or "markers",
-        empty_comments=args.empty_comments,
-        docx_changes=args.docx_changes,
-        language=args.language,
-        encoding=args.encoding,
-    )
+    options = Options(**_reading_options(args))
     output = args.output or (default_output() if args.open else review_page(path))
     run = Run(
         "review",
@@ -654,20 +639,18 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         Path(output),
         options=options,
         align=args.align,
-        request=_request(args),
+        request=request_of(args),
         documents=args.assess_documents,
     )
     try:
         done = execute(run, _say)
     except (FilterError, SourceError) as e:
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
+        return _fail(str(e))
     assessment = done.assessment
     if assessment.error:
         print(f"{PROG}: the review failed: {assessment.error}", file=sys.stderr)
-    verdict = f" ({assessment.verdict})" if assessment.verdict else ""
     marked = counted(len(assessment.annotations), "problem")
-    print(f"{PROG}: {path.name} reviewed{verdict}, {marked} marked -> {done.path}")
+    print(f"{PROG}: {path.name} reviewed{_verdict(assessment)}, {marked} marked -> {done.path}")
     if args.open:
         open_output(done.path)
     return 0
@@ -677,11 +660,9 @@ def _list_models(ai: str) -> int:
     try:
         found = models_of(ai.strip().lower())
     except AssessError as e:
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
+        return _fail(str(e))
     if not found:
-        print(f"{PROG}: {ai} reports no models", file=sys.stderr)
-        return 1
+        return _fail(f"{ai} reports no models")
     width = max(len(m.name) for m in found)
     for m in found:
         print(f"{m.name:<{width}}  {m.description}".rstrip())
@@ -697,8 +678,7 @@ def _login_codex() -> int:
     try:
         ok = login_codex()
     except AssessError as e:
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
+        return _fail(str(e))
     print(f"{PROG}: {'logged in to ChatGPT' if ok else 'the login did not succeed'}")
     return 0 if ok else 1
 
@@ -776,8 +756,7 @@ def _setup_git(repo: Path | None) -> int:
     try:
         done = setup_git(repo)
     except SetupError as e:
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
+        return _fail(str(e))
     print("\n".join(done))
     print(
         "git diff now shows Word and OpenDocument files as text; "
@@ -793,8 +772,7 @@ def _to_markdown(path: Path, changes: str) -> int:
         data = path.read_bytes()
         text = document_to_markdown(data, document_name(data, path.name), changes)
     except (OSError, SourceError) as e:
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
+        return _fail(str(e))
     sys.stdout.flush()
     sys.stdout.buffer.write(text)
     sys.stdout.buffer.flush()

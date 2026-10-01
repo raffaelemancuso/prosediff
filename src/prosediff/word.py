@@ -29,6 +29,7 @@ equation as its text.
 """
 
 from dataclasses import dataclass, field
+from functools import partial
 from io import BytesIO
 
 import docx
@@ -60,7 +61,6 @@ from prosediff.document import (
     Text,
     check_changes,
     comment_runs,
-    join_paragraphs,
     spaced,
     strip,
 )
@@ -235,10 +235,6 @@ class Reader(DocumentReader):
         )
         return strip(self.children(el, p))
 
-    def cell(self, paragraphs, part=None) -> list:
-        """The inlines of several paragraphs, as one, a space between them."""
-        return join_paragraphs(self.paragraph_inlines(p, part) for p in paragraphs)
-
     def source(self, el, part=None) -> Source:
         """Where a paragraph is: its part's name and its XPath there."""
         part = self.document.part if part is None else part
@@ -313,12 +309,8 @@ class Reader(DocumentReader):
             el, part = found
             paragraphs = list(el.iter(qn("w:p")))
             out.append(
-                Block(
-                    "note",
-                    self.cell(paragraphs, part),
-                    number=k,
-                    language=self.language_of(paragraphs),
-                    source=tuple(self.source(p, part) for p in paragraphs),
+                self.note_block(
+                    paragraphs, k, self.cell(paragraphs, part), partial(self.source, part=part)
                 )
             )
         return out

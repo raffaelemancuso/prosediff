@@ -386,22 +386,17 @@ class WordRedline:
         paragraphs = self.old_paragraphs[i]
         runs = []
         if paragraphs:
-            text, at = atoms(paragraphs)
-            where = aligned(old_line, text)
+            _, at, where = located(paragraphs, old_line)
             x1, x2 = where[o1], where[o2]
             for r, group in by_run(at[x1:x2]):
-                run = OxmlElement("w:r")
-                rpr = r.find(qn("w:rPr"))
-                if rpr is not None:
-                    run.append(without_changes(copy.deepcopy(rpr)))
+                run = run_like(r)
                 _deleted_content(run, group)
                 runs.append(run)
         if not runs:
             words = plain_text(old_line[o1:o2])
             if words:
-                styles = getattr(old_line, "styles", None)
                 run = OxmlElement("w:r")
-                run.append(run_properties(styles[o1] & STYLES if styles else frozenset()))
+                run.append(run_properties(line_styles(old_line, o1)))
                 run.append(text_element("w:delText", words))
                 runs.append(run)
         return runs
@@ -410,13 +405,12 @@ class WordRedline:
         """The run properties of the old character o of old line i."""
         paragraphs = self.old_paragraphs[i]
         if paragraphs:
-            text, at = atoms(paragraphs)
-            x = aligned(old_line, text)[o]
+            _, at, where = located(paragraphs, old_line)
+            x = where[o]
             if x < len(at):
                 rpr = at[x][0].find(qn("w:rPr"))
                 return copy.deepcopy(rpr) if rpr is not None else OxmlElement("w:rPr")
-        styles = getattr(old_line, "styles", None)
-        return run_properties(styles[o] & STYLES if styles else frozenset())
+        return run_properties(line_styles(old_line, o))
 
     def edited(self, i: int, j: int) -> None:
         """Mark the changes of old line i into new line j, in j's paragraphs."""
@@ -424,8 +418,7 @@ class WordRedline:
         paragraphs = self.new_paragraphs[j]
         if not paragraphs:
             return
-        text, at = atoms(paragraphs)
-        where = aligned(b, text)
+        text, at, where = located(paragraphs, b)
         a_styles, b_styles = getattr(a, "styles", None), getattr(b, "styles", None)
         inserted, deleted, formatted = [], [], []
         for op, o1, o2, n1, n2 in word_ops(a, b) if a != b else [("equal", 0, len(a), 0, len(b))]:
@@ -499,7 +492,7 @@ class WordRedline:
             run.append(text_element("w:t", plain_text(old_line)))
             p.append(run)
             paragraphs = [p]
-        if getattr(old_line, "kind", "") == "row":
+        if is_row(old_line):
             tr = next(paragraphs[0].iterancestors(qn("w:tr")), None)
             if tr is not None:
                 row = _cleaned(copy.deepcopy(tr))
@@ -549,7 +542,7 @@ class WordRedline:
         self.new.save(target)
 
     def is_row(self, j: int) -> bool:
-        return getattr(self.f.new_text[j], "kind", "") == "row"
+        return is_row(self.f.new_text[j])
 
     @staticmethod
     def after_of(p, row: bool):
@@ -584,16 +577,41 @@ class WordRedline:
         ref, side = (anchor, "after") if anchor is not None else (before, "before")
         if ref is None:
             return None
-        if ref.tag == qn("w:tr"):
-            if is_row:
-                return side, ref
-            tbl = next(ref.iterancestors(qn("w:tbl")), None)
-            return side, tbl if tbl is not None else ref
         if is_row:
-            return None if ref is None else (side, ref)
-        # a paragraph in a table cell: after (before) the table
+            return side, ref
+        # a paragraph after (before) a row, or in a table cell: after
+        # (before) the table
         tbl = next(ref.iterancestors(qn("w:tbl")), None)
         return side, tbl if tbl is not None else ref
+
+
+def is_row(line: str) -> bool:
+    """Whether a line is a table row."""
+    return getattr(line, "kind", "") == "row"
+
+
+def line_styles(line: str, n: int) -> frozenset[str]:
+    """The styles of character n of a line written in a run (STYLES); none
+    for a line that carries none."""
+    styles = getattr(line, "styles", None)
+    return styles[n] & STYLES if styles else frozenset()
+
+
+def run_like(model) -> object:
+    """A new w:r in the formatting of model, a w:r (None: none), its
+    tracked changes of formatting left out."""
+    run = OxmlElement("w:r")
+    rpr = model.find(qn("w:rPr")) if model is not None else None
+    if rpr is not None:
+        run.append(without_changes(copy.deepcopy(rpr)))
+    return run
+
+
+def located(paragraphs, line: str) -> tuple[str, list, list[int]]:
+    """The text of a line's paragraphs, their atoms (atoms), and where in
+    that text each character of the line is (aligned)."""
+    text, at = atoms(paragraphs)
+    return text, at, aligned(line, text)
 
 
 def by_run(atoms_) -> list:
@@ -886,10 +904,9 @@ class OdtRedline:
         """The words start to end of a line, in their styles, in element (a
         new paragraph when none)."""
         p = odfdo.Paragraph() if element is None else element
-        styles = getattr(line, "styles", None)
 
         def style(n):
-            return styles[n] & STYLES if styles else frozenset()
+            return line_styles(line, n)
 
         k = start
         while k < end:
@@ -1027,7 +1044,7 @@ class OdtRedline:
 
     def row_of(self, j: int, paragraphs):
         """The table row new line j is, None when it is no row."""
-        if getattr(self.f.new_text[j], "kind", "") != "row":
+        if not is_row(self.f.new_text[j]):
             return None
         return next(paragraphs[0].iterancestors(odf("table:table-row")), None)
 
@@ -1038,7 +1055,7 @@ class OdtRedline:
         outside a table, after the last one."""
         at_start = []  # deletions going at the start of before, in order
         for k in pending:
-            if getattr(self.f.old_text[k], "kind", "") == "row":
+            if is_row(self.f.old_text[k]):
                 if before_row is not None:
                     before_row.addprevious(self.deleted_row(k, before_row))
                     continue

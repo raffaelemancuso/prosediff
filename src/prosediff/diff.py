@@ -79,9 +79,8 @@ from prosediff.sources import (
 )
 
 # The styles of a document's line the text formats write: its formatting,
-# and its tracked changes; and a heading's style (h1 ... h6), its level.
+# and its tracked changes.
 TEXT_MARKS = frozenset(document.FORMATTING) | {"tc-ins", "tc-del"}
-HEADING = re.compile(r"h([1-6])")
 
 # Windows opens a console for a console program (git, cmd.exe) started from
 # a process without one, such as the window of prosediff-gui: a terminal
@@ -691,15 +690,14 @@ FMT = Markup('<span class="fmt" data-fmt="{}">{}</span>')
 
 def formatting(styles: set[str] | frozenset[str]) -> frozenset[str]:
     """The styles of a character that are formatting."""
-    return frozenset(s for s in styles if s in FORMATS or HEADING.fullmatch(s))
+    return frozenset(s for s in styles if s in FORMATS or document.HEADING_LEVEL.fullmatch(s))
 
 
 def describe_format(text: str, old: frozenset[str], new: frozenset[str]) -> list[str]:
     """How the formatting of a piece of text changed, in plain English."""
     q = quote(text)
     out = []
-    old_heading = next((int(s[1]) for s in old if HEADING.fullmatch(s)), 0)
-    new_heading = next((int(s[1]) for s in new if HEADING.fullmatch(s)), 0)
+    old_heading, new_heading = document.styles_level(old), document.styles_level(new)
     if old_heading != new_heading:
         out.append(
             f"made {q} a level {new_heading} heading" if new_heading else f"made {q} not a heading"
@@ -1121,9 +1119,10 @@ def token_similarity(a: list[str], b: list[str], cutoff: float) -> float:
     return Indel.normalized_similarity(a, b, score_cutoff=cutoff)
 
 
-def footnote_similarity(old: str, new: str) -> float:
-    """How alike the texts of two footnotes are, 0 to 1."""
-    return token_similarity(similarity_tokens(old), similarity_tokens(new), 0)
+def line_similarity(old: str, new: str, cutoff: float = 0) -> float:
+    """How alike two lines (or the texts of two footnotes) are, 0 to 1: the
+    share of their tokens in common, in order, 0 below cutoff."""
+    return token_similarity(similarity_tokens(old), similarity_tokens(new), cutoff)
 
 
 def pair_lines(old: list[str], new: list[str]) -> list[tuple[int | None, int | None]]:
@@ -1170,14 +1169,7 @@ def pair_lines(old: list[str], new: list[str]) -> list[tuple[int | None, int | N
         for k in range(max(len(gap_old), len(gap_new))):
             i = gap_old[k] if k < len(gap_old) else None
             j = gap_new[k] if k < len(gap_new) else None
-            if (
-                i is None
-                or j is None
-                or single
-                or token_similarity(
-                    similarity_tokens(old[i]), similarity_tokens(new[j]), PAIRING_FLOOR
-                )
-            ):
+            if i is None or j is None or single or line_similarity(old[i], new[j], PAIRING_FLOOR):
                 pairs.append((i, j))
             else:
                 # too little in common to be the same line edited: shown, in
@@ -1203,17 +1195,16 @@ def opcodes_from_changes(
     """Whole-file opcodes from the changed ranges, the gaps being equal."""
     ops: list[Opcode] = []
     i = j = 0
-    for i1, i2, j1, j2 in changes:
+    # the end, an empty change, for the gap after the last
+    for i1, i2, j1, j2 in [*changes, (n_old, n_old, n_new, n_new)]:
         if i1 > i or j1 > j:
             # With --ignore-all-space a gap may hold lines that differ in
             # whitespace only; its two sides still have as many lines.
             tag = "equal" if i1 - i == j1 - j else "replace"
             ops.append((tag, i, i1, j, j1))
-        ops.append((change_tag(i1, i2, j1, j2), i1, i2, j1, j2))
+        if i2 > i1 or j2 > j1:
+            ops.append((change_tag(i1, i2, j1, j2), i1, i2, j1, j2))
         i, j = i2, j2
-    if i < n_old or j < n_new:
-        tag = "equal" if n_old - i == n_new - j else "replace"
-        ops.append((tag, i, n_old, j, n_new))
     return ops
 
 
@@ -1360,10 +1351,7 @@ def _sorted_tokens(line: str) -> list[str]:
 MOVE_ALGORITHMS = {
     # words and punctuation in common, whatever their order: 2 x longest
     # common subsequence of the sorted tokens / total length
-    "token-sort": (
-        _sorted_tokens,
-        lambda a, b, cutoff: Indel.normalized_similarity(a, b, score_cutoff=cutoff),
-    ),
+    "token-sort": (_sorted_tokens, token_similarity),
     # the words both lines share against the rest of each, whatever their
     # order (a line inside a longer one scores high)
     "token-set": (
@@ -1410,17 +1398,21 @@ def move_scorer(similarity: float, algorithm: str) -> tuple[Callable, Callable]:
     return prepare, at_least
 
 
-def line_move_score(similarity: float, algorithm: str) -> Callable[[str, str], float]:
-    """How alike two lines are as a move, 0 to 1: 1 for the same words
-    (spacing aside); else algorithm's score, 0 below similarity (and always
-    at similarity 1); 0 for a line too short to tell a move from chance
-    (move_key). Each line is prepared once."""
+def line_move_score(
+    similarity: float, algorithm: str, key: Callable[[str], str | None] = move_key
+) -> Callable[[str, str], float]:
+    """How alike two lines are as a move, 0 to 1: 1 for the same key (by
+    default move_key: the same words, spacing aside); else algorithm's
+    score, 0 below similarity (and always at similarity 1); 0 for a line of
+    no key (too short to tell a move from chance). Each line is prepared
+    once."""
+    key_of = key
     prepare, score = move_scorer(similarity, algorithm)
     seen: dict[str, tuple] = {}
 
     def of(line: str) -> tuple:
         if line not in seen:
-            key = move_key(line)
+            key = key_of(line)
             seen[line] = (key, prepare(line) if key and similarity < 1 else None)
         return seen[line]
 
@@ -1450,23 +1442,20 @@ def best_pairs(candidates: list[tuple]) -> list[tuple]:
 
 
 def candidate_pairs(
-    outs: list,
-    ins: list,
-    words_of: Callable,
-    max_pairs: int,
-    rare_min: int,
-    rare_share: float,
+    outs: list, ins: list, words_of: Callable, ps: "MovedPassageSettings"
 ) -> list[tuple[int, int]]:
     """The pairs (i, j) of a removed outs[i] and an added ins[j] worth
-    matching: every one, or past max_pairs of them those sharing rare words
-    (words_of: the content words of one; rare, in at most rare_share of
-    them or rare_min), the most rare words shared first, at most max_pairs."""
+    matching: every one, or past ps.max_pairs of them those sharing rare
+    words (words_of: the content words of one; rare, in at most
+    ps.rare_share of them or ps.rare_min), the most rare words shared first,
+    at most ps.max_pairs."""
+    max_pairs = ps.max_pairs
     if len(outs) * len(ins) <= max_pairs:
         return [(i, j) for i in range(len(outs)) for j in range(len(ins))]
     out_words = [set(words_of(x)) for x in outs]
     in_words = [set(words_of(x)) for x in ins]
     df = Counter(w for ws in [*out_words, *in_words] for w in ws)
-    limit = max(rare_min, rare_share * (len(outs) + len(ins)))
+    limit = max(ps.rare_min, ps.rare_share * (len(outs) + len(ins)))
     index: dict[str, list[int]] = defaultdict(list)
     for j, ws in enumerate(in_words):
         for w in ws:
@@ -1653,7 +1642,6 @@ class Passage:
     last_op: int
     # a whole line removed or added: it may move as a line (long enough for
     # move_key), and as a passage (long_enough)
-    whole: bool = False
     line: bool = False
     passage: bool = True
 
@@ -1841,13 +1829,15 @@ def mark_moves(
         as_passage = passages and long_enough(line.strip(), ps)
         if as_line or as_passage:
             if as_passage:
-                (p,) = passages_of(r, o, n, ps)
+                p = _passage(r, r.kind == "delete", line, 0, len(line), (-1, -1), ps)
             else:
                 p = Passage(r, r.kind == "delete", 0, len(line), -1, -1)
-            p.whole, p.line, p.passage = True, as_line, as_passage
+            p.line, p.passage = as_line, as_passage
             free.append(p)
     line_score = line_move_score(similarity, algorithm)
-    prepare, score = move_scorer(similarity, algorithm)
+    # the same words, spacing aside (not move_key: None for any two passages
+    # under MIN_MOVE_CHARS, which would make them all alike)
+    alike = line_move_score(similarity, algorithm, key=spaced)
 
     def line_of(p: Passage) -> str:
         return _row_lines(p.row, old, new)[0 if p.old else 1]
@@ -1865,13 +1855,6 @@ def mark_moves(
 
     def text(p: Passage) -> str:
         return line_of(p)[p.start : p.end]
-
-    def alike(a: str, b: str) -> float:
-        # the same words, spacing aside (not move_key: None for any two
-        # passages under MIN_MOVE_CHARS, which would make them all alike)
-        if spaced(a) == spaced(b):
-            return 1.0
-        return score(prepare(a), prepare(b)) if similarity < 1 else 0.0
 
     def scored(a: Passage, b: Passage, region: tuple[int, int, int, int]):
         """How alike the parts a1:a2 of a and b1:b2 of b are, cut down to
@@ -1926,14 +1909,7 @@ def mark_moves(
         if not outs or not ins:
             break
         candidates = []
-        for i, j in candidate_pairs(
-            outs,
-            ins,
-            lambda p: content_words(text(p), ps),
-            ps.max_pairs,
-            ps.rare_min,
-            ps.rare_share,
-        ):
+        for i, j in candidate_pairs(outs, ins, lambda p: content_words(text(p), ps), ps):
             a, b = outs[i], ins[j]
             if (a, b) in tried:
                 continue
@@ -2108,9 +2084,7 @@ def unpair_moved(
         if tag == "replace"
         and i is not None
         and j is not None
-        and not token_similarity(
-            similarity_tokens(old[i]), similarity_tokens(new[j]), PAIRING_THRESHOLD
-        )
+        and not line_similarity(old[i], new[j], PAIRING_THRESHOLD)
     ]
     if not weak or similarity > 1:
         return pairs
@@ -2525,8 +2499,9 @@ def build_files(
     entries: list[tuple[FileDiff, bytes, bytes]],
     options: Options = DEFAULT_OPTIONS,
     single: bool = False,
-) -> list[CommentEntry]:
-    """Fill in the rows of every file; returns the comments for the panel.
+) -> tuple[list[FileDiff], list[CommentEntry]]:
+    """Fill in the rows of every file; returns the files, by path, and the
+    comments for the panel.
 
     Word and OpenDocument texts are read into paragraphs of styled text
     (prosediff.word, prosediff.odt, prosediff.document), compared as lines
@@ -2656,9 +2631,7 @@ def build_files(
                     old_lines, new_lines, old_labels, new_labels, every=drop_comments
                 )
             # Footnote numbers set aside: a renumbered footnote is no change.
-            old_lines, new_lines, notes = footnotes.set_aside(
-                old_lines, new_lines, footnote_similarity
-            )
+            old_lines, new_lines, notes = footnotes.set_aside(old_lines, new_lines, line_similarity)
         texts.append((fd, old_lines, new_lines, old_labels, new_labels, notes))
 
     all_ops = git_opcodes([(old, new) for _, old, new, *_ in texts], options.ignore_whitespace)
@@ -2724,7 +2697,7 @@ def build_files(
             for view in row_views(fd.rows):
                 view.left = show_comments(view.left, comments, removed=gone)
                 view.right = show_comments(view.right, comments, added)
-    return panel
+    return sorted((fd for fd, _, _ in entries), key=lambda f: f.path), panel
 
 
 def line_markdown(line: str) -> str:
@@ -2871,8 +2844,7 @@ def compare(
             if in_paths(p, paths):
                 entries.append((FileDiff("untracked", None, p), b"", (root / p).read_bytes()))
 
-    panel = build_files(entries, options)
-    files = sorted((fd for fd, _, _ in entries), key=lambda f: f.path)
+    files, panel = build_files(entries, options)
 
     # The commits the comparison spans. The working tree and the index sit
     # on top of HEAD.
@@ -2939,11 +2911,14 @@ def compare_paths(
             change = "modified" if old.name == new.name else "renamed"
             entries.append((FileDiff(change, old.name, new.name), a, b))
     elif old.is_dir() and new.is_dir():
-        a_files, b_files = read_side(old, include), read_side(new, include)
-        gone = {p: a_files[p] for p in a_files.keys() - b_files.keys() if in_paths(p, paths)}
-        came = {p: b_files[p] for p in b_files.keys() - a_files.keys() if in_paths(p, paths)}
+        a_files, b_files = (
+            {p: d for p, d in read_side(side, include).items() if in_paths(p, paths)}
+            for side in (old, new)
+        )
+        gone = {p: a_files[p] for p in a_files.keys() - b_files.keys()}
+        came = {p: b_files[p] for p in b_files.keys() - a_files.keys()}
         for p in sorted(a_files.keys() & b_files.keys()):
-            if in_paths(p, paths) and a_files[p] != b_files[p]:
+            if a_files[p] != b_files[p]:
                 entries.append((FileDiff("modified", p, p), a_files[p], b_files[p]))
         by_content = defaultdict(list)
         for p, data in came.items():
@@ -2963,12 +2938,12 @@ def compare_paths(
                 raise SourceError(f"no such file or folder: {side}")
         raise SourceError("compare a file with a file, or a folder with a folder")
 
-    panel = build_files(entries, options)
+    files, panel = build_files(entries, options)
     return Comparison(
         repo_name=old.name if old.name == new.name else f"{old.name} → {new.name}",
         base=_side_revision(old),
         target=_side_revision(new),
-        files=sorted((fd for fd, _, _ in entries), key=lambda f: f.path),
+        files=files,
         comments=panel,
     )
 
@@ -2983,13 +2958,13 @@ def review_file(path: str | Path, options: Options = DEFAULT_OPTIONS) -> Compari
     if not path.is_file():
         raise SourceError(f"no such file: {path}")
     fd = FileDiff("reviewed", None, path.name)
-    panel = build_files([(fd, b"", path.read_bytes())], options, single=True)
+    files, panel = build_files([(fd, b"", path.read_bytes())], options, single=True)
     side = _side_revision(path)
     return Comparison(
         repo_name=path.name,
         base=side,
         target=side,
-        files=[fd],
+        files=files,
         comments=panel,
         single=True,
     )

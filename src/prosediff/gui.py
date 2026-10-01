@@ -46,7 +46,6 @@ from prosediff.assess import (
     CONTEXTS,
     AssessError,
     Assessment,
-    AssessRequest,
     ModelInfo,
     duration,
     models_of,
@@ -68,7 +67,7 @@ from prosediff.diff import (
     setting_type,
 )
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, language_name, normalize_language
-from prosediff.pipeline import Result, Run, execute
+from prosediff.pipeline import Result, Run, execute, request_of
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
@@ -85,8 +84,7 @@ from prosediff.sources import (
     DOCX_CHANGES,
     FOLDER_FILES,
     SourceError,
-    default_page,
-    review_page,
+    page_of,
 )
 from prosediff.tracked import TRACKED_FORMATS, check_paths
 
@@ -280,12 +278,18 @@ PREFILLED_FILES = (".md", ".docx", ".odt")
 PAD = {"padx": 6, "pady": 4}
 
 
+def prefillable(path: Path) -> bool:
+    """Whether path is a Markdown, Word or OpenDocument file, which the
+    window's tabs are filled in with."""
+    return path.is_file() and path.suffix.lower() in PREFILLED_FILES
+
+
 def single_file(args: list[str]) -> Path | None:
     """The one Markdown, Word or OpenDocument file given, whose partner the
     window asks for."""
     if len(args) == 1:
         path = Path(args[0])
-        if path.is_file() and path.suffix.lower() in PREFILLED_FILES:
+        if prefillable(path):
             return path.resolve()
     return None
 
@@ -311,11 +315,11 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
     s = replace(base)
     if len(args) == 1:
         path = Path(args[0])
-        if single_file(args):
+        if first := single_file(args):
             # the other file is asked for when the window opens (main)
             s.mode = "files"
-            s.old, s.new = str(path.resolve()), ""
-            s.single = str(path.resolve())
+            s.old, s.new = str(first), ""
+            s.single = str(first)
             s.output = ""
             return s, ""
         if path.is_dir():
@@ -331,8 +335,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
         return s, f"Not a folder, a Markdown, Word or OpenDocument file: {path}"
     if len(args) == 2:
         old, new = Path(args[0]), Path(args[1])
-        both_files = all(p.is_file() and p.suffix.lower() in PREFILLED_FILES for p in (old, new))
-        if both_files:
+        if prefillable(old) and prefillable(new):
             s.mode = "files"
             s.old, s.new = str(old.resolve()), str(new.resolve())
             s.output = ""  # next to the new one (App.follow_sides)
@@ -371,19 +374,30 @@ CHOICES = {
 def sanitized(s: Settings) -> Settings:
     """The settings, each value that is no choice the window offers
     replaced by its default (CHOICES), as is a number of hidden lines or a
-    timeout that is no number."""
+    timeout that is no number; of the moved-passage settings, only the
+    numbers of settings known kept."""
     fixed = {
         name: default
         for name, (choices, default) in CHOICES.items()
         if getattr(s, name) not in choices
     }
-    if not isinstance(s.max_hidden, int) or isinstance(s.max_hidden, bool):
+    if not is_number(s.max_hidden, int):
         fixed["max_hidden"] = MAX_HIDDEN
-    if not isinstance(s.assess_timeout, int | float) or isinstance(s.assess_timeout, bool):
+    if not is_number(s.assess_timeout):
         fixed["assess_timeout"] = ASSESS_TIMEOUT
     if not isinstance(s.md_filter, str):
         fixed["md_filter"] = ""
+    known_passage = {f.name for f in fields(MovedPassageSettings)}
+    passages = s.moved_passages if isinstance(s.moved_passages, dict) else {}
+    fixed["moved_passages"] = {
+        k: v for k, v in passages.items() if k in known_passage and is_number(v)
+    }
     return replace(s, **fixed)
+
+
+def is_number(v: object, kinds: type | tuple[type, ...] = (int, float)) -> bool:
+    """Whether v is a number of kinds, a JSON true or false being none."""
+    return isinstance(v, kinds) and not isinstance(v, bool)
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -395,16 +409,7 @@ def load_settings(path: Path | None = None) -> Settings:
         s = Settings(**{k: v for k, v in data.items() if k in known})
     except (OSError, ValueError, TypeError):
         return Settings()
-    s = sanitized(s)
-    known_passage = {f.name for f in fields(MovedPassageSettings)}
-    if not isinstance(s.moved_passages, dict):
-        s.moved_passages = {}
-    s.moved_passages = {
-        k: v
-        for k, v in s.moved_passages.items()
-        if k in known_passage and isinstance(v, int | float) and not isinstance(v, bool)
-    }
-    return s
+    return sanitized(s)
 
 
 def save_settings(s: Settings, path: Path | None = None) -> bool:
@@ -476,21 +481,10 @@ def run_of(s: Settings) -> Run:
         language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
-    request = None
-    if s.assess:
-        request = AssessRequest(
-            s.assess,
-            effort=s.assess_effort,
-            context=s.assess_context,
-            instructions=s.assess_instructions,
-            timeout=s.assess_timeout,
-            save_prompt=s.assess_save_prompt,
-            annotate=s.assess_annotate,
-        )
     common = {
         "options": options,
         "align": s.align,
-        "request": request,
+        "request": request_of(s),
         "documents": s.assess_documents,
     }
     if s.mode == "review":
@@ -498,7 +492,7 @@ def run_of(s: Settings) -> Run:
             raise ValueError("choose the file to review")
         if not s.assess:
             raise ValueError("choose an AI to review the file")
-        out = Path(with_format(s.output, "html")) if s.output else review_page(Path(s.single))
+        out = Path(with_format(s.output, "html")) if s.output else page_of("review", s.single, "")
         return Run("review", s.single, out, **common)
     old, new = sides(s)
     fmt = s.output_format if s.output_format in FORMATS else "html"
@@ -516,8 +510,7 @@ def run_of(s: Settings) -> Run:
     if s.output:
         out = Path(with_format(s.output, fmt))
     else:
-        out = s.mode != "git" and default_page(Path(old), Path(new), FORMATS[fmt])
-        out = out or default_output(fmt)
+        out = page_of(s.mode, old, new, FORMATS[fmt]) or default_output(fmt)
     run = Run(
         s.mode,
         old,
@@ -639,6 +632,15 @@ def moves_of(s: Settings, sentences: bool) -> MoveSettings:
     similarity = s.sentence_move_similarity if sentences else s.move_similarity
     algorithm = s.sentence_move_algorithm if sentences else s.move_algorithm
     return MoveSettings(similarity, algorithm if algorithm in MOVE_ALGORITHMS else None)
+
+
+def passes(check: Callable[..., object], *args: object) -> bool:
+    """Whether check(*args) passes: raises no ValueError."""
+    try:
+        check(*args)
+    except ValueError:
+        return False
+    return True
 
 
 def sides(s: Settings) -> tuple[str, str]:
@@ -1338,8 +1340,9 @@ class App:
     def update_ai_switches(self) -> None:
         """What the AI is sent and the AI assessment's switches, greyed out
         while no AI will assess."""
+        active = self.ai_active()
         for switch in self.ai_switches:
-            on = self.ai_active()
+            on = active
             # the documents are made of the problems marked in the text
             if switch is getattr(self, "documents_switch", None):
                 on = on and self.assess_annotate.get()
@@ -1414,24 +1417,22 @@ class App:
             self.model_box.configure(values=())
             self.update_efforts()
             return
-        if ai not in self.ai_models and self.saved_model == (ai, self.assess_model.get()):
-            # the model saved shown meanwhile, checked once they are known
-            self.ask(ai, lambda: models_of(ai))
-            return
         if ai not in self.ai_models:
-            # "Loading…" until the AI has said its models; the model and
-            # effort chosen before kept for then
-            if self.assess_model.get() != LOADING:
-                self.pending = (
-                    (self.assess_model.get().strip(), self.assess_effort.get().strip())
-                    if keep
-                    else ("", "")
-                )
-            self.model_box.configure(values=())
-            self.assess_model.set(LOADING)
-            self.assess_effort.set(LOADING)
-            self.model_box.state(["disabled"])
-            self.effort_box.state(["disabled"])
+            # the model saved shown meanwhile, checked once they are known;
+            # else "Loading…" until the AI has said its models, the model
+            # and effort chosen before kept for then
+            if self.saved_model != (ai, self.assess_model.get()):
+                if self.assess_model.get() != LOADING:
+                    self.pending = (
+                        (self.assess_model.get().strip(), self.assess_effort.get().strip())
+                        if keep
+                        else ("", "")
+                    )
+                self.model_box.configure(values=())
+                self.assess_model.set(LOADING)
+                self.assess_effort.set(LOADING)
+                self.model_box.state(["disabled"])
+                self.effort_box.state(["disabled"])
             self.ask(ai, lambda: models_of(ai))
             return
         models = [m.name for m in self.ai_models[ai]]
@@ -1661,11 +1662,7 @@ class App:
         fmt = self.output_format.get()
 
         def fits(split: str) -> bool:
-            try:
-                check_split(split, fmt)
-            except ValueError:
-                return False
-            return True
+            return passes(check_split, split, fmt)
 
         for value, button in self.split_buttons.items():
             enable(button, fits(value) and not self.reviewing())
@@ -1690,18 +1687,15 @@ class App:
 
     def sides_page(self) -> str:
         """Where the output goes by default: next to the new file, into the new
-        folder (default_page); "" comparing git versions, or sides not yet chosen."""
+        folder, the file reviewed (page_of); "" comparing git versions, or sides
+        not yet chosen."""
         mode = self.mode.get()
-        if mode == "git":
-            return ""
-        if mode == "review":
-            single = self.single.get().strip()
-            return str(review_page(Path(single)).resolve()) if single else ""
-        old, new = (self.old, self.new) if mode == "files" else (self.old_folder, self.new_folder)
-        if not old.get().strip() or not new.get().strip():
-            return ""
-        page = default_page(
-            Path(old.get().strip()), Path(new.get().strip()), FORMATS[self.output_format.get()]
+        old, new = {
+            "review": (self.single, self.single),
+            "folders": (self.old_folder, self.new_folder),
+        }.get(mode, (self.old, self.new))
+        page = page_of(
+            mode, old.get().strip(), new.get().strip(), FORMATS[self.output_format.get()]
         )
         return str(page.resolve()) if page else ""
 
@@ -1718,11 +1712,9 @@ class App:
         are compared that are not both of their kind; a repository or folders
         are only known once compared."""
         files = self.mode.get() == "files"
-        for fmt, suffix in TRACKED_FORMATS.items():
-            fits = not files or all(
-                Path(v.get().strip()).suffix.lower() == suffix for v in (self.old, self.new)
-            )
-            enable(self.format_buttons[fmt], fits)
+        old, new = self.old.get().strip(), self.new.get().strip()
+        for fmt in TRACKED_FORMATS:
+            enable(self.format_buttons[fmt], not files or passes(check_paths, old, new, fmt))
         if self.reviewing():  # a review is an HTML report: no diff, no changes
             for fmt, button in self.format_buttons.items():
                 enable(button, fmt == "html")
