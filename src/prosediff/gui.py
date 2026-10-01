@@ -1230,18 +1230,49 @@ class App:
         self.assess_send_files = self.setting("assess_send_files")
         self.assess_files = self.setting("assess_files")
         sending = toggle(card, "Other files", self.assess_send_files)
-        sending.grid(row=4, column=0, sticky="w", **PAD)
+        sending.grid(row=4, column=0, sticky="nw", **PAD)
         hint(
             sending,
             "Also send the AI other files as context, to draw on, not to assess: a "
             "journal's guidelines, a reviewer's report, a cited paper (PDF, Word, "
             "OpenDocument, Markdown or text).",
         )
-        self.files_entry = ttk.Entry(card, textvariable=self.assess_files)
-        self.files_entry.grid(row=4, column=1, sticky="ew", **PAD)
-        hint(self.files_entry, 'The files to send, separated by ";".')
-        self.files_pick = browse(card, self.pick_files, "Add files to send")
-        self.files_pick.grid(row=4, column=2, sticky="w", **PAD)
+        # the files, one a row (their name, their folder), with the buttons
+        # that add and remove them; kept in assess_files, separated by ";"
+        listed = ttk.Frame(card)
+        listed.grid(row=4, column=1, sticky="ew", **PAD)
+        listed.columnconfigure(0, weight=1)
+        self.files_list = ttk.Treeview(
+            listed, columns=("name", "folder"), show="headings", height=4, selectmode="extended"
+        )
+        self.files_list.heading("name", text="File", anchor="w")
+        self.files_list.heading("folder", text="Folder", anchor="w")
+        self.files_list.column("name", width=180, stretch=False, anchor="w")
+        self.files_list.column("folder", width=320, anchor="w")
+        self.files_list.grid(row=0, column=0, sticky="ew")
+        scroll = ttk.Scrollbar(listed, orient="vertical", command=self.files_list.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        self.files_list.configure(yscrollcommand=scroll.set)
+        self.files_list.bind("<Delete>", lambda e: self.remove_files())
+        hint(self.files_list, "The files sent to the AI with the text, one a row.")
+        buttons = ttk.Frame(card)
+        buttons.grid(row=4, column=2, sticky="nw", **PAD)
+        self.files_add = ttk.Button(
+            buttons, text="Add…", command=self.pick_files, bootstyle="secondary-outline", width=9
+        )
+        self.files_add.pack(fill="x")
+        hint(self.files_add, "Add files to send (several at once)")
+        self.files_remove = ttk.Button(
+            buttons,
+            text="Remove",
+            command=self.remove_files,
+            bootstyle="secondary-outline",
+            width=9,
+        )
+        self.files_remove.pack(fill="x", pady=(6, 0))
+        hint(self.files_remove, "Remove the files chosen in the list (Delete)")
+        self.show_files()
+        self.assess_files.trace_add("write", lambda *_: self.show_files())
         self.assess_send_files.trace_add("write", lambda *_: self.update_ai_switches())
         self.ai_switches += [entry, write, pick, author, sending]
         self.assess_annotate = self.setting("assess_annotate")
@@ -1395,9 +1426,10 @@ class App:
                 on = on and not self.reviewing()
             enable(switch, on)
         # the files to send, while sending them
-        if hasattr(self, "files_entry"):
-            for w in (self.files_entry, self.files_pick):
-                enable(w, active and self.assess_send_files.get())
+        if hasattr(self, "files_list"):
+            sending = active and self.assess_send_files.get()
+            for w in (self.files_list, self.files_add, self.files_remove):
+                enable(w, sending)
 
     def pick_files(self) -> None:
         """Add files to those sent to the AI as context."""
@@ -1410,9 +1442,26 @@ class App:
             ],
         )
         if chosen:
-            have = [f for f in self.assess_files.get().split(";") if f.strip()]
+            have = self.files_chosen()
             self.assess_files.set(";".join([*have, *(f for f in chosen if f not in have)]))
             self.assess_send_files.set(True)
+
+    def files_chosen(self) -> list[str]:
+        """The files to send, as kept: assess_files, separated by ";"."""
+        return [f.strip() for f in self.assess_files.get().split(";") if f.strip()]
+
+    def show_files(self) -> None:
+        """The list of files to send, as assess_files holds them."""
+        self.files_list.delete(*self.files_list.get_children())
+        for f in self.files_chosen():
+            p = Path(f)
+            self.files_list.insert("", "end", iid=f, values=(p.name, str(p.parent)))
+
+    def remove_files(self) -> None:
+        """Take the files chosen in the list off it."""
+        gone = set(self.files_list.selection())
+        if gone:
+            self.assess_files.set(";".join(f for f in self.files_chosen() if f not in gone))
 
     def pick_into(self, var: tk.StringVar, title: str) -> None:
         chosen = filedialog.askopenfilename(

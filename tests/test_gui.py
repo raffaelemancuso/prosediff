@@ -5,6 +5,7 @@ import queue
 import sys
 from dataclasses import fields, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -1174,21 +1175,34 @@ def test_the_one_file_tab(root):
 def test_the_window_greys_out_the_files_while_not_sending_them(root):
     app = App(root, Settings(mode="files", assess="claude"))
     app.update_ai_switches()
-    assert app.files_entry.instate(["disabled"]) and app.files_pick.instate(["disabled"])
+    assert app.files_list.instate(["disabled"]) and app.files_add.instate(["disabled"])
     app.assess_send_files.set(True)
-    assert not app.files_entry.instate(["disabled"])
+    assert not app.files_list.instate(["disabled"])
+    # the list shows the files, one a row, and Remove takes the chosen off
+    app.assess_files.set(r"C:\docs\guide.pdf;C:\docs\report.docx")
+    rows = [app.files_list.item(i, "values") for i in app.files_list.get_children()]
+    assert [r[0] for r in rows] == ["guide.pdf", "report.docx"]
+    app.files_list.selection_set(r"C:\docs\guide.pdf")
+    app.remove_files()
+    assert app.assess_files.get() == r"C:\docs\report.docx"
 
 
 def test_the_window_never_shrinks_when_the_status_gets_shorter(root):
-    """A longer status widens the window; a shorter one leaves it as wide."""
+    """A longer status raises the window's minimum to the width it asks
+    for; a shorter one leaves it there. (The test's window is hidden, so
+    Tk sends it no <Configure>: the handler is called as Tk would.)"""
     app = App(root, Settings(mode="files"))
     root.update()
+    shown = SimpleNamespace(widget=root)
     app.status.set("Asking claude to assess the changes… " + "x" * 200)
     root.update()
-    wide = root.winfo_width()
+    wide = root.winfo_reqwidth()
+    app.keep_largest_size(shown)
+    assert root.minsize()[0] == wide > 780
     app.status.set("Ready.")
     root.update()
-    assert root.winfo_width() >= wide and root.minsize()[0] >= wide
+    app.keep_largest_size(shown)
+    assert root.winfo_reqwidth() < wide and root.minsize()[0] == wide
 
 
 def test_the_rebuild_tab(root, tmp_path):
