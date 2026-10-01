@@ -15,20 +15,28 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
-**Side-by-side comparison of prose, not code: Word documents (.docx) first,
-OpenDocument (.odt) and Markdown too.**
+**See what changed between two drafts, and have an AI tell you whether the
+revision is better: Word documents (.docx) first, OpenDocument (.odt) and
+Markdown too.**
 
-Diff tools are made for code, where a line is a statement and a change is a
-line. prosediff is made for prose, where a line is a whole paragraph, a
-change is a few words inside it, paragraphs move, and co-authors leave
-comments in the margin: papers, reports, books, the drafts co-authors send
-back.
+- **An AI reviews the revision**: Claude Code, ChatGPT through Codex, a
+  local Ollama model (nothing leaves your computer) or any API model reads
+  the changes and gives a verdict (*Improves*, *Mixed* or *Worsens*), what
+  changed, what improved and what to fix.
+- **It marks each problem in the text**: a numbered badge on the passage
+  and a card in the margin saying what is wrong and the fix it proposes.
+- **It hands you back the document**: the Word or LibreOffice file with the
+  AI's comments, and its fixes as tracked changes to accept or reject one by
+  one.
+- **It reviews a single file too**, with no older version to compare, and
+  can check whether the added text reads as AI-written.
 
-It writes a self-contained HTML report of two versions side by side, each
-paragraph facing the paragraph it came from, changed words highlighted
-inside it, and text that moved followed to its new place **even when it was
-edited on the way**. The versions are two Word or OpenDocument documents,
-two Markdown or text files, two folders, or commits of a git repository.
+Underneath is a diff made for prose, not code: a self-contained HTML report
+of two versions side by side, each paragraph facing the one it came from,
+changed words highlighted inside it, and text that moved followed to its
+new place **even when it was edited on the way**. The versions are two Word
+or OpenDocument documents, two Markdown or text files, two folders, or
+commits of a git repository.
 
 ![An HTML report made by prosediff: the AI's verdict in the top bar; below, two versions of a short text on free fall side by side, the second a revision with errors in it, changed words highlighted, and beside them a margin of cards for the comments and the problems the AI marked, one of them pinned, its passage highlighted in the text](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_page.png)
 
@@ -48,9 +56,6 @@ two Markdown or text files, two folders, or commits of a git repository.
 - **It can put tracked changes back**: from a draft and a version returned
   without them, it writes the returned document with each change a tracked
   change, to accept or reject in Word or LibreOffice.
-- **An AI can judge the revision** (optional): Claude Code, ChatGPT through
-  Codex, a local Ollama model or any API model says whether the new version
-  is better and marks the problems in the text.
 - **The result is one HTML file**: no server, no network, no Word needed to
   read it; attach it to an e-mail, or print it.
 
@@ -60,7 +65,7 @@ two Markdown or text files, two folders, or commits of a git repository.
 uv tool install prosediff
 ```
 
-This installs `prosediff` (the command line) and `prosediff-gui` (a window).
+This installs `prosediff-gui` (the window) and `prosediff` (the command line).
 It needs Python 3.11 or later and [git](https://git-scm.com/) on `PATH` for
 every comparison, files and folders included. The AI assessment is an
 optional extra: `"prosediff[claude]"`, `"prosediff[codex]"` or
@@ -68,33 +73,26 @@ optional extra: `"prosediff[claude]"`, `"prosediff[codex]"` or
 
 ## Usage
 
-```
-prosediff --git REPO BASE [TARGET] [options]
-prosediff --files OLD NEW [options]
-prosediff --folders OLD NEW [options]
-prosediff --review FILE --assess AI [options]
-prosediff --setup-git [REPO | --global]
-```
+Run `prosediff-gui`, or double-click it (on Windows it opens no console).
+In the window:
 
-- `prosediff --files draft_v1.docx draft_v2_returned.docx --open`: what a
-  co-author changed and commented;
-- `prosediff --git . HEAD --untracked`: everything not yet committed;
-- `prosediff --folders submitted/ revised/`: two folders, file by file;
-- `prosediff --files draft_v1.docx draft_v2.docx -o redline.docx`: the new
-  version with every change a tracked change (`-o redline.odt` for
-  LibreOffice);
-- `prosediff --files draft_v1.docx draft_v2_returned.docx --assess claude
-  --open`: the report, headed by Claude Code's assessment;
-- `prosediff --review paper.docx --assess claude --open`: one paper
-  reviewed whole by the AI.
+1. Choose what to compare: two **Files**, two **Folders**, two versions in a
+   **Git repository**, or **One file** for the AI to review alone.
+2. Optionally, pick an **AI** (Claude Code, Codex, Ollama or an API model),
+   its model and effort.
+3. Click **Compare** (Ctrl+Enter). The report opens in the browser.
 
-`prosediff --setup-git` also makes `git diff` show Word and OpenDocument
-files as text, and `git difftool -t prosediff` open a report.
+![The prosediff window: a git repository with base and target commits chosen from lists, the comparison options in one card, the output, and the AI assessment card with its AI, model and effort](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
+
+`prosediff-gui OLD.docx NEW.docx` opens the window with two files filled
+in. Every option has a tooltip; [The window](https://github.com/raffaelemancuso/prosediff/blob/master/docs/window.md) describes them
+all. Everything the window does is also on the command line, for scripts
+and git: see [Command line](https://github.com/raffaelemancuso/prosediff/blob/master/docs/cli.md).
 
 ## Documentation
 
-- [Command line](https://github.com/raffaelemancuso/prosediff/blob/master/docs/cli.md): every option, examples, and git integration.
-- [The window](https://github.com/raffaelemancuso/prosediff/blob/master/docs/window.md): `prosediff-gui`.
+- [The window](https://github.com/raffaelemancuso/prosediff/blob/master/docs/window.md): every field and option of `prosediff-gui`.
+- [Command line](https://github.com/raffaelemancuso/prosediff/blob/master/docs/cli.md): every option of `prosediff`, examples, and git integration.
 - [The HTML report](https://github.com/raffaelemancuso/prosediff/blob/master/docs/report.md): what it shows, and its keys.
 - [AI assessment](https://github.com/raffaelemancuso/prosediff/blob/master/docs/ai_assessment.md): the AIs supported, what they are
   sent, the documents with the AI's comments and fixes.
