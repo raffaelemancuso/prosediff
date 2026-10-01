@@ -18,7 +18,7 @@ authors:
     given-names: Raffaele
     orcid: "https://orcid.org/0000-0003-0105-7124"
 repository-code: "https://github.com/raffaelemancuso/prosediff"
-url: "https://pypi.org/project/prosediff/"
+url: "https://raffaelemancuso.github.io/prosediff/"
 license: MIT
 version: 0.6.0
 date-released: "2026-09-29"

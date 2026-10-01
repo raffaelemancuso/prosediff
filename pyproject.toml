@@ -76,7 +76,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/raffaelemancuso/prosediff"
+Homepage = "https://raffaelemancuso.github.io/prosediff/"
+Source = "https://github.com/raffaelemancuso/prosediff"
 Issues = "https://github.com/raffaelemancuso/prosediff/issues"
 Changelog = "https://github.com/raffaelemancuso/prosediff/releases"
 
