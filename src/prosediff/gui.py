@@ -1823,11 +1823,11 @@ class App:
         # numbers as typed, negative too, for run to refuse (check_numbers);
         # what is no number, the default
         try:
-            max_hidden = int(self.max_hidden.get().replace(",", "").strip())
+            max_hidden = int(number_in(self.max_hidden.get()))
         except ValueError:
             max_hidden = MAX_HIDDEN
         try:
-            timeout = float(self.assess_timeout.get().replace(",", "").strip())
+            timeout = number_in(self.assess_timeout.get())
         except ValueError:
             timeout = ASSESS_TIMEOUT
         return Settings(
@@ -1905,7 +1905,7 @@ class App:
         for f in fields(MovedPassageSettings):
             kind = setting_type(f)
             try:
-                value = kind(float(self.passage_vars[f.name].get().replace(",", "")))
+                value = kind(number_in(self.passage_vars[f.name].get()))
             except ValueError:
                 continue
             if value != f.default:
@@ -2169,6 +2169,12 @@ def popdown_listbox(combo: ttk.Combobox, popdown: str) -> str | None:
     return None
 
 
+def number_in(text: str) -> float:
+    """The number a box holds, its thousands separated or not (1,500);
+    ValueError for none."""
+    return float(text.replace(",", "").strip())
+
+
 def number_text(n: float) -> str:
     """A number as a box shows it: its thousands separated, a whole one
     without decimals (1,500; 2.5)."""
@@ -2187,7 +2193,7 @@ def number_box(
 
     def stepped(sign: int) -> str:
         try:
-            n = float(variable.get().replace(",", "").strip())
+            n = number_in(variable.get())
         except ValueError:
             n = low
         variable.set(number_text(min(high, max(low, n + sign * step))))
@@ -2201,7 +2207,7 @@ def number_box(
 def passage_text(f, value: float) -> str:
     """A setting of moved passages (a field of MovedPassageSettings) as its
     box shows it: a share as it is, a count with its thousands separated."""
-    return f"{value:g}" if f.metadata["share"] else f"{int(value):,}"
+    return f"{value:g}" if f.metadata["share"] else number_text(int(value))
 
 
 def segment(

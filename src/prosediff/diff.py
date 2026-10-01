@@ -34,9 +34,8 @@ from rapidfuzz import fuzz
 from rapidfuzz.distance import Indel
 
 from prosediff import document, footnotes
-from prosediff.comments import (  # noqa: F401  (re-exported)
+from prosediff.comments import (
     ANY_PLACEHOLDER,
-    COMMENT_MARK,
     END_PLACEHOLDER,
     PLACEHOLDER,
     CommentEntry,
@@ -1700,11 +1699,11 @@ def passages_of(
     """The passages removed from and added to one changed row: a line
     removed or added whole is one passage, an edited one has its runs of
     changes (holes of up to ps.max_gap words allowed)."""
-    whole = (-1, -1)
-    if row.kind == "delete":
-        return [p for p in [_passage(row, True, old_line, 0, len(old_line), whole, ps)] if p]
-    if row.kind == "insert":
-        return [p for p in [_passage(row, False, new_line, 0, len(new_line), whole, ps)] if p]
+    if row.kind in ("delete", "insert"):
+        old = row.kind == "delete"
+        line = old_line if old else new_line
+        p = _passage(row, old, line, 0, len(line), (-1, -1), ps)
+        return [p] if p else []
     ops = word_ops(old_line, new_line)
     found = []
     for old in (True, False):
@@ -1767,16 +1766,15 @@ def _core(
     runs = [k for k, m in enumerate(blocks) if m.size >= ps.edge_run]
     if not runs:
         return None
+
+    def near(x, y) -> bool:
+        """Whether block y follows block x within ps.max_gap on both sides."""
+        return y.a - (x.a + x.size) <= ps.max_gap and y.b - (x.b + x.size) <= ps.max_gap
+
     first, last = runs[0], runs[-1]
-    while first > 0 and (
-        blocks[first].a - (blocks[first - 1].a + blocks[first - 1].size) <= ps.max_gap
-        and blocks[first].b - (blocks[first - 1].b + blocks[first - 1].size) <= ps.max_gap
-    ):
+    while first > 0 and near(blocks[first - 1], blocks[first]):
         first -= 1
-    while last < len(blocks) - 1 and (
-        blocks[last + 1].a - (blocks[last].a + blocks[last].size) <= ps.max_gap
-        and blocks[last + 1].b - (blocks[last].b + blocks[last].size) <= ps.max_gap
-    ):
+    while last < len(blocks) - 1 and near(blocks[last], blocks[last + 1]):
         last += 1
     i1, j1 = blocks[first].a, blocks[first].b
     i2, j2 = blocks[last].a + blocks[last].size, blocks[last].b + blocks[last].size

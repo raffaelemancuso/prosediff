@@ -136,9 +136,6 @@ class Image:
         return cls(f"[image: {description}]" if description else "[image]")
 
 
-Inline = Text | Span | CommentMark | CommentEnd | NoteRef | Image
-
-
 @dataclass
 class Block:
     """A paragraph ("p"), a heading ("heading", with its level), a list item

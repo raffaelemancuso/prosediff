@@ -709,7 +709,7 @@ thead.print, .print-note { display: none; }
    (off): one number when both are the same, else both, the "Moved passages"
    switch showing one. #}
 {% macro both(on, off) -%}
-{% if on == off %}{{ on | comma }}{% else %}<span class="pv-on">{{ on | comma }}</span><span class="pv-off">{{ off | comma }}</span>{% endif %}
+{{ pv(on | comma, none if on == off else off | comma) }}
 {%- endmacro %}
 
 {# The counts of a file or a comparison, its lines called by unit (a
@@ -729,9 +729,6 @@ thead.print, .print-note { display: none; }
 {% macro unit_of(files, split) -%}
 {% if files and files | selectattr("markdown") | list | length == files | length %}{{ "sentence" if split == "sentence" else "paragraph" }}{% else %}line{% endif %}
 {%- endmacro %}
-{% macro unit_name(c, split) -%}
-{{ unit_of(c.files, split) }}s
-{%- endmacro %}
 
 {# Which view this is: prose compared paragraph by paragraph or sentence
    by sentence, and, when the report holds both (other), a button to the
@@ -741,10 +738,10 @@ thead.print, .print-note { display: none; }
 {%- endmacro %}
 
 {# The body of the report for one comparison: its summary, its files.
-   prefix sets its ids apart when the report holds two, one per split;
-   other is the other split then. notes: a margin beside each file's rows,
+   other: the other split, when the report holds both (their ids set apart
+   by render.set_apart). notes: a margin beside each file's rows,
    for the cards of its comments and of the problems the AI marked. #}
-{% macro report_body(c, split, prefix="", other=none) %}
+{% macro report_body(c, split, other=none) %}
 {% set notes = (assessment and assessment.annotations and not assessment.error) or c.comments %}
 {% set width = 5 if notes else 4 %}
 {% if not c.files %}
@@ -760,7 +757,7 @@ thead.print, .print-note { display: none; }
 <div class="summary">
   {% if prose or n.changed_lines or n.inserted_lines or n.deleted_lines or n.moved or n.moved_passages %}
   <p class="units">{% if prose %}{{ view_label(split, other) }}{% endif %}
-    <span><b>{{ unit_name(c, split) | capitalize }}:</b>
+    <span><b>{{ (unit_of(c.files, split) ~ "s") | capitalize }}:</b>
     {{ n.changed_lines | comma }} changed,
     {{ both(n.inserted_lines, y.inserted_lines) }} inserted,
     {{ both(n.deleted_lines, y.deleted_lines) }} deleted,
@@ -910,10 +907,10 @@ thead.print, .print-note { display: none; }
 
 {% if alt %}
 <div class="split" data-split="paragraph" aria-label="Compared paragraph by paragraph">
-{{ report_body(c, "paragraph", "", "sentence") }}
+{{ report_body(c, "paragraph", "sentence") }}
 </div>
 <div class="split" data-split="sentence" aria-label="Compared sentence by sentence" hidden>
-{{ report_body(alt, "sentence", "s-", "paragraph") }}
+{{ report_body(alt, "sentence", "paragraph") }}
 </div>
 {% else %}
 {{ report_body(c, split) }}
@@ -999,11 +996,16 @@ thead.print, .print-note { display: none; }
 
   // The views (one column, formatted, change highlights, ...) are classes
   // of the body, remembered where the browser allows.
-  function setView(name, on) {
+  // A view switched on or off, its button pressed or not.
+  function applyView(name, on) {
     document.body.classList.toggle(name, on);
     if (name === "formats" && on) unfoldFormats();
     var b = document.querySelector('[data-toggle="' + name + '"]');
     if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  // The same, chosen: the browser remembers it.
+  function setView(name, on) {
+    applyView(name, on);
     try { localStorage.setItem("prosediff-" + name, on ? "1" : "0"); } catch (e) {}
   }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
@@ -1038,11 +1040,8 @@ thead.print, .print-note { display: none; }
       var saved = localStorage.getItem("prosediff-" + name);
       if (saved !== null) on = saved === "1";
     } catch (e) {}
-    document.body.classList.toggle(name, on);
-    var b = document.querySelector('[data-toggle="' + name + '"]');
-    if (b) b.setAttribute("aria-pressed", on ? "true" : "false");
+    applyView(name, on);
   });
-  if (document.body.classList.contains("formats")) unfoldFormats();
 
   // Reveal the run of unchanged lines a fold row stands for.
   function unfold(fold) {

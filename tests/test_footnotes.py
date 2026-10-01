@@ -3,7 +3,8 @@
 from helpers import NOTE, strip_tags
 
 from prosediff import Options, compare_paths, render
-from prosediff.diff import PLACEHOLDER, footnote_similarity
+from prosediff.comments import PLACEHOLDER
+from prosediff.diff import footnote_similarity
 from prosediff.footnotes import STAND_IN, match_footnotes, set_aside
 
 NOTES = {

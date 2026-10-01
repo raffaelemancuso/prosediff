@@ -91,17 +91,11 @@ def included(rel: str, globs: list[str]) -> bool:
 
 
 def read_side(path: Path, include: str | None = None) -> dict[str, bytes]:
-    """The files of one side, by path relative to it ("/"-separated).
-
-    A file is a side of one file, under its own name; a folder contributes
-    every file below it that the include patterns match (patterns()), .git
-    folders, the lock files of open documents and an HTML report of prosediff's own
-    (FOLDER_PAGE) at its top excepted.
+    """The files of a folder compared, by path relative to it
+    ("/"-separated): every file below it that the include patterns match
+    (patterns()), .git folders, the lock files of open documents and an
+    HTML report of prosediff's own (FOLDER_PAGE) at its top excepted.
     """
-    if path.is_file():
-        return {path.name: path.read_bytes()}
-    if not path.is_dir():
-        raise SourceError(f"no such file or folder: {path}")
     globs = patterns(include)
     files = {}
     for p in sorted(path.rglob("*")):

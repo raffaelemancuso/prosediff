@@ -4,8 +4,18 @@ import pytest
 from helpers import END, NOTE, two_folders
 
 from prosediff import Options, compare, compare_paths, render
-from prosediff.comments import NEW_COMMENT_MARK, REMOVED_COMMENT_MARK, end_of, number_of
-from prosediff.diff import COMMENT_MARK, PLACEHOLDER, Comments, fold_comments, plain, show_comments
+from prosediff.comments import (
+    COMMENT_MARK,
+    NEW_COMMENT_MARK,
+    PLACEHOLDER,
+    REMOVED_COMMENT_MARK,
+    Comments,
+    end_of,
+    fold_comments,
+    number_of,
+    plain,
+    show_comments,
+)
 
 MARKER = 'data-author="Anna" data-date="2026-09-23 23:40" data-text="Too long."'
 
