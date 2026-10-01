@@ -41,6 +41,7 @@ from prosediff.comments import (  # noqa: F401  (re-exported)
     PLACEHOLDER,
     CommentEntry,
     Comments,
+    Folder,
     end_of,
     fold_comments,
     placeholders_in,
@@ -1302,24 +1303,20 @@ class Styler:
         return self._cache[line]
 
 
-def deleted_row(number: int, line: str, style: Styler) -> Row:
+def whole_row(kind: str, number: int, line: str, style: Styler) -> Row:
+    """The row of a line removed ("delete", line number on the left) or
+    added ("insert", on the right) whole."""
+    words, cell = len(WORD.findall(line)), styled(line, style(line))
+    if kind == "delete":
+        return Row(
+            kind, number, cell, changes=["removed this line"], words_removed=words, text=line
+        )
     return Row(
-        "delete",
-        number,
-        styled(line, style(line)),
-        changes=["removed this line"],
-        words_removed=len(WORD.findall(line)),
-        text=line,
-    )
-
-
-def inserted_row(number: int, line: str, style: Styler) -> Row:
-    return Row(
-        "insert",
+        kind,
         right_no=number,
-        right=styled(line, style(line)),
+        right=cell,
         changes=["added this line"],
-        words_added=len(WORD.findall(line)),
+        words_added=words,
         text=line,
     )
 
@@ -1855,7 +1852,7 @@ def mark_moves(
     prepare, score = move_scorer(similarity, algorithm)
 
     def line_of(p: Passage) -> str:
-        return old[p.row.left_no - 1] if p.old else new[p.row.right_no - 1]
+        return _row_lines(p.row, old, new)[0 if p.old else 1]
 
     # each passage's words and punctuation, and how many of each
     tokens: dict[Passage, list[tuple[int, int, str]]] = {}
@@ -2189,9 +2186,9 @@ def align(
 
     def changed_row(i: int | None, j: int | None) -> Row:
         if j is None:
-            return deleted_row(i + 1, old[i], style)
+            return whole_row("delete", i + 1, old[i], style)
         if i is None:
-            return inserted_row(j + 1, new[j], style)
+            return whole_row("insert", j + 1, new[j], style)
         w = word_diff(old[i], new[j], style(old[i]), style(new[j]))
         return Row(
             # no change in the text (only comments came or went): an
@@ -2554,28 +2551,19 @@ def build_files(
     marked_languages = options.language in (DOCUMENT, DEFAULT)
 
     def document_lines(doc: Document | None) -> list[Line]:
-        # a comment's id in this document -> its placeholder, for the end
-        # of its text: the ids are the document's own
-        started: dict[str, str] = {}
+        # the ids of the comments are the document's own
+        folder = Folder(comments, options.empty_comments)
 
         def comment(c: CommentMark | CommentEnd) -> str:
             """What a document's comment, or the end of its text, is in its
             text: a placeholder, folded; nothing, when it has no text to
             show; or the span pandoc writes."""
             if isinstance(c, CommentEnd):
-                if not fold:
-                    return comment_end_markdown(c)
-                mark = started.pop(c.id, None)
-                return end_of(mark) if mark is not None else ""
+                return folder.end(c.id) if fold else comment_end_markdown(c)
             if not fold:
                 return comment_markdown(c)
-            if not c.text and not options.empty_comments:
-                return ""
-            mark = comments.placeholder(quoted_author(c.author), c.text, short_date(c.date), c.rich)
-            if mark is None:
-                return comment_markdown(c)
-            started[c.id] = mark
-            return mark
+            mark = folder.start(c.id, quoted_author(c.author), c.text, short_date(c.date), c.rich)
+            return comment_markdown(c) if mark is None else mark
 
         found = document.lines(doc, comment) if doc is not None else []
         if not marked_languages:
@@ -2583,7 +2571,7 @@ def build_files(
                 line.lang = ""
         return found
 
-    def read_side(data: bytes, path: str | None) -> Document | None:
+    def read_doc(data: bytes, path: str | None) -> Document | None:
         """A side of a Word or OpenDocument file, read; None for any other."""
         if data and is_document(path):
             return read_document(data, path, options.docx_changes)
@@ -2620,7 +2608,7 @@ def build_files(
         # (prosediff.document); a side of any other file is text.
         from_word = is_document(fd.old_path) or is_document(fd.new_path)
         try:
-            old_doc, new_doc = read_side(old_bytes, fd.old_path), read_side(new_bytes, fd.new_path)
+            old_doc, new_doc = read_doc(old_bytes, fd.old_path), read_doc(new_bytes, fd.new_path)
         except SourceError as e:
             fd.binary = True
             fd.note = str(e)
@@ -2685,8 +2673,8 @@ def build_files(
         if fd.markdown:
             fd.old_lines = [diff_line(x, fn.old if fn else {}) for x in old]
             fd.new_lines = [diff_line(x, fn.new if fn else {}) for x in new]
-            fd.old_text = [footnotes.numbered_line(x, fn.old if fn else {}) for x in old]
-            fd.new_text = [footnotes.numbered_line(x, fn.new if fn else {}) for x in new]
+            fd.old_text = [footnotes.numbered(x, fn.old if fn else {}) for x in old]
+            fd.new_text = [footnotes.numbered(x, fn.new if fn else {}) for x in new]
             fd.comments = comments
         else:
             fd.old_lines, fd.new_lines = list(old), list(new)

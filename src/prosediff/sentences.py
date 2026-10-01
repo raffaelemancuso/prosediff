@@ -42,7 +42,7 @@ LIST_ITEM = re.compile(r"^(\s*)([-*+]|\d+[.)])(\s+)")
 FOOTNOTE_REF = re.compile(r"\[\^[^\]]*\]")
 # A footnote reference or a closing quote or bracket rides along with the
 # sentence it follows: "...the library.[^4] We..." breaks after the marker.
-ATTACHED = re.compile(r"[\"'”’)\]]*(?:\[\^[^\]]*\])?[\"'”’)\]]*")
+ATTACHED = re.compile(f"[\"'”’)\\]]*(?:{FOOTNOTE_REF.pattern})?[\"'”’)\\]]*")
 GAP = re.compile(r"[ \t]+")
 # The stand-in rule, for languages yasbd does not know.
 SIMPLE_BOUNDARY = re.compile(r"[.!?]+(?=\s+[\"'“‘(\[]?[A-ZÀ-ɏ])")
@@ -66,10 +66,6 @@ def detector(language: str):
         except UnsupportedLanguageError:
             pass
     return SimpleDetector()
-
-
-def is_supported(language: str) -> bool:
-    return not isinstance(detector(language), SimpleDetector)
 
 
 def _without_footnotes(text: str) -> tuple[str, list[int]]:

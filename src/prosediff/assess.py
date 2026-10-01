@@ -56,7 +56,7 @@ VERDICTS = ("improves", "mixed", "worsens")
 # fair or poor.
 REVIEW_VERDICTS = ("good", "fair", "poor")
 # The verdicts of the second assessment, whether the new text reads as written
-# by an AI (AssessRequest.ai_writing): likely, possibly or unlikely.
+# by an AI (an assessment of kind "writing"): likely, possibly or unlikely.
 WRITING_VERDICTS = ("likely", "possibly", "unlikely")
 # What the model reads: the whole new version and the changes, or the
 # changes alone.
@@ -130,7 +130,7 @@ Write "None found." if there are none.
 Be specific and brief. Write in the language the document is written in, \
 unless the instructions of the person asking say otherwise."""
 
-# The second assessment, asked apart when AssessRequest.ai_writing: whether
+# The second assessment, of kind "writing", asked apart: whether
 # the text the changes added reads as written by an AI. Such a judgement is
 # circumstantial, and the model is told so.
 SYSTEM_WRITING = """\
@@ -324,9 +324,9 @@ class AssessRequest:
     instructions of the person asking (added to the prompt), how long it
     may take, whether the text sent is put in the HTML report
     (save_prompt: Assessment.prompt_text), whether the model marks the
-    problems in the text (annotate: Assessment.annotations), and whether it
-    is asked apart, a second time, if the new text reads as written by an
-    AI (ai_writing: an assessment of kind "writing")."""
+    problems in the text (annotate: Assessment.annotations). Whether the
+    new text reads as written by an AI is asked apart, a second time
+    (assess_comparison with kind "writing")."""
 
     spec: str
     effort: str = ""
@@ -335,7 +335,6 @@ class AssessRequest:
     timeout: float = ASSESS_TIMEOUT
     save_prompt: bool = False
     annotate: bool = True
-    ai_writing: bool = False
 
 
 @dataclass
@@ -489,11 +488,7 @@ def prompt_for(diff: str, subject: str, document: str = "", instructions: str = 
         f"The changes made to {subject}, as a word diff:\n\n"
         f"<diff>\n{cut(diff, MAX_DIFF_CHARS, 'diff')}\n</diff>"
     )
-    if instructions.strip():
-        parts.append(
-            "The instructions of the person asking for this assessment, to follow "
-            f"within the format above:\n\n<instructions>\n{instructions.strip()}\n</instructions>"
-        )
+    parts += instructions_part(instructions, "assessment")
     parts.append("Assess the changes as the instructions say.")
     return "\n\n".join(parts)
 
@@ -505,13 +500,20 @@ def review_prompt_for(document: str, subject: str, instructions: str = "") -> st
         f"The document to review, {subject}:\n\n"
         f"<document>\n{cut(document, MAX_DIFF_CHARS, 'document')}\n</document>"
     ]
-    if instructions.strip():
-        parts.append(
-            "The instructions of the person asking for this review, to follow "
-            f"within the format above:\n\n<instructions>\n{instructions.strip()}\n</instructions>"
-        )
+    parts += instructions_part(instructions, "review")
     parts.append("Review the document as the instructions say.")
     return "\n\n".join(parts)
+
+
+def instructions_part(instructions: str, what: str) -> list[str]:
+    """The part of the message giving the instructions of the person
+    asking for this what (an assessment, a review); none without them."""
+    if not instructions.strip():
+        return []
+    return [
+        f"The instructions of the person asking for this {what}, to follow within the "
+        f"format above:\n\n<instructions>\n{instructions.strip()}\n</instructions>"
+    ]
 
 
 def _missing(extra: str, what: str) -> AssessError:
@@ -615,6 +617,16 @@ def _any_llm(
     except Exception as e:  # any-llm's errors, a connection refused, an unknown provider
         raise AssessError(f"{provider}/{model}: {e}") from e
     return response.choices[0].message.content or "", response.model or model
+
+
+def _within_as(label: str, coroutine, timeout: float):
+    """_within, any other error of an SDK an AssessError saying label."""
+    try:
+        return _within(coroutine, timeout)
+    except AssessError:
+        raise
+    except Exception as e:
+        raise AssessError(f"{label}: {e}") from e
 
 
 def _within(coroutine, timeout: float):
@@ -732,12 +744,7 @@ def _claude_models(timeout: float) -> list[ModelInfo]:
         return info.get("models") or []
 
     with tempfile.TemporaryDirectory() as cwd:
-        try:
-            found = _within(run(cwd), timeout)
-        except AssessError:
-            raise
-        except Exception as e:
-            raise AssessError(f"Claude Code: {e}") from e
+        found = _within_as("Claude Code", run(cwd), timeout)
     return [
         ModelInfo(
             m["value"],
@@ -759,12 +766,7 @@ def _codex_models(timeout: float) -> list[ModelInfo]:
         async with AsyncCodex() as codex:
             return (await codex.models()).data
 
-    try:
-        found = [m for m in _within(run(), timeout) if not m.hidden]
-    except AssessError:
-        raise
-    except Exception as e:
-        raise AssessError(f"Codex: {e}") from e
+    found = [m for m in _within_as("Codex", run(), timeout) if not m.hidden]
     found.sort(key=lambda m: not m.is_default)
 
     def value(effort) -> str:

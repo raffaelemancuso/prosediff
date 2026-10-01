@@ -126,6 +126,35 @@ class Comments:
         return len(self._items)
 
 
+class Folder:
+    """The comments of one text (a Markdown file, a document) folded into
+    placeholders: a comment with no text left out unless keep_empty, the
+    end of each comment's text marked with its placeholder's end (end_of)."""
+
+    def __init__(self, comments: Comments, keep_empty: bool = False) -> None:
+        self.comments = comments
+        self.keep_empty = keep_empty
+        self.started: dict[str, str] = {}  # a comment's id -> its placeholder
+
+    def start(
+        self, cid: str | None, author: str, text: str, date: str = "", rich: Rich = ()
+    ) -> str | None:
+        """A comment's placeholder; "" for a comment left out; None when
+        there are no placeholders left, the comment to be kept as written."""
+        if not text and not self.keep_empty:
+            return ""
+        mark = self.comments.placeholder(author, text, date, rich)
+        if mark is not None and cid:
+            self.started[cid] = mark
+        return mark
+
+    def end(self, cid: str | None) -> str:
+        """The end of a comment's text: its mark, or nothing for a comment
+        not folded."""
+        mark = self.started.pop(cid, None) if cid else None
+        return end_of(mark) if mark is not None else ""
+
+
 def end_of(placeholder: str) -> str:
     """The character marking where the text of the comment behind
     placeholder ends."""
@@ -188,8 +217,7 @@ def fold_comments(text: str, comments: Comments, keep_empty: bool = False) -> st
     its text with it.
     """
     out = []
-    # a comment-start's id -> its placeholder, for its comment-end
-    started: dict[str, str] = {}
+    folder = Folder(comments, keep_empty)
     i = 0
     while i < len(text):
         c = text[i]
@@ -204,29 +232,23 @@ def fold_comments(text: str, comments: Comments, keep_empty: bool = False) -> st
                 attrs = text[close + 1 : end + 1] if end != -1 else ""
                 m = COMMENT_CLASS.match(attrs)
                 if m:
+                    cid = ID.search(attrs)
+                    cid = cid[1] if cid else None
                     if m[1] == "comment-end":
-                        cid = ID.search(attrs)
-                        mark = started.pop(cid[1], None) if cid else None
-                        if mark is not None:
-                            out.append(end_of(mark))
+                        out.append(folder.end(cid))
                         i = end + 1
                         continue
                     author = AUTHOR.search(attrs)
                     date = DATE_ATTRIBUTE.search(attrs)
                     # Markdown escapes (\[ \* \_ ...) are not part of the comment
                     note = ESCAPE.sub(r"\1", spaced(text[i + 1 : close]))
-                    if not note and not keep_empty:
-                        # a comment with no text says nothing: left out
-                        i = end + 1
-                        continue
-                    mark = comments.placeholder(
+                    mark = folder.start(
+                        cid,
                         author[1] if author else "",
                         note,
                         short_date(date[1]) if date else "",
                     )
-                    if mark is not None:
-                        if cid := ID.search(attrs):
-                            started[cid[1]] = mark
+                    if mark is not None:  # "": a comment with no text, left out
                         out.append(mark)
                         i = end + 1
                         continue

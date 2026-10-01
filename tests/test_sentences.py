@@ -1,7 +1,7 @@
 """Comparing sentence by sentence: splitting prose, labelling the sentences."""
 
 from prosediff import Options, compare_paths, render
-from prosediff.sentences import is_supported, sentences, split_sentences
+from prosediff.sentences import sentences, split_sentences
 
 
 def test_sentences_know_abbreviations_and_footnotes():
@@ -48,7 +48,10 @@ def test_front_matter_and_dash_tables_kept():
 
 
 def test_unknown_language_falls_back_to_a_simple_rule():
-    assert is_supported("en") and not is_supported("fi")
+    from prosediff.sentences import SimpleDetector, detector
+
+    assert isinstance(detector("fi"), SimpleDetector)
+    assert not isinstance(detector("en"), SimpleDetector)
     assert sentences("Yksi lause. Toinen lause.", "fi") == ["Yksi lause.", "Toinen lause."]
 
 

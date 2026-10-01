@@ -160,14 +160,9 @@ def set_aside(
 
 def numbered(text: str, labels: dict[str, str], quote=str) -> str:
     """Text with each stand-in written as its footnote, [^label] (quote:
-    how the reference is written into it, e.g. escaped for HTML)."""
-    return STAND_IN.sub(lambda m: quote(f"[^{labels.get(m[0], '?')}]"), text)
-
-
-def numbered_line(line: str, labels: dict[str, str]) -> str:
-    """A line with each stand-in written as its footnote, [^label], a
+    how the reference is written into it, e.g. escaped for HTML), a
     document's line keeping its styles (document.sub)."""
-    return sub(STAND_IN, lambda m: f"[^{labels.get(m[0], '?')}]", line)
+    return sub(STAND_IN, lambda m: quote(f"[^{labels.get(m[0], '?')}]"), text)
 
 
 def restore(markup: Markup, labels: dict[str, str]) -> Markup:

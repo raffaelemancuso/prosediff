@@ -20,6 +20,7 @@ from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
 from prosediff.language import file_language_note, flag_code, paragraph_language_note
+from prosediff.sources import is_document
 from prosediff.tracked import TRACKED_FORMATS, write_tracked
 from prosediff.unified import unified
 
@@ -78,13 +79,7 @@ def check_split(split: str, fmt: str) -> None:
 # suffix.
 FORMATS = {"html": ".html", "diff": ".diff", "wdiff": ".wdiff", "docx": ".docx", "odt": ".odt"}
 # The suffixes each format but the HTML report is recognised by.
-TEXT_SUFFIXES = {
-    ".diff": "diff",
-    ".patch": "diff",
-    ".wdiff": "wdiff",
-    ".docx": "docx",
-    ".odt": "odt",
-}
+TEXT_SUFFIXES = {s: f for f, s in FORMATS.items() if f != "html"} | {".patch": "diff"}
 HOMEPAGE = "https://github.com/raffaelemancuso/prosediff"
 
 
@@ -248,7 +243,7 @@ def write_output(
 def open_output(path: Path) -> None:
     """Show the output: the HTML report and the diffs in the browser, a
     document in the program that opens it."""
-    if path.suffix.lower() not in (".docx", ".odt"):
+    if not is_document(str(path)):
         webbrowser.open(path.resolve().as_uri())
     elif sys.platform == "win32":
         os.startfile(path)

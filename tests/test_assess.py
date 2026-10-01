@@ -387,7 +387,7 @@ def test_word_files_come_with_the_notation_explained(tmp_path, monkeypatch):
 
 
 def test_the_ai_is_asked_apart_whether_the_new_text_reads_as_ai_written(tmp_path, monkeypatch):
-    """With ai_writing, a second assessment: its own instructions, which say
+    """Asked apart, a second assessment: its own instructions, which say
     such a judgement is circumstantial, no problem marked in the text, its
     verdict likely, possibly or unlikely; in the report, a chip of its own
     in the top bar, opening its drawer, which says it is no proof."""
@@ -398,7 +398,7 @@ def test_the_ai_is_asked_apart_whether_the_new_text_reads_as_ai_written(tmp_path
     monkeypatch.setattr(assess_module, "run_backend", runner)
     old, new = two_files(tmp_path, "One line.\n", "One pivotal line.\n")
     c = compare_paths(old, new)
-    request = AssessRequest("claude", ai_writing=True)
+    request = AssessRequest("claude")
     writing = assess_comparison(c, request, kind="writing")
     ((_, system, prompt, *_),) = runner.asked
     assert system.startswith(SYSTEM_WRITING) and "circumstantial" in SYSTEM_WRITING
