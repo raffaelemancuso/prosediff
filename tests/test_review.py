@@ -169,7 +169,9 @@ def test_cli_review(tmp_path, monkeypatch, capsys):
     out = tmp_path / "paper_review.html"
     html = out.read_text(encoding="utf-8")
     assert "verdict-fair" in html and html.count('class="ai-document"') == 1
-    assert "by Claude Code (claude-opus-5-5), effort high," in html
+    # no ", in N seconds" after it when the stand-in answers within the
+    # clock's resolution (on Windows, about 16 ms)
+    assert "by Claude Code (claude-opus-5-5), effort high" in html
     assert "paper.docx reviewed (fair), 1 problem marked" in capsys.readouterr().out
     ((_, _, _, _, effort, _),) = runner.asked
     assert effort == "high"

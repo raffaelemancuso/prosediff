@@ -446,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
-    args = ap.parse_args(argv)
+    args = ap.parse_intermixed_args(argv)
 
     mode = next((m for m in ("git", "files", "folders", "review") if getattr(args, m)), None)
     for name, act in (
