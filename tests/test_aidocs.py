@@ -351,3 +351,114 @@ def test_a_fix_keeps_the_documents_quotes_and_dashes():
         "new", "The so-called", "said.", "p", "", 'The so-called "inertial mass" is kept - said.'
     )
     assert fix_of(line, locate([line], note), note) == [(33, 40, "kept")]
+
+
+ODF_TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ODF_OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+DC = "http://purl.org/dc/elements/1.1/"
+
+
+def co_authored(path, fmt):
+    """The new version as a co-author left it: in the passage FIXED fixes,
+    "large and " a tracked insertion of theirs and "very " a deletion, and
+    a comment of theirs; read with them accepted, it is NEW still."""
+    if fmt == "docx":
+        d = docx.Document(str(path))
+        p = next(p for p in d.paragraphs if p.text.startswith("We find"))
+        p.runs[0].text = "We find a "
+        added, gone, rest = (
+            p.add_run("large and "),
+            p.add_run("very "),
+            p.add_run("significant effect."),
+        )
+        for run, tag in ((added, "ins"), (gone, "del")):
+            mark = docx.oxml.OxmlElement(f"w:{tag}")
+            mark.set(W + "id", "90" if tag == "ins" else "91")
+            mark.set(W + "author", "Anna Rossi")
+            mark.set(W + "date", "2026-09-01T10:00:00Z")
+            run._r.addprevious(mark)
+            mark.append(run._r)
+        gone._r.find(W + "t").tag = W + "delText"
+        d.add_comment(rest, text="Which effect?", author="Anna Rossi")
+        d.save(str(path))
+        return path
+    from lxml import etree
+
+    z = zipfile.ZipFile(path)
+    files = {n: z.read(n) for n in z.namelist()}
+    z.close()
+    root = etree.fromstring(files["content.xml"])
+    t = f"{{{ODF_TEXT}}}"
+    p = next(p for p in root.iter(t + "p") if "".join(p.itertext()).startswith("We find"))
+    for child in list(p):
+        p.remove(child)
+    p.text = "We find a "
+    start = etree.SubElement(p, t + "change-start", {t + "change-id": "ct1"})
+    start.tail = "large and "
+    etree.SubElement(p, t + "change-end", {t + "change-id": "ct1"})
+    change = etree.SubElement(p, t + "change", {t + "change-id": "ct2"})
+    note = etree.SubElement(p, f"{{{ODF_OFFICE}}}annotation")
+    etree.SubElement(note, f"{{{DC}}}creator").text = "Anna Rossi"
+    etree.SubElement(note, t + "p").text = "Which effect?"
+    change.tail = "significant effect."
+    body = root.find(f".//{{{ODF_OFFICE}}}text")
+    tracked = etree.Element(t + "tracked-changes")
+    body.insert(0, tracked)
+    for name, kind, words in (("ct1", "insertion", None), ("ct2", "deletion", "very ")):
+        region = etree.SubElement(tracked, t + "changed-region", {t + "id": name})
+        what = etree.SubElement(region, t + kind)
+        info = etree.SubElement(what, f"{{{ODF_OFFICE}}}change-info")
+        etree.SubElement(info, f"{{{DC}}}creator").text = "Anna Rossi"
+        etree.SubElement(info, f"{{{DC}}}date").text = "2026-09-01T10:00:00"
+        if words:
+            etree.SubElement(what, t + "p").text = words
+    files["content.xml"] = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+    with zipfile.ZipFile(path, "w") as out:
+        out.writestr(zipfile.ZipInfo("mimetype"), files.pop("mimetype"))
+        for name, data in files.items():
+            out.writestr(name, data, zipfile.ZIP_DEFLATED)
+    return path
+
+
+def authors_of(path, fmt):
+    """Who made the document's tracked changes."""
+    if fmt == "docx":
+        return {r.get(W + "author") for r in revisions(path)}
+    from lxml import etree
+
+    root = etree.parse(BytesIO(zipfile.ZipFile(path).read("content.xml")))
+    return {
+        c.text for c in root.iter(f"{{{DC}}}creator") if c.getparent().tag.endswith("change-info")
+    }
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+@pytest.mark.parametrize("alone", [True, False], ids=["review", "compared"])
+def test_the_co_authors_changes_and_comments_are_kept(tmp_path, fmt, alone):
+    """The file with the AI's fixes is the file itself, the co-authors'
+    tracked changes and comments in it as they were, the AI's added: its fix
+    of words a co-author put in is a change of its own beside theirs, not
+    within it. All accepted, the fixed text."""
+    from prosediff.diff import review_file
+
+    old, new = pair(tmp_path, fmt)
+    co_authored(new, fmt)
+    c = review_file(new, Options()) if alone else compare_paths(str(old), str(new), Options())
+    got = downloads(c, assessment([FIXED, ADVICE]))
+    out = tmp_path / got[-1].name
+    out.write_bytes(got[-1].data)
+    accepted = lines(out, "accept-all")
+    assert "We find a small and significant effect." in accepted
+    assert accepted == [s.replace("a large and", "a small and") for s in lines(new, "accept-all")]
+    # all rejected, the text before the co-author's changes: the words of
+    # theirs the AI took out still theirs (in an OpenDocument text, the AI's
+    # deletion stacked on their insertion, as LibreOffice writes it)
+    assert "We find a very significant effect." in lines(out, "reject-all")
+    assert authors_of(out, fmt) == {"Anna Rossi", "Claude Code (opus)"}
+    texts = comments_of(out, fmt)
+    assert "Which effect?" in texts and "Which checks?\nProposed: Name them." in texts
+    if fmt == "docx":  # no insertion within another
+        body = docx.Document(str(out)).element.body
+        assert not [
+            x for x in body.iter(W + "ins") if next(x.iterancestors(W + "ins"), None) is not None
+        ]

@@ -981,3 +981,31 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     assert lines(tracked, "reject-all") == lines(old, "accept-all")
     assert [t for t in comments_of(tracked, fmt) if "Nothing supports" in t] == []
     page.context.close()
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+def test_a_fix_left_out_gives_the_co_authors_words_back(browser, tmp_path, fmt):
+    """A fix of words a co-author put in, left out in review mode: the
+    downloaded file as the co-author left it, their insertion and deletion
+    still tracked, all accepted the text unfixed, all rejected the text
+    before them."""
+    from test_aidocs import ADVICE, FIXED, assessment, authors_of, co_authored
+    from test_tracked import lines, pair
+
+    from prosediff.diff import review_file
+
+    new = co_authored(pair(tmp_path, fmt)[1], fmt)
+    page = open_report(
+        browser, tmp_path, review_file(new, Options()), assessment=assessment([FIXED, ADVICE])
+    )
+    page.keyboard.press("r")
+    page.locator("#review-list .with-check", has_text="Nothing supports").locator("input").uncheck()
+    page.keyboard.press("r")
+    with page.expect_download() as d:
+        page.click(".toolbar .ai-download")
+    out = tmp_path / f"out.{fmt}"
+    d.value.save_as(out)
+    assert lines(out, "accept-all") == lines(new, "accept-all")
+    assert lines(out, "reject-all") == lines(new, "reject-all")
+    assert "We find a very significant effect." in lines(out, "reject-all")
+    assert authors_of(out, fmt) == {"Anna Rossi"}

@@ -236,9 +236,11 @@ def split_before(atom) -> None:
 
 
 class WordRedline:
-    """The changes of one file marked in a copy of its new version."""
+    """The changes of one file marked in a copy of its new version; with
+    own, the new version's own tracked changes kept as they are, not
+    accepted (for the AI's fixes, made on the file itself, prosediff.aidocs)."""
 
-    def __init__(self, f: FileDiff, author: str) -> None:
+    def __init__(self, f: FileDiff, author: str, own: bool = False) -> None:
         self.f = f
         self.new = WordFile(f.new_data, f.document_changes)
         self.old = WordFile(f.old_data, f.document_changes) if f.old_data else None
@@ -248,7 +250,8 @@ class WordRedline:
         # settled (which may merge paragraphs away)
         self.new_paragraphs = [self.found(self.new, line) for line in f.new_text]
         self.old_paragraphs = [self.found(self.old, line) for line in f.old_text]
-        self.new.settle()
+        if not own:
+            self.new.settle()
         if self.old is not None:
             self.old.settle()
         self.ids = RevisionIdRegistry(self.new.doc)
@@ -629,6 +632,7 @@ ODF_NOT_TEXT = {
     )
 }
 ODF_SPACES = {odf("text:tab"), odf("text:line-break")}
+XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
 
 
 def odf_atoms(paragraphs) -> tuple[str, list]:
@@ -742,14 +746,22 @@ class OdtRedline:
     out as LibreOffice lays out its own : an
     insertion between a change-start and a change-end, a deletion's words
     kept in its region, a text:change where they were. Formatting changes
-    are not marked: LibreOffice reads none back."""
+    are not marked: LibreOffice reads none back. With own, the new
+    version's own tracked changes are kept as they are, not accepted (for
+    the AI's fixes, made on the file itself, prosediff.aidocs)."""
 
-    def __init__(self, f: FileDiff, author: str) -> None:
+    def __init__(self, f: FileDiff, author: str, own: bool = False) -> None:
         self.f = f
         self.doc = odfdo.Document(BytesIO(f.new_data))
         self.root = lxml_of(self.doc.get_part("content").root)
         self.new_paragraphs = [self.found(line) for line in f.new_text]
-        self.accept_own()
+        if not own:
+            self.accept_own()
+        # the ids of the document's own changes, not to be given again
+        self.taken = {
+            r.get(odf("text:id")) or r.get(XML_ID)
+            for r in self.root.iter(odf("text:changed-region"))
+        }
         self.styles = OdtStyles(self.doc, prefix="PD_T")
         self.author = author
         self.date = dt.datetime.now(dt.UTC).replace(microsecond=0, tzinfo=None)
@@ -790,6 +802,9 @@ class OdtRedline:
         deletion holding content; its id."""
         self.regions += 1
         name = f"pd{self.regions}"
+        while name in self.taken:
+            self.regions += 1
+            name = f"pd{self.regions}"
         change = odfdo.TextInsertion() if kind == "ins" else odfdo.TextDeletion()
         change.set_change_info(creator=self.author, date=self.date)
         for el in content:

@@ -6,6 +6,9 @@ problems of a Word document or an OpenDocument text (prosediff.assess):
 - the new version, each fix the AI wrote out as the passage should read
   (Annotation.replacement) a tracked change of the AI's, what is wrong a
   comment on it; a problem it gave no such fix for, a comment as above.
+  It is the file itself, its own tracked changes and comments (the
+  co-authors') kept as they are, the AI's added on top; never one change
+  within another of the same kind (WordNotes.fix, OdtNotes.fix).
 
 Both have a first comment, on the first paragraph, with the AI's verdict.
 Only the new version's passages are marked: a problem in text the old
@@ -40,6 +43,7 @@ from prosediff.assess import Annotation, Assessment
 from prosediff.comments import ANY_PLACEHOLDER
 from prosediff.diff import Comparison, FileDiff, word_ops
 from prosediff.redline import (
+    XML_ID,
     OdtRedline,
     WordRedline,
     aligned,
@@ -66,6 +70,8 @@ SOFT_HYPHEN = "­"
 REACH = 20_000
 DC = "http://purl.org/dc/elements/1.1/"
 XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
+# What holds the words a Word document's own tracked changes put in.
+WORD_INSERTIONS = {qn("w:ins"), qn("w:moveTo")}
 
 
 # Finding a passage ----------------------------------------------------------------
@@ -267,6 +273,23 @@ def note_reference(red: WordRedline, p):
     return None, ""
 
 
+def out_of_insertions(el, red: WordRedline) -> None:
+    """Take el, an insertion of the AI's (or a comment's reference), out of
+    the document's own insertion (or move) it was put in, splitting that in
+    two around it: Word nests no insertion in another. (A deletion of the
+    AI's stays in it, as Word puts one there.)"""
+    while (outer := el.getparent()) is not None and outer.tag in WORD_INSERTIONS:
+        before, after = el.getprevious() is not None, el.getnext() is not None
+        if before and after:
+            rest = copy.copy(outer)  # its attributes, not its content
+            rest[:] = []
+            rest.set(qn("w:id"), str(red.ids.next()))
+            for x in list(el.itersiblings()):
+                rest.append(x)
+            outer.addnext(rest)
+        (outer.addnext if before else outer.addprevious)(el)
+
+
 def mark_paragraphs(first, last, cid: int) -> None:
     """A comment's range from the start of paragraph first to the end of
     paragraph last, its reference at the end."""
@@ -322,6 +345,9 @@ class WordNotes:
                 p.add_run(bold_first).bold = True
                 text = text[len(bold_first) :]
             p.add_run(text)
+        for ref in red.new.doc.element.body.iter(qn("w:commentReference")):
+            if ref.get(qn("w:id")) == str(c.comment_id) and ref.getparent().tag == qn("w:r"):
+                out_of_insertions(ref.getparent(), red)
         return c.comment_id
 
     def fix(self, j: int, edits: list, begin: int) -> list[int]:
@@ -386,6 +412,7 @@ class WordNotes:
                 at[0][0].addprevious(mark)
             else:
                 paragraphs[0].append(mark)
+            out_of_insertions(mark, red)
         return ids
 
     def can_fix(self, j: int, edits: list) -> bool:
@@ -442,6 +469,26 @@ def odf_remove(paragraphs, x1: int, x2: int) -> None:
             node.tail = (node.tail[:k] + node.tail[k + 1 :]) or None
 
 
+def odf_drop(el) -> None:
+    """Take el out of its paragraph, its tail kept."""
+    parent, prev = el.getparent(), el.getprevious()
+    if el.tail:
+        if prev is not None:
+            prev.tail = (prev.tail or "") + el.tail
+        else:
+            parent.text = (parent.text or "") + el.tail
+    parent.remove(el)
+
+
+def odf_put_around(marks: list, end, start) -> None:
+    """Put end just before the first of marks, start just after the last."""
+    first, last = marks[0], marks[-1]
+    first.addprevious(end)  # the text before the first mark stays before end
+    end.tail = None
+    last.addnext(start)
+    start.tail, last.tail = last.tail, None
+
+
 class OdtNotes:
     """The AI's comments and fixes put in an OpenDocument text: red, an
     OdtRedline, its changes marked (the document of tracked changes) or not
@@ -452,6 +499,7 @@ class OdtNotes:
         self.author = author
         self.lines = red.f.new_text
         self.count = 0
+        self.mine: set[str] = set()  # the ids of the AI's changes
 
     def comment(self, place: Place, paragraphs: list[str], bold_first: str = "") -> str | None:
         """A comment on a place (an office:annotation and its end), its
@@ -482,7 +530,11 @@ class OdtNotes:
     def fix(self, j: int, edits: list, begin: int) -> list[str]:
         """Make edits (fix_of) in line j's paragraphs as tracked changes of
         the AI's, as LibreOffice lays them out (begin, where the passage
-        begins, as for Word); the ids of the changes."""
+        begins, as for Word); the ids of the changes. Within the document's
+        own insertion (a co-author's), the AI's changes split it in two, its
+        deletion stacked on it as LibreOffice stacks a deletion of words
+        another put in (OASIS OFFICE-4174, in LibreOffice's extended schema):
+        rejected, the words come back as the co-author's."""
         red, line = self.red, self.lines[j]
         paragraphs = red.new_paragraphs[j]
         where = aligned(line, odf_atoms(paragraphs)[0])
@@ -491,13 +543,14 @@ class OdtNotes:
         # from the last: an edit moves only what comes after it
         for start, end, put in edits:
             x1, x2 = where[start], where[end]
-            marks = []
+            under = self.opened_at(paragraphs, x1) if x2 > x1 else []
+            marks, deletion = [], None
             if end > start:
                 gone = red.words(line, start, end)
                 if gone.text_recursive:
-                    name = red.region("del", [gone])
-                    ids.append(name)
-                    marks.append(red.point("text:change", name))
+                    deletion = red.region("del", [gone])
+                    ids.append(deletion)
+                    marks.append(red.point("text:change", deletion))
             if put:
                 name = red.region("ins")
                 ids.append(name)
@@ -510,6 +563,7 @@ class OdtNotes:
                 ]
             if not marks:
                 continue
+            self.mine.update(ids)
             # the marks after the last word taken out (or put in before the
             # passage's first word, after the word before elsewhere), in its
             # paragraph, then the words taken out: a table cell left empty
@@ -518,9 +572,103 @@ class OdtNotes:
                 odf_put(paragraphs, x2, marks, after=True)
             else:
                 odf_put(paragraphs, x1, marks)
+            around = self.opened(marks[0])
+            inside = [n for n in under if n in around]
+            if deletion is not None and inside:
+                self.stack(deletion, inside[-1])
+            self.split(marks, around)
             if x2 > x1:
                 odf_remove(paragraphs, x1, x2)
+        self.drop_empty()
         return ids
+
+    def regions(self) -> dict:
+        """The document's changed regions, by id."""
+        return {
+            r.get(odf("text:id")) or r.get(XML_ID): r
+            for r in self.red.root.iter(odf("text:changed-region"))
+        }
+
+    def opened(self, at) -> list[str]:
+        """The document's own changes (not the AI's) whose range element at
+        is in: between their change-start and their change-end."""
+        opened: dict[str, None] = {}  # in order
+        for el in self.red.root.iter(odf("text:change-start"), odf("text:change-end"), at.tag):
+            if el is at:
+                break
+            name = el.get(odf("text:change-id"))
+            if name in self.mine:
+                continue
+            if el.tag == odf("text:change-start"):
+                opened[name] = None
+            elif el.tag == odf("text:change-end"):
+                opened.pop(name, None)
+        return list(opened)
+
+    def opened_at(self, paragraphs, x: int) -> list[str]:
+        """The document's own changes whose range character x of
+        paragraphs' text is in."""
+        probe = etree.Element(odf("text:bookmark"))
+        odf_put(paragraphs, x, [probe])
+        names = self.opened(probe)
+        odf_drop(probe)
+        return names
+
+    def stack(self, deletion: str, name: str) -> None:
+        """The AI's deletion on the insertion name: the region of the
+        deletion followed by that insertion's, as LibreOffice writes a
+        deletion of words another put in."""
+        regions = self.regions()
+        insertion = regions[name].find(odf("text:insertion")) if name in regions else None
+        if insertion is not None:
+            regions[deletion].append(copy.deepcopy(insertion))
+
+    def drop_empty(self) -> None:
+        """The insertions left with no text (a co-author's split around a
+        fix, the AI having taken all of its first part out): their marks
+        and their regions."""
+        regions = self.regions()
+        for start in list(self.red.root.iter(odf("text:change-start"))):
+            end = start.getnext()
+            name = start.get(odf("text:change-id"))
+            if start.tail or end is None or end.tag != odf("text:change-end"):
+                continue
+            if end.get(odf("text:change-id")) != name:
+                continue
+            if name in regions:
+                regions[name].getparent().remove(regions[name])
+            odf_drop(start)
+            odf_drop(end)
+
+    def split(self, marks: list, opened: list[str]) -> None:
+        """Split each of the document's own changes opened (whose range the
+        marks were put in) in two around them, the second a copy of its
+        region: no range of the AI's within another's."""
+        red = self.red
+        regions = self.regions()
+        for name in opened:
+            region = regions.get(name)
+            if region is None:
+                continue
+            k = 2
+            while f"{name}_{k}" in regions or f"{name}_{k}" in red.taken:
+                k += 1
+            again = copy.deepcopy(region)
+            for attribute in (odf("text:id"), XML_ID):
+                if again.get(attribute) is not None:
+                    again.set(attribute, f"{name}_{k}")
+            region.addnext(again)
+            red.taken.add(f"{name}_{k}")
+            regions[f"{name}_{k}"] = again
+            # its end (the one it has yet: after the marks) now the second part's
+            for e in red.root.iter(odf("text:change-end")):
+                if e.get(odf("text:change-id")) == name:
+                    e.set(odf("text:change-id"), f"{name}_{k}")
+            odf_put_around(
+                marks,
+                red.point("text:change-end", name),
+                red.point("text:change-start", f"{name}_{k}"),
+            )
 
     def can_fix(self, j: int, edits: list) -> bool:
         return in_text(self.lines[j], odf_atoms(self.red.new_paragraphs[j])[0], edits)
@@ -683,7 +831,9 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
             )
     which = "document" if comparison.single else "new version"
     try:
-        red = red_of(f, ai)
+        # the file itself, its own tracked changes (the co-authors') kept as
+        # they are, unless the text was read with them rejected or shown
+        red = red_of(f, ai, own=f.document_changes == "accept-all")
         ids = notes_in(red, notes, ai, assessment, fixes=True)
         data = (WordNotes if fmt == "docx" else OdtNotes)(red, ai).save()
         out.append(

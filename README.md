@@ -304,6 +304,14 @@ version:
   word for word: one in an equation, a field or a note reference, whose
   place could only be guessed. A fix changes whole words, and keeps the
   document's curly quotes and dashes where the AI wrote plain ones.
+  It is the new file itself, its own tracked changes and comments (the
+  co-authors') kept as they are, the AI's added on top. A fix of words a
+  co-author put in is a change of the AI's beside theirs: in Word, its
+  deletion within their insertion, as Word marks one; in LibreOffice, its
+  deletion stacked on their insertion, as LibreOffice writes one (checked
+  with LibreOffice 26.8). Rejected, the words come back as the
+  co-author's. (Read with `--docx-changes reject-all` or `show`, a Word
+  document's own changes are settled first, as the text was compared.)
 
 Each opens with a comment on the first paragraph giving the AI's verdict;
 the comments and the changes are the AI's, under its name ("Claude Code
@@ -386,8 +394,10 @@ fix, and, with `--assess-annotate` (on by default), marks each problem in
 the text, a badge before its passage and a card in the margin. The report
 shows the file in one column, paragraph by paragraph. A Word document (or
 an OpenDocument text) comes back as **the document with the AI's fixes,
-tracked**, to download from the top bar or the assessment's drawer: each problem a
-comment of the AI's on its passage, each fix it wrote out a tracked change
+tracked**: the file itself, the co-authors' tracked changes and comments
+in it kept, the AI's added; to download from the top bar or the
+assessment's drawer: each problem a comment of the AI's on its passage,
+each fix it wrote out a tracked change
 of its own, as described above; review mode's boxes choose which problems
 it holds. There are no changes to track, so the other document is not
 made, and the options of a comparison do not apply: `--split` is paragraph,

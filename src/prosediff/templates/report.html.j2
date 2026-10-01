@@ -1817,6 +1817,11 @@ thead.print, .print-note { display: none; }
     e.parentNode.removeChild(e);
   }
   function remove(e) { if (e.parentNode) e.parentNode.removeChild(e); }
+  function changePoint(doc, name, id) {
+    var e = doc.createElementNS(TEXT_NS, "text:" + name);
+    e.setAttributeNS(TEXT_NS, "text:change-id", id);
+    return e;
+  }
   function leaveOutWord(files, comments, changes) {
     var doc = xmlOf(files["word/document.xml"]);
     ["commentRangeStart", "commentRangeEnd"].forEach(function (name) {
@@ -1858,13 +1863,25 @@ thead.print, .print-note { display: none; }
       remove(e);
     });
     each(doc, TEXT_NS, "change-end", TEXT_NS, "change-id", changes, remove);
+    // a deletion of a co-author's insertion (stacked on it): its words back
+    // as their insertion, the region left holding that alone
+    var stacked = {};
     each(doc, TEXT_NS, "change", TEXT_NS, "change-id", changes, function (e) {
-      var region = regions[e.getAttributeNS(TEXT_NS, "change-id")];
+      var id = e.getAttributeNS(TEXT_NS, "change-id"), region = regions[id];
       var p = region && region.getElementsByTagNameNS(TEXT_NS, "p")[0];
+      var under = region && region.getElementsByTagNameNS(TEXT_NS, "insertion")[0];
+      if (under) {
+        stacked[id] = true;
+        e.parentNode.insertBefore(changePoint(doc, "change-start", id), e);
+      }
       if (p) while (p.firstChild) e.parentNode.insertBefore(p.firstChild, e);
+      if (under) {
+        e.parentNode.insertBefore(changePoint(doc, "change-end", id), e);
+        remove(region.getElementsByTagNameNS(TEXT_NS, "deletion")[0]);
+      }
       remove(e);
     });
-    changes.forEach(function (id) { if (regions[id]) remove(regions[id]); });
+    changes.forEach(function (id) { if (regions[id] && !stacked[id]) remove(regions[id]); });
     files["content.xml"] = bytesOfXml(doc);
   }
   function zipOf(files, odt) {

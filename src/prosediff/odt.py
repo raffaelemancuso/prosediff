@@ -15,7 +15,10 @@ prosediff.document.Document:
   text:change-start and text:change-end; a deletion is a text:change point
   whose text is kept in text:tracked-changes. Accepting keeps the inserted
   text and leaves the deleted out, rejecting does the reverse, and "show"
-  keeps both, marked as insertions and deletions. A comment anchored in
+  keeps both, marked as insertions and deletions. A deletion of inserted
+  text (LibreOffice's stacked changes: a region holding a deletion, then
+  the insertion it deletes from) keeps its text only when both stay, so
+  rejecting it all takes it out. A comment anchored in
   dropped text is kept. Deleted text that spanned several paragraphs comes
   back, when rejected, as those paragraphs, each of its own kind (a heading,
   a list item); shown ("show"), as one run of text. A table row
@@ -51,6 +54,7 @@ from prosediff.document import (
     Span,
     Text,
     comment_runs,
+    comments_in,
     join_paragraphs,
     markdown,
     spaced,
@@ -150,6 +154,10 @@ class Reader(DocumentReader):
         self.document = document
         # change id -> ("insertion" | "deletion", author, date, region element)
         self.regions: dict[str, tuple[str, str, str, Element]] = {}
+        # the deletions of inserted text: a region holding a deletion and,
+        # after it, the insertion it deletes from (LibreOffice's stacked
+        # changes, OASIS OFFICE-4174)
+        self.stacked: set[str] = set()
         self.open: list[str] = []  # the insertions the walk is inside
         self.notes: list[Block] = []  # footnotes and endnotes, as referenced
         self.comment_count = 0
@@ -206,6 +214,8 @@ class Reader(DocumentReader):
     def read_regions(self, body: Element) -> None:
         for region in body.get_elements("text:tracked-changes/text:changed-region"):
             cid = region.get_attribute_string("text:id") or ""
+            if all(region.get_element(f"text:{k}") is not None for k in ("deletion", "insertion")):
+                self.stacked.add(cid)
             for kind in ("insertion", "deletion"):
                 change = region.get_element(f"text:{kind}")
                 if change is None:
@@ -234,6 +244,9 @@ class Reader(DocumentReader):
             for p, kind in self.deleted_paragraphs(change)
         ]
         self.open = saved
+        if cid in self.stacked and not self.keeps("insertion"):
+            # the insertion beneath rejected too: the words go
+            return [(c, None) for inlines, _ in paragraphs for c in comments_in(inlines)]
         if self.changes == "reject-all" and len(paragraphs) > 1:
             # the paragraphs back, a break between each two
             out: list[Tagged] = []
