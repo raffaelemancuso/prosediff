@@ -72,7 +72,9 @@ name can be typed); what it **Reads**; your **Instructions**, typed, written
 in a large box in a window of their own (the pencil button), or from a text
 file; in that window, prosediff's own prompts too, to edit (**Restore
 default** puts prosediff's back): for one file, the review's; for two
-versions, the assessment's and the AI-writing check's; who its comments in the Word and OpenDocument documents are by
+versions, the assessment's and the AI-writing check's; **Other files** to
+send as context (a switch, the files separated by ";", and a button that
+adds several at once: PDF, Word, OpenDocument, Markdown or text); who its comments in the Word and OpenDocument documents are by
 (**Author**, of its comments and tracked changes; empty: the AI and its model); whether it marks problems in the text
 (**Mark problems in the text**, on by default); whether it may
 edit the text (**Allow text edits**, on by default: its fixes as

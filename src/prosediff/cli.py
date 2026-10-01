@@ -375,6 +375,15 @@ def build_parser() -> argparse.ArgumentParser:
         "Policy; Laura asked to cut the introduction by a fifth'), or a file holding them",
     )
     ai_group.add_argument(
+        "--assess-file",
+        dest="assess_files",
+        metavar="FILE",
+        action="append",
+        help="another file sent to the AI as context, to draw on, not to assess (a journal's "
+        "guidelines, a reviewer's report, a cited paper): PDF, Word, OpenDocument, Markdown "
+        "or text; repeat it for several",
+    )
+    ai_group.add_argument(
         "--assess-prompt",
         metavar="TEXT",
         help="a prompt in place of prosediff's own, or a file holding it; prosediff still "
@@ -520,6 +529,7 @@ def main(argv: list[str] | None = None) -> int:
     elif (
         args.assess_effort
         or args.assess_instructions
+        or args.assess_files
         or args.assess_prompt
         or args.assess_writing_prompt
         or args.assess_author
@@ -527,7 +537,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.assess_ai_writing
     ):
         ap.error(
-            "--assess-effort, --assess-instructions, --assess-prompt, "
+            "--assess-effort, --assess-instructions, --assess-file, --assess-prompt, "
             "--assess-writing-prompt, --assess-author, --assess-save-prompt and "
             "--assess-ai-writing go with --assess"
         )

@@ -43,7 +43,10 @@ Markdown too.**
 **What the AI reads.** Comparing two versions, the AI is sent prosediff's
 own word diff between them (`[-removed-]`, `{+added+}`), computed from the
 two texts and not from the files' Track Changes, and, by default, the whole
-new version. Reviewing one file, it is sent the file. Either way, a Word or
+new version. Reviewing one file, it is sent the file. Other files can go with it as
+context, to draw on, not to assess (`--assess-file`, or the window's
+**Other files** switch): a journal's guidelines, a reviewer's report, a
+cited paper, as PDF, Word, OpenDocument, Markdown or text. Either way, a Word or
 OpenDocument file is read with its tracked changes accepted, so the AI sees
 the final text, not who changed what: `--docx-changes reject-all` reads the
 text before them, and `--docx-changes show` keeps them in the text as

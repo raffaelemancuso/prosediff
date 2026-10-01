@@ -410,6 +410,8 @@ class AssessRequest:
     # whether the AI may edit the text: propose fixes as rewordings of the
     # passages it marks (Annotation.replacement), or only mark them
     edits: bool = True
+    # other files sent as context (prosediff.references): their paths
+    files: tuple[str, ...] = ()
 
 
 def default_system(kind: str, single: bool = False) -> str:
@@ -580,9 +582,16 @@ def cut(text: str, limit: int, what: str) -> str:
     return f"{kept}\n\n[The {what} is cut here: {left:,} more characters left out.]"
 
 
-def prompt_for(diff: str, subject: str, document: str = "", instructions: str = "") -> str:
+def prompt_for(
+    diff: str,
+    subject: str,
+    document: str = "",
+    instructions: str = "",
+    references: list[str] = (),
+) -> str:
     """The message the model is sent: the whole new version (when given),
-    the word diff, and the instructions of the person asking."""
+    the word diff, the other files sent as context (references_part), and
+    the instructions of the person asking."""
     parts = []
     if document.strip():
         parts.append(
@@ -593,21 +602,51 @@ def prompt_for(diff: str, subject: str, document: str = "", instructions: str = 
         f"The changes made to {subject}, as a word diff:\n\n"
         f"<diff>\n{cut(diff, MAX_DIFF_CHARS, 'diff')}\n</diff>"
     )
+    parts += references
     parts += instructions_part(instructions, "assessment")
     parts.append("Assess the changes as the instructions say.")
     return "\n\n".join(parts)
 
 
-def review_prompt_for(document: str, subject: str, instructions: str = "") -> str:
+def review_prompt_for(
+    document: str, subject: str, instructions: str = "", references: list[str] = ()
+) -> str:
     """The message the model is sent to review one document alone: the
-    document, and the instructions of the person asking."""
+    document, the other files sent as context, and the instructions of the
+    person asking."""
     parts = [
         f"The document to review, {subject}:\n\n"
         f"<document>\n{cut(document, MAX_DIFF_CHARS, 'document')}\n</document>"
     ]
+    parts += references
     parts += instructions_part(instructions, "review")
     parts.append("Review the document as the instructions say.")
     return "\n\n".join(parts)
+
+
+def references_part(files) -> list[str]:
+    """The part of the message holding the other files sent as context, each
+    in a <reference> named by its file name, all of them cut past
+    MAX_REFERENCE_CHARS; none without them. AssessError for a file that
+    cannot be read."""
+    if not files:
+        return []
+    from prosediff.references import MAX_REFERENCE_CHARS, UnreadableFile, read_references
+
+    try:
+        found = read_references(files)
+    except UnreadableFile as e:
+        raise AssessError(f"a file to send: {e}") from e
+    left, blocks = MAX_REFERENCE_CHARS, []
+    for ref in found:
+        text = cut(ref.text, max(left, 0), "file")
+        left -= len(ref.text)
+        name = ref.name.replace('"', "'")
+        blocks.append(f'<reference name="{name}">\n{text}\n</reference>')
+    return [
+        "Other files the person asking sends as context, to draw on (a journal's "
+        "guidelines, a reviewer's report, a cited source), not to assess:\n\n" + "\n\n".join(blocks)
+    ]
 
 
 def instructions_part(instructions: str, what: str) -> list[str]:
@@ -808,11 +847,13 @@ def assess(
         if review:
             if not document.strip():
                 raise AssessError("the document has no text to review")
-            prompt = review_prompt_for(document, subject, instructions)
+        elif not diff.strip():
+            raise AssessError("there are no changes to assess")
+        references = references_part(request.files)
+        if review:
+            prompt = review_prompt_for(document, subject, instructions, references)
         else:
-            if not diff.strip():
-                raise AssessError("there are no changes to assess")
-            prompt = prompt_for(diff, subject, document, instructions)
+            prompt = prompt_for(diff, subject, document, instructions, references)
         system = system_of(request, kind, single) + (DOCUMENTS if documents else "") + marks
         made.system, made.prompt = system, prompt  # kept even if the model then fails
         text, answered = runner(backend, system, prompt, model, request.effort, request.timeout)

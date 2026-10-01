@@ -68,6 +68,7 @@ dependencies = [
     "patiencediff>=0.2.19",
     "psutil>=7.2.2",
     "py3langid>=0.4.0",
+    "pypdfium2>=5.13.0",
     "pyphen>=0.18.1",
     "python-docx>=1.2.0",
     "rapidfuzz>=3.14.6",

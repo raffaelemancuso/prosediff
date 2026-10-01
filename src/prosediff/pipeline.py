@@ -83,7 +83,20 @@ def request_of(src: object) -> AssessRequest | None:
         system=src.assess_prompt or "",
         writing_system=src.assess_writing_prompt or "",
         edits=src.assess_edits,
+        files=files_of(src),
     )
+
+
+def files_of(src: object) -> tuple[str, ...]:
+    """The other files src sends the AI as context: the command line's
+    --assess-file, each given; the window's, separated by ";", only while
+    its switch is on."""
+    files = src.assess_files or ()
+    if isinstance(files, str):
+        files = files.split(";")
+    if not getattr(src, "assess_send_files", True):
+        return ()
+    return tuple(f.strip() for f in files if f.strip())
 
 
 def options_of(src: object, comparing: bool = True, **more) -> Options:

@@ -201,6 +201,10 @@ class Settings:
     assess_effort: str = ""
     assess_context: str = "document"
     assess_instructions: str = ""
+    # other files sent to the AI as context, separated by ";", while the
+    # switch is on
+    assess_send_files: bool = False
+    assess_files: str = ""
     # the prompts in place of prosediff's own (text, or a file; "":
     # prosediff's): for two versions compared, for one file reviewed, and for
     # whether the new text reads as written by an AI
@@ -1148,17 +1152,36 @@ class App:
         )
         pick.pack(side="left")
         self.assess_author = self.setting("assess_author")
-        ttk.Label(card, text="Author").grid(row=3, column=0, sticky="w", **PAD)
+        author_label = ttk.Label(card, text="Author")
+        author_label.grid(row=3, column=0, sticky="w", **PAD)
         author = ttk.Entry(card, textvariable=self.assess_author, width=30)
         author.grid(row=3, column=1, sticky="w", **PAD)
+        for w in (author_label, author):
+            hint(
+                w,
+                "The author of what the AI adds to the Word and OpenDocument documents to "
+                "download: its comments and its tracked changes, the name Word and "
+                "LibreOffice show beside each (Review, Track Changes). Not the author of "
+                'the document. Empty: the AI and its model, e.g. "Claude Code '
+                '(claude-opus-5-5)".',
+            )
+        self.assess_send_files = self.setting("assess_send_files")
+        self.assess_files = self.setting("assess_files")
+        sending = toggle(card, "Other files", self.assess_send_files)
+        sending.grid(row=4, column=0, sticky="w", **PAD)
         hint(
-            author,
-            "Who the AI's comments and its fixes, tracked changes, in the Word and "
-            "OpenDocument documents are by, as Word and LibreOffice show them (Review, "
-            "Track Changes). Empty: the AI and its model, "
-            'e.g. "Claude Code (claude-opus-5-5)".',
+            sending,
+            "Also send the AI other files as context, to draw on, not to assess: a "
+            "journal's guidelines, a reviewer's report, a cited paper (PDF, Word, "
+            "OpenDocument, Markdown or text).",
         )
-        self.ai_switches += [entry, write, pick, author]
+        self.files_entry = ttk.Entry(card, textvariable=self.assess_files)
+        self.files_entry.grid(row=4, column=1, sticky="ew", **PAD)
+        hint(self.files_entry, 'The files to send, separated by ";".')
+        self.files_pick = browse(card, self.pick_files, "Add files to send")
+        self.files_pick.grid(row=4, column=2, sticky="w", **PAD)
+        self.assess_send_files.trace_add("write", lambda *_: self.update_ai_switches())
+        self.ai_switches += [entry, write, pick, author, sending]
         self.assess_annotate = self.setting("assess_annotate")
         self.assess_save_prompt = self.setting("assess_save_prompt")
         self.assess_preview = self.setting("assess_preview")
@@ -1166,7 +1189,7 @@ class App:
         self.assess_edits = self.setting("assess_edits")
         self.assess_documents = self.setting("assess_documents")
         switches = ttk.Frame(card)
-        switches.grid(row=4, column=1, columnspan=2, sticky="w", **PAD)
+        switches.grid(row=5, column=1, columnspan=2, sticky="w", **PAD)
         self.switch_cells: list[tk.Misc] = []
         for text, var, tip in (
             (
@@ -1309,6 +1332,25 @@ class App:
             if switch in self.changes_only:
                 on = on and not self.reviewing()
             enable(switch, on)
+        # the files to send, while sending them
+        if hasattr(self, "files_entry"):
+            for w in (self.files_entry, self.files_pick):
+                enable(w, active and self.assess_send_files.get())
+
+    def pick_files(self) -> None:
+        """Add files to those sent to the AI as context."""
+        chosen = filedialog.askopenfilenames(
+            parent=self.root,
+            title="Files to send the AI",
+            filetypes=[
+                ("Documents", "*.pdf *.docx *.odt *.md *.txt"),
+                ("All", "*.*"),
+            ],
+        )
+        if chosen:
+            have = [f for f in self.assess_files.get().split(";") if f.strip()]
+            self.assess_files.set(";".join([*have, *(f for f in chosen if f not in have)]))
+            self.assess_send_files.set(True)
 
     def pick_into(self, var: tk.StringVar, title: str) -> None:
         chosen = filedialog.askopenfilename(
