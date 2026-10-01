@@ -403,6 +403,9 @@ class Live:
     counted: bool = False
     chars: int = 0
     answer: str = ""
+    # its thinking as the backend summarizes it (Claude Code), for what it
+    # is thinking about
+    thoughts: str = ""
     cost_usd: float | None = None
     report: Callable[["Live"], None] | None = None
     reported: float = 0.0
@@ -416,10 +419,13 @@ class Live:
             self.report(self)
 
     def wrote(self, text: str, thinking: bool = False) -> None:
-        """More text written: thought, or part of the answer."""
-        self.chars += len(text)
-        if not thinking:
+        """More text written: thought (a summary of it: not counted as
+        tokens), or part of the answer."""
+        if thinking:
+            self.thoughts += text
+        else:
             self.answer += text
+            self.chars += len(text)
         if not self.counted:
             self.output_tokens = self.chars // CHARS_PER_TOKEN
         self.update(phase="thinking" if thinking else "writing the answer")
@@ -429,9 +435,23 @@ class Live:
         """The problems marked so far, counted in the answer's list."""
         return self.answer.count('"problem"')
 
+    @property
+    def thought(self) -> str:
+        """What it is thinking about, from the summary of its thinking so
+        far: its last heading (**Checking the citations**), else its last
+        whole sentence; "" before one is whole (the summary comes a few
+        characters at a time)."""
+        if headings := re.findall(r"\*\*(.+?)\*\*", self.thoughts):
+            return headings[-1].strip()
+        sentences = re.findall(r"[^.!?\n]*\S[^.!?\n]*[.!?](?=\s|$)", self.thoughts)
+        last = sentences[-1].strip() if sentences else ""
+        return last if len(last) <= 80 else last[:79] + "…"
+
     def describe(self) -> str:
-        """It in words: "thinking, about 3,481 tokens written"."""
-        parts = [self.phase]
+        """It in words: "thinking: Checking the citations", "writing the
+        answer, about 3,481 tokens written"."""
+        thought = self.thought if self.phase == "thinking" else ""
+        parts = [f"{self.phase}: {thought}" if thought else self.phase]
         if self.output_tokens:
             about = "" if self.counted else "about "
             parts.append(f"{about}{self.output_tokens:,} tokens written")
@@ -785,8 +805,11 @@ def _claude(system: str, prompt: str, model: str, effort: str, timeout: float) -
             effort=effort or None,
             cwd=cwd,
             setting_sources=[],
-            # the API's stream events, for what the model is doing (Live)
+            # the API's stream events, for what the model is doing (Live);
+            # its thinking summarized, not left out as newer models do by
+            # default, for what it is thinking about
             include_partial_messages=True,
+            thinking={"type": "adaptive", "display": "summarized"},
         )
         answered, text = "", ""
         tracked = live()

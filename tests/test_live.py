@@ -22,7 +22,12 @@ def test_claudes_stream_events_told_as_they_come():
         tracked,
         {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "x" * 400}},
     )
-    assert (tracked.phase, tracked.output_tokens, tracked.counted) == ("thinking", 100, False)
+    assert (tracked.phase, tracked.output_tokens, tracked.counted) == ("thinking", 0, False)
+    assert tracked.describe() == "thinking"  # no sentence whole yet
+    tracked.wrote("\n\nThe diff adds a clause. It cites Ryan, and the cla", thinking=True)
+    assert tracked.describe() == "thinking: The diff adds a clause."
+    tracked.wrote("ims hold up.", thinking=True)
+    assert tracked.describe().endswith("It cites Ryan, and the claims hold up.")
     claude_event(tracked, {"type": "content_block_start", "content_block": {"type": "text"}})
     answer = '[{"start": "a", "problem": "b"}, {"start": "c", "problem": "d"}]'
     claude_event(
