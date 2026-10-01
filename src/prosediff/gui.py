@@ -606,7 +606,7 @@ class App:
                 image=ttk.Icon(icon, size=16),
                 compound="left",
             )
-        source = ttk.Labelframe(page, text="Versions", padding=(10, 8))
+        source = self.source_card = ttk.Labelframe(page, text="Versions", padding=(10, 8))
         source.pack(fill="x")
         self.sides = {mode: ttk.Frame(source) for mode in MODES}
         for side in self.sides.values():
@@ -1516,6 +1516,11 @@ class App:
         greyed out, the output an HTML report."""
         if self.mode.get() != "git":
             self.status.set(REVIEW_READY if self.reviewing() else READY)
+        # one file is reviewed, not compared
+        self.root.title(
+            f"prosediff: {'review one file' if self.reviewing() else 'compare two versions'}"
+        )
+        self.source_card.configure(text="File" if self.reviewing() else "Versions")
         for mode, side in self.sides.items():
             if mode == self.mode.get():
                 side.pack(fill="x")

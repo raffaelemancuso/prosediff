@@ -1172,3 +1172,12 @@ def test_instructions_from_a_file_shown_read_only(root, tmp_path):
     (ok,) = [w for w in within(top) if isinstance(w, tk_ttk.Button) and w.cget("text") == "OK"]
     ok.invoke()
     assert app.assess_instructions.get() == str(notes)
+
+
+def test_the_one_file_tab_names_a_file_not_versions(root):
+    app = App(root, Settings(mode="files"))
+    assert app.source_card.cget("text") == "Versions"
+    app.mode.set("review")
+    app.show_mode()
+    assert app.source_card.cget("text") == "File"
+    assert root.title() == "prosediff: review one file"
