@@ -32,7 +32,6 @@ import tkinter as tk
 import webbrowser
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields, replace
-from functools import partial
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from tkinter import ttk as tk_ttk
@@ -42,6 +41,7 @@ import psutil
 import ttkbootstrap as ttk
 
 from prosediff.assess import (
+    ASSESS_TIMEOUT,
     CLAUDE_DEFAULT,
     CONTEXTS,
     AssessError,
@@ -56,35 +56,30 @@ from prosediff.assess import (
 from prosediff.diff import (
     AUTO_ENCODING,
     COMMENT_MODES,
+    MAX_HIDDEN,
     MOVE_ALGORITHMS,
-    Comparison,
     Context,
     FilterError,
     MovedPassageSettings,
     MoveSettings,
     Options,
     check_encoding,
-    compare,
-    compare_paths,
-    compare_split,
     move_defaults,
-    review_file,
     setting_type,
 )
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, language_name, normalize_language
+from prosediff.pipeline import Result, Run, execute
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
     SPLITS,
     TEXT_SUFFIXES,
-    assess_comparison,
     check_split,
     counted,
     default_output,
     default_split,
     format_of,
     open_output,
-    write_output,
 )
 from prosediff.sources import (
     DOCX_CHANGES,
@@ -237,6 +232,10 @@ class Settings:
     language: str = DEFAULT
     # a codec's name, or "auto": UTF-8 unless a file shows it is not
     encoding: str = AUTO_ENCODING
+    # a shell command both versions of every Markdown file are piped through
+    md_filter: str = ""
+    # the unchanged lines embedded per gap, for the HTML report to reveal
+    max_hidden: int = MAX_HIDDEN
     output: str = ""
     # "html": the HTML report; "diff", "wdiff": a unified or word diff
     # (prosediff.unified); "docx", "odt": a document of tracked changes
@@ -252,6 +251,8 @@ class Settings:
     assess_context: str = "document"
     assess_instructions: str = ""
     assess_save_prompt: bool = False
+    # how long the AI may take, in seconds
+    assess_timeout: float = ASSESS_TIMEOUT
     # whether the AI marks the problems in the text
     assess_annotate: bool = True
     # whether the report is first shown without the assessment, and the AI
@@ -369,15 +370,20 @@ CHOICES = {
 
 def sanitized(s: Settings) -> Settings:
     """The settings, each value that is no choice the window offers
-    replaced by its default (CHOICES)."""
-    return replace(
-        s,
-        **{
-            name: default
-            for name, (choices, default) in CHOICES.items()
-            if getattr(s, name) not in choices
-        },
-    )
+    replaced by its default (CHOICES), as is a number of hidden lines or a
+    timeout that is no number."""
+    fixed = {
+        name: default
+        for name, (choices, default) in CHOICES.items()
+        if getattr(s, name) not in choices
+    }
+    if not isinstance(s.max_hidden, int) or isinstance(s.max_hidden, bool):
+        fixed["max_hidden"] = MAX_HIDDEN
+    if not isinstance(s.assess_timeout, int | float) or isinstance(s.assess_timeout, bool):
+        fixed["assess_timeout"] = ASSESS_TIMEOUT
+    if not isinstance(s.md_filter, str):
+        fixed["md_filter"] = ""
+    return replace(s, **fixed)
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -413,6 +419,17 @@ def save_settings(s: Settings, path: Path | None = None) -> bool:
     return True
 
 
+def check_numbers(s: Settings) -> None:
+    """Refuse what the command line refuses too (ValueError): a negative
+    number of context lines (context_of) or of hidden lines, a timeout of
+    none."""
+    context_of(s)
+    if s.max_hidden < 0:
+        raise ValueError("Hidden lines must be 0 or more.")
+    if s.assess_timeout <= 0:
+        raise ValueError("The AI's timeout must be above 0 seconds.")
+
+
 def context_of(s: Settings) -> Context:
     """The context for compare(), from the Context lines box; ValueError
     for a negative number of lines, refused as the command line refuses it."""
@@ -431,20 +448,26 @@ def generate(
     s: Settings,
     progress: Callable[[str], None] = lambda stage: None,
     approve: Callable[[Path], bool] | None = None,
-) -> tuple[Path, Comparison, Assessment | None]:
-    """Compare as the settings say and write the HTML report; returns its
-    path, the comparison and the AI's assessment (None when none was asked,
-    or the preview was not approved: a failed one holds its error, and the
-    report is written all the same). progress is told each stage as it
-    starts ("Comparing…"). With an AI to assess and s.assess_preview, the
-    report is first written without the assessment, and approve, given its
-    path, says whether the text goes to the AI (no approve: it goes)."""
-    paths = s.paths or None
+) -> Result:
+    """Compare as the settings say and write the output (pipeline.execute):
+    progress is told each stage as it starts ("Comparing…"). With an AI to
+    assess and s.assess_preview, the report is first written without the
+    assessment, and approve, given its path, says whether the text goes to
+    the AI (no approve: it goes)."""
+    return execute(run_of(s), progress, approve if s.assess_preview else None)
+
+
+def run_of(s: Settings) -> Run:
+    """The run the settings ask for (pipeline.Run); ValueError for settings
+    that ask for none: sides or an AI to review with not chosen, a split or
+    a document of tracked changes the output cannot hold."""
     options = Options(
         context=context_of(s),
+        md_filter=s.md_filter or None,
         ignore_whitespace=s.ignore_whitespace,
         comments=s.comments,
         empty_comments=s.empty_comments,
+        max_hidden=s.max_hidden,
         docx_changes=s.docx_changes,
         paragraph_moves=moves_of(s, False),
         sentence_moves=moves_of(s, True),
@@ -453,8 +476,30 @@ def generate(
         language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
+    request = None
+    if s.assess:
+        request = AssessRequest(
+            s.assess,
+            effort=s.assess_effort,
+            context=s.assess_context,
+            instructions=s.assess_instructions,
+            timeout=s.assess_timeout,
+            save_prompt=s.assess_save_prompt,
+            annotate=s.assess_annotate,
+        )
+    common = {
+        "options": options,
+        "align": s.align,
+        "request": request,
+        "documents": s.assess_documents,
+    }
     if s.mode == "review":
-        return review(s, options, progress, approve)
+        if not s.single:
+            raise ValueError("choose the file to review")
+        if not s.assess:
+            raise ValueError("choose an AI to review the file")
+        out = Path(with_format(s.output, "html")) if s.output else review_page(Path(s.single))
+        return Run("review", s.single, out, **common)
     old, new = sides(s)
     fmt = s.output_format if s.output_format in FORMATS else "html"
     split = s.split if s.split in SPLITS else default_split(fmt)
@@ -463,127 +508,35 @@ def generate(
     check_split(split, fmt)
     if fmt in TRACKED_FORMATS and s.mode == "files" and old and new:
         check_paths(old, new, fmt)  # before comparing them
-
-    def run(options: Options) -> Comparison:
-        if s.mode == "files":
-            if not old or not new:
-                raise ValueError("choose the old and the new file")
-            return compare_paths(old, new, options, paths=paths)
-        if s.mode == "folders":
-            if not old or not new:
-                raise ValueError("choose the old and the new folder")
-            return compare_paths(old, new, options, paths=paths, include=s.include)
+    if s.mode == "git":
         if not s.repo or not s.base:
             raise ValueError("choose a repository and a base")
-        target = None if s.target in ("worktree", "index", "") else s.target
-        return compare(
-            s.repo,
-            s.base,
-            target,
-            options,
-            paths=paths,
-            cached=s.target == "index",
-            untracked=s.untracked and s.target in ("worktree", ""),
-        )
-
-    def staged(options: Options) -> Comparison:
-        if split != "both":
-            progress("Comparing…")
-        else:
-            unit = "sentence" if options.by_sentence else "paragraph"
-            progress(f"Comparing {unit} by {unit}…")
-        return run(options)
-
-    comparison, sentences = compare_split(staged, options, split)
+    elif not old or not new:
+        raise ValueError(f"choose the old and the new {'file' if s.mode == 'files' else 'folder'}")
     if s.output:
         out = Path(with_format(s.output, fmt))
     else:
         out = s.mode != "git" and default_page(Path(old), Path(new), FORMATS[fmt])
         out = out or default_output(fmt)
-    assessment = writing = None
-    write = partial(
-        write_output,
-        comparison,
+    run = Run(
+        s.mode,
+        old,
         out,
-        fmt,
-        s.paths,
-        align=s.align,
-        context=context_of(s),
-        sentences=sentences,
+        new=new,
+        paths=s.paths or None,
+        fmt=fmt,
         split=split,
-        documents=s.assess_documents,
+        ai_writing=s.assess_ai_writing,
+        **common,
     )
-    if s.assess and fmt == "html" and s.assess_preview and approve is not None:
-        progress("Writing the preview…")
-        write()
-        if not approve(out):
-            return out, comparison, None
-    if s.assess and fmt == "html":  # no other format has a place for it
-        request = AssessRequest(
-            s.assess,
-            effort=s.assess_effort,
-            context=s.assess_context,
-            instructions=s.assess_instructions,
-            save_prompt=s.assess_save_prompt,
-            annotate=s.assess_annotate,
-        )
-        progress(f"Asking {s.assess} to assess the changes…")
-        assessment = assess_comparison(comparison, request)
-        if s.assess_ai_writing:
-            progress(f"Asking {s.assess} whether the new text reads as written by an AI…")
-            writing = assess_comparison(comparison, request, kind="writing")
-    progress(
-        "Writing the report…"
-        if fmt == "html"
-        else "Writing the document…"
-        if fmt in ("docx", "odt")
-        else "Writing the diff…"
-    )
-    out = write(assessment=assessment, writing=writing)
-    return out, comparison, assessment
-
-
-def review(
-    s: Settings,
-    options: Options,
-    progress: Callable[[str], None],
-    approve: Callable[[Path], bool] | None,
-) -> tuple[Path, Comparison, Assessment | None]:
-    """generate for one file alone (the tab "review"): the AI chosen reviews
-    it whole, into an HTML report, first written without the review when
-    s.assess_preview (as generate does)."""
-    if not s.single:
-        raise ValueError("choose the file to review")
-    if not s.assess:
-        raise ValueError("choose an AI to review the file")
-    progress("Reading the file…")
-    comparison = review_file(s.single, options)
-    out = Path(s.output) if s.output else review_page(Path(s.single))
-    out = Path(with_format(str(out), "html"))
-    write = partial(
-        write_output,
-        comparison,
-        out,
-        align=s.align,
-        split="paragraph",
-        documents=s.assess_documents,
-    )
-    if s.assess_preview and approve is not None:
-        progress("Writing the preview…")
-        write()
-        if not approve(out):
-            return out, comparison, None
-    request = AssessRequest(
-        s.assess,
-        effort=s.assess_effort,
-        instructions=s.assess_instructions,
-        save_prompt=s.assess_save_prompt,
-        annotate=s.assess_annotate,
-    )
-    progress(f"Asking {s.assess} to review the file…")
-    assessment = assess_comparison(comparison, request)
-    progress("Writing the report…")
-    return write(assessment=assessment), comparison, assessment
+    if s.mode == "git":
+        run.old, run.new = s.repo, s.base
+        run.target = None if s.target in ("worktree", "index", "") else s.target
+        run.cached = s.target == "index"
+        run.untracked = s.untracked and s.target in ("worktree", "")
+    elif s.mode == "folders":
+        run.include = s.include
+    return run
 
 
 # Why a comparison can fail: the errors the window reports, others being bugs.
@@ -612,6 +565,8 @@ class JobResult:
     assessment: Assessment | None = None
     # the name of the file reviewed alone, "" for a comparison
     reviewed: str = ""
+    # why the AI-writing assessment failed ("": it did not, or was not asked)
+    writing_error: str = ""
 
 
 # How long a preview waits for the window to say whether the AI assesses;
@@ -635,21 +590,22 @@ def run_job(s: Settings, messages, replies) -> None:
             return False
 
     try:
-        path, c, assessment = generate(s, lambda stage: messages.put(("stage", stage)), approve)
+        done = generate(s, lambda stage: messages.put(("stage", stage)), approve)
     except JOB_ERRORS as e:
         messages.put(("error", str(e) or type(e).__name__))
         return
     except Exception as e:  # a bug: said rather than left unanswered
         messages.put(("error", f"{type(e).__name__}: {e}"))
         return
-    counts = c.counts
+    c, counts = done.comparison, done.comparison.counts
     result = JobResult(
-        path,
+        done.path,
         len(c.files),
         counts.additions,
         counts.deletions,
-        assessment,
+        done.assessment,
         c.repo_name if c.single else "",
+        (done.writing.error or "") if done.writing is not None else "",
     )
     messages.put(("done", result))
 
@@ -940,6 +896,15 @@ class App:
             choice_box(compared, self.align, ALIGNMENTS, ALIGNMENT_HINTS.get),
             "How long lines that wrap are aligned in the HTML report.",
         )
+        self.max_hidden = tk.StringVar(value=f"{self.s.max_hidden:,}")
+        field_row(
+            compared,
+            2,
+            "Hidden lines",
+            number_box(compared, self.max_hidden, 0, 1_000_000, 100),
+            "The unchanged lines embedded in the HTML report per gap, for it to reveal; "
+            f"longer gaps are left out. Default: {MAX_HIDDEN:,}.",
+        )
         self.move_passages = tk.BooleanVar(value=self.s.move_passages)
         switch_row(
             shown,
@@ -1021,14 +986,7 @@ class App:
             spin = (
                 ttk.Spinbox(passages, from_=0.01, to=1, increment=0.05, textvariable=var, width=10)
                 if f.metadata["share"]
-                else ttk.Spinbox(
-                    passages,
-                    from_=f.metadata["low"],
-                    to=10**7,
-                    increment=1,
-                    textvariable=var,
-                    width=10,
-                )
+                else number_box(passages, var, f.metadata["low"], 10**7, 1)
             )
             row, col = k // 2, (k % 2) * 2
             label = ttk.Label(passages, text=f.metadata["label"])
@@ -1050,6 +1008,25 @@ class App:
                 ENCODING_HINTS.get,
             ),
             "Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed.",
+        )
+        self.md_filter = tk.StringVar(value=self.s.md_filter)
+        field_row(
+            reading,
+            1,
+            "Markdown filter",
+            ttk.Entry(reading, textvariable=self.md_filter, width=30),
+            "A shell command both versions of every Markdown file are piped through "
+            "before they are compared (not Word or OpenDocument files). Empty: none.",
+        )
+        timing = ttk.Labelframe(self.advanced, text="AI assessment", padding=(10, 8))
+        timing.pack(fill="x", pady=(8, 0))
+        self.assess_timeout = tk.StringVar(value=number_text(self.s.assess_timeout))
+        field_row(
+            timing,
+            0,
+            "Timeout (seconds)",
+            number_box(timing, self.assess_timeout, 1, 86_400, 60),
+            f"Give up on the AI's assessment after this long. Default: {ASSESS_TIMEOUT:,}.",
         )
         ttk.Button(
             self.advanced, text="Close", command=self.toggle_advanced, bootstyle="secondary"
@@ -1800,6 +1777,16 @@ class App:
             encoding = check_encoding(self.encoding.get())
         except ValueError:
             encoding = AUTO_ENCODING
+        # numbers as typed, negative too, for run to refuse (check_numbers);
+        # what is no number, the default
+        try:
+            max_hidden = int(self.max_hidden.get().replace(",", "").strip())
+        except ValueError:
+            max_hidden = MAX_HIDDEN
+        try:
+            timeout = float(self.assess_timeout.get().replace(",", "").strip())
+        except ValueError:
+            timeout = ASSESS_TIMEOUT
         return Settings(
             mode=self.mode.get(),
             repo=self.repo.get().strip(),
@@ -1829,6 +1816,8 @@ class App:
             split=self.split.get(),
             language=language,
             encoding=encoding,
+            md_filter=self.md_filter.get().strip(),
+            max_hidden=max_hidden,
             # the default is kept as "": it follows the sides next time
             output=(
                 "" if self.output.get().strip() == self.auto_output else self.output.get().strip()
@@ -1840,6 +1829,7 @@ class App:
             assess_context=self.assess_context.get(),
             assess_instructions=self.assess_instructions.get().strip(),
             assess_save_prompt=self.assess_save_prompt.get(),
+            assess_timeout=timeout,
             assess_annotate=self.assess_annotate.get(),
             assess_preview=self.assess_preview.get(),
             assess_ai_writing=self.assess_ai_writing.get(),
@@ -1913,6 +1903,9 @@ class App:
             (self.split, d.split),
             (self.language, d.language),
             (self.encoding, d.encoding),
+            (self.md_filter, d.md_filter),
+            (self.max_hidden, f"{d.max_hidden:,}"),
+            (self.assess_timeout, number_text(d.assess_timeout)),
             (self.include, d.include),
             (self.untracked, d.untracked),
             (self.output_format, d.output_format),
@@ -1941,7 +1934,7 @@ class App:
             return  # one comparison at a time
         s = self.collect()
         try:
-            context_of(s)
+            check_numbers(s)
         except ValueError as e:
             self.complain(str(e))
             return
@@ -2072,6 +2065,10 @@ class App:
         self.status.set(f"{summary}: {path.name}")
         if assessment is not None and assessment.error:
             messagebox.showwarning("prosediff", f"The AI assessment failed: {assessment.error}")
+        if result.writing_error:
+            messagebox.showwarning(
+                "prosediff", f"The AI-writing assessment failed: {result.writing_error}"
+            )
         ttk.ToastNotification(
             "prosediff",
             f"{summary}\n{path.name}",
@@ -2126,6 +2123,35 @@ def popdown_listbox(combo: ttk.Combobox, popdown: str) -> str | None:
             return w
         widgets += combo.tk.splitlist(combo.tk.call("winfo", "children", w))
     return None
+
+
+def number_text(n: float) -> str:
+    """A number as a box shows it: its thousands separated, a whole one
+    without decimals (1,500; 2.5)."""
+    return f"{int(n):,}" if n == int(n) else f"{n:,}"
+
+
+def number_box(
+    parent, variable: tk.StringVar, low: float, high: float, step: float, width: int = 10
+) -> ttk.Spinbox:
+    """A box of a number shown with its thousands separated (1,500), its
+    arrows stepping that number, low to high: Tk's own would read it only
+    up to the first comma, stepping 250,000 to 251."""
+    spin = ttk.Spinbox(
+        parent, from_=low, to=high, increment=step, textvariable=variable, width=width
+    )
+
+    def stepped(sign: int) -> str:
+        try:
+            n = float(variable.get().replace(",", "").strip())
+        except ValueError:
+            n = low
+        variable.set(number_text(min(high, max(low, n + sign * step))))
+        return "break"  # not Tk's own step
+
+    spin.bind("<<Increment>>", lambda e: stepped(1))
+    spin.bind("<<Decrement>>", lambda e: stepped(-1))
+    return spin
 
 
 def passage_text(f, value: float) -> str:

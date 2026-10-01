@@ -14,7 +14,7 @@ import tkinter as tk
 
 from helpers import two_files
 
-from prosediff import gui
+from prosediff import gui, pipeline
 from prosediff.assess import AssessError, Assessment, ModelInfo
 from prosediff.diff import MOVED_PASSAGE_DEFAULTS, MovedPassageSettings
 from prosediff.gui import (
@@ -163,9 +163,8 @@ def test_generate_git(history, tmp_path):
     b, shas = history
     for target in ("worktree", "index", shas[4]):
         out = tmp_path / f"{target}.html"
-        path, c, _ = generate(
-            Settings(repo=str(b.path), base=shas[0], target=target, output=str(out))
-        )
+        done = generate(Settings(repo=str(b.path), base=shas[0], target=target, output=str(out)))
+        path, c = done.path, done.comparison
         assert path == out and out.read_bytes().startswith(b"<!DOCTYPE html>")
         short = {"worktree": "working tree", "index": "index"}.get(target, shas[4][:7])
         assert c.target.short == short
@@ -182,16 +181,17 @@ def test_generate_files_and_default_output(tmp_path):
         f"First paragraph here.\n\nSecond paragraph. {moved}\n",
     )
     s = Settings(mode="files", old=str(a), new=str(b))
-    path, c, _ = generate(s)
+    done = generate(s)
+    path, c = done.path, done.comparison
     assert path == tmp_path / "a_vs_b.html" and len(c.files) == 1
     assert c.counts.moved == 0
     s.split = "sentence"
-    assert generate(s)[1].counts.moved == 1
+    assert generate(s).comparison.counts.moved == 1
     s.output_format = "diff"
-    path, _, _ = generate(s)
+    path = generate(s).path
     assert path.suffix == ".diff" and path.read_text().startswith("--- a/a.md\n+++ b/b.md\n")
     s.output = str(tmp_path / "a_vs_b.html")  # the format chosen wins over the suffix
-    assert generate(s)[0] == tmp_path / "a_vs_b.diff"
+    assert generate(s).path == tmp_path / "a_vs_b.diff"
     with pytest.raises(ValueError, match="old and the new file"):
         generate(Settings(mode="files"))
     with pytest.raises(ValueError, match="old and the new folder"):
@@ -308,7 +308,7 @@ def test_the_ai_reads_only_an_approved_preview(tmp_path, monkeypatch):
     preview shown; the AI is asked only once it is approved."""
     old, new = two_files(tmp_path, "One.\n", "Two.\n")
     asked = []
-    monkeypatch.setattr(gui, "assess_comparison", lambda c, request: asked.append(request))
+    monkeypatch.setattr(pipeline, "assess_comparison", lambda c, request: asked.append(request))
     s = Settings(mode="files", old=str(old), new=str(new), assess="claude", split="paragraph")
     previews = []
 
@@ -317,7 +317,8 @@ def test_the_ai_reads_only_an_approved_preview(tmp_path, monkeypatch):
         assert path.is_file()  # written before the question
         return False
 
-    path, _, assessment = generate(s, approve=refuse)
+    done = generate(s, approve=refuse)
+    path, assessment = done.path, done.assessment
     assert previews == [path] and asked == [] and assessment is None
     stages = []
     generate(s, stages.append, approve=lambda path: True)
@@ -834,12 +835,12 @@ def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     old.write_bytes(b"One sentence here. Another one there.\n")
     new.write_bytes(b"Another one there. One sentence here.\n")
     s.mode, s.old, s.new, s.output = "files", str(old), str(new), str(tmp_path / "r.html")
-    path, _, _ = generate(s)
+    path = generate(s).path
     page = path.read_text(encoding="utf-8")
     assert 'data-split="paragraph"' in page and 'data-split="sentence"' in page
     # a diff holds one split: both compares paragraph by paragraph
     s.output_format, s.output = "diff", str(tmp_path / "r.diff")
-    path, _, _ = generate(s)
+    path = generate(s).path
     assert path.suffix == ".diff" and path.read_text(encoding="utf-8")
 
 
@@ -893,11 +894,11 @@ def test_documents_to_download(tmp_path, monkeypatch, root):
     from test_tracked import pair
 
     old, new = pair(tmp_path, "docx")
-    monkeypatch.setattr(gui, "assess_comparison", lambda c, request: assessment([FIXED]))
+    monkeypatch.setattr(pipeline, "assess_comparison", lambda c, request: assessment([FIXED]))
     s = Settings(mode="files", old=str(old), new=str(new), assess="claude", assess_preview=False)
-    path, _, _ = generate(s)
+    path = generate(s).path
     assert path.read_text(encoding="utf-8").count('class="ai-document"') == 2
-    path, _, _ = generate(replace(s, assess_documents=False))
+    path = generate(replace(s, assess_documents=False)).path
     assert 'class="ai-document"' not in path.read_text(encoding="utf-8")
     app = App(root, Settings(mode="files"))
     settle(root, app)
@@ -926,10 +927,11 @@ def test_one_file_reviewed(root, tmp_path, monkeypatch):
         asked.append((c, request))
         return Assessment("claude", "## Verdict\n**Good**.", annotations=[FIXED], kind="review")
 
-    monkeypatch.setattr(gui, "assess_comparison", assessed)
+    monkeypatch.setattr(pipeline, "assess_comparison", assessed)
     s = Settings(mode="review", single=str(path), assess="claude", assess_preview=False)
     stages = []
-    out, c, a = generate(s, stages.append)
+    done = generate(s, stages.append)
+    out, c, a = done.path, done.comparison, done.assessment
     assert out == tmp_path / "paper_review.html" and c.single and a.verdict == "good"
     assert stages == [
         "Reading the file…",
@@ -969,3 +971,82 @@ def test_one_file_reviewed(root, tmp_path, monkeypatch):
     app.show_mode()
     assert app.button.cget("text") == "Compare"
     assert not any(w.instate(["disabled"]) for w in app.comparing_only)
+
+
+def test_the_window_has_the_options_of_the_command_line(root, tmp_path):
+    """The Markdown filter, the hidden lines and the AI's timeout, as
+    --md-filter, --max-hidden and --assess-timeout: kept with the other
+    options, put in the run, refused out of range as the command line
+    refuses them, and reset to their defaults."""
+    from prosediff.assess import ASSESS_TIMEOUT
+    from prosediff.diff import MAX_HIDDEN
+    from prosediff.gui import run_of
+
+    old, new = two_files(tmp_path, "One.\n", "Two.\n")
+    s = Settings(mode="files", old=str(old), new=str(new), md_filter="cat", max_hidden=7)
+    app = App(root, replace(s, assess_timeout=90))
+    got = app.collect()
+    assert (got.md_filter, got.max_hidden, got.assess_timeout) == ("cat", 7, 90)
+    run = run_of(replace(got, assess="claude"))
+    assert run.options.md_filter == "cat" and run.options.max_hidden == 7
+    assert run.request.timeout == 90
+    app.max_hidden.set("-1")
+    app.run()
+    assert app.job is None and "Hidden lines must be 0 or more" in root.shown[-1]
+    app.max_hidden.set("7")
+    app.assess_timeout.set("0")
+    app.run()
+    assert app.job is None and "timeout must be above 0" in root.shown[-1]
+    app.reset_options()
+    got = app.collect()
+    assert (got.md_filter, got.max_hidden, got.assess_timeout) == ("", MAX_HIDDEN, ASSESS_TIMEOUT)
+
+
+def test_a_failed_ai_writing_assessment_is_shown(root, tmp_path, monkeypatch):
+    """The AI-writing assessment failing is said, as the command line says
+    it: its error goes back with the result, and the window shows it."""
+    from prosediff.gui import run_job
+
+    def assessed(c, request, kind="value"):
+        if kind == "writing":
+            return Assessment("claude", error="no login")
+        return Assessment("claude", "## Verdict\n**Mixed**: fine.")
+
+    monkeypatch.setattr(pipeline, "assess_comparison", assessed)
+    old, new = two_files(tmp_path, "One.\n", "Two.\n")
+    s = Settings(
+        mode="files",
+        old=str(old),
+        new=str(new),
+        assess="claude",
+        assess_ai_writing=True,
+        assess_preview=False,
+        open_page=False,
+    )
+    messages = queue.Queue()
+    run_job(s, messages, queue.Queue())
+    while (message := messages.get_nowait())[0] == "stage":
+        pass
+    kind, result = message
+    assert kind == "done" and result.writing_error == "no login"
+    app = App(root, s)
+    app.job, app.job_settings = object(), s
+    app.handle(kind, result)
+    assert "The AI-writing assessment failed: no login" in root.shown
+
+
+def test_a_number_box_steps_the_number_it_shows(root):
+    """A box showing 250,000 steps from 250,000, not from 250 (as Tk's own
+    arrows read it), keeps its thousands separated, and stays in range."""
+    from prosediff.gui import number_box
+
+    var = tk.StringVar(value="250,000")
+    box = number_box(root, var, 0, 1_000_000, 100)
+    box.event_generate("<<Decrement>>")
+    assert var.get() == "249,900"
+    var.set("999,950")
+    box.event_generate("<<Increment>>")
+    assert var.get() == "1,000,000"
+    var.set("none")
+    box.event_generate("<<Increment>>")
+    assert var.get() == "100"

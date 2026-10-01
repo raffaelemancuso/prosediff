@@ -37,19 +37,15 @@ from prosediff.diff import (
     SettingError,
     check_encoding,
     check_move_similarity,
-    compare,
-    compare_paths,
-    compare_split,
-    review_file,
     setting_type,
 )
 from prosediff.gitsetup import SetupError, document_name, setup_git
 from prosediff.language import DEFAULT, normalize_language
+from prosediff.pipeline import OutputError, Run, execute
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
     SPLITS,
-    assess_comparison,
     check_split,
     counted,
     default_output,
@@ -57,7 +53,6 @@ from prosediff.render import (
     format_of,
     open_output,
     package_version,
-    write_output,
 )
 from prosediff.sources import (
     DOCX_CHANGES,
@@ -538,22 +533,30 @@ def main(argv: list[str] | None = None) -> int:
         encoding=args.encoding,
     )
 
-    def run(options: Options):
-        if not args.git:
-            include = FOLDER_FILES if args.include is None else args.include
-            return compare_paths(args.repo, args.base, options, paths=args.paths, include=include)
-        return compare(
-            Path(args.repo),
-            args.base,
-            args.target,
-            options,
-            paths=args.paths,
-            cached=args.cached,
-            untracked=args.untracked,
-        )
-
+    mode = "git" if args.git else "folders" if args.folders else "files"
+    run = Run(
+        mode,
+        args.repo,
+        _output_path(args, fmt),
+        new=args.base,
+        target=args.target,
+        cached=args.cached,
+        untracked=args.untracked,
+        paths=args.paths,
+        include=FOLDER_FILES if args.include is None else args.include,
+        options=options,
+        fmt=fmt,
+        split=split,
+        align=args.align,
+        request=_request(args),
+        ai_writing=args.assess_ai_writing,
+        documents=args.assess_documents,
+    )
     try:
-        comparison, sentences = compare_split(run, options, split)
+        done = execute(run, _say)
+    except OutputError as e:  # a .docx or .odt of anything but two such documents
+        print(f"{PROG}: {e}", file=sys.stderr)
+        return 1
     except git.InvalidGitRepositoryError:
         print(
             f"{PROG}: not a git repository: {args.repo} "
@@ -570,55 +573,13 @@ def main(argv: list[str] | None = None) -> int:
     except (FilterError, SourceError) as e:
         print(f"{PROG}: {e}", file=sys.stderr)
         return 1
-
-    assessment = None
-    if args.assess is not None:
-        print(f"{PROG}: asking {args.assess} to assess the changes...", file=sys.stderr)
-        request = AssessRequest(
-            args.assess,
-            effort=args.assess_effort or "",
-            context=args.assess_context,
-            instructions=args.assess_instructions or "",
-            timeout=args.assess_timeout,
-            save_prompt=args.assess_save_prompt,
-            annotate=args.assess_annotate,
-        )
-        assessment = assess_comparison(comparison, request)
-        if assessment.error:
-            print(f"{PROG}: the assessment failed: {assessment.error}", file=sys.stderr)
-    writing = None
-    if args.assess is not None and args.assess_ai_writing:
-        print(
-            f"{PROG}: asking {args.assess} whether the new text reads as written by an AI...",
-            file=sys.stderr,
-        )
-        writing = assess_comparison(comparison, request, kind="writing")
-        if writing.error:
-            print(f"{PROG}: the AI-writing assessment failed: {writing.error}", file=sys.stderr)
-
-    output = _output_path(args, fmt)
-    try:
-        output = write_output(
-            comparison,
-            output,
-            fmt,
-            args.paths,
-            align=args.align,
-            context=options.context,
-            sentences=sentences,
-            split=split,
-            assessment=assessment,
-            writing=writing,
-            documents=args.assess_documents,
-        )
-    except ValueError as e:  # a .docx or .odt of anything but two such documents
-        print(f"{PROG}: {e}", file=sys.stderr)
-        return 1
-
-    c = comparison
+    assessment, writing, c = done.assessment, done.writing, done.comparison
+    for what, a in (("the assessment", assessment), ("the AI-writing assessment", writing)):
+        if a is not None and a.error:
+            print(f"{PROG}: {what} failed: {a.error}", file=sys.stderr)
     print(
         f"{PROG}: {c.base.short}..{c.target.short}: {counted(len(c.files), 'file')}, "
-        f"+{c.counts.additions:,} -{c.counts.deletions:,} -> {output}"
+        f"+{c.counts.additions:,} -{c.counts.deletions:,} -> {done.path}"
     )
     if assessment is not None:
         verdict = f" ({assessment.verdict})" if assessment.verdict else ""
@@ -627,8 +588,31 @@ def main(argv: list[str] | None = None) -> int:
         verdict = f" ({writing.verdict})" if writing.verdict else ""
         print(f"{PROG}: AI-writing assessment{verdict}, beside it")
     if args.open:
-        open_output(output)
+        open_output(done.path)
     return 0
+
+
+def _request(args: argparse.Namespace) -> AssessRequest | None:
+    """The AI --assess names, asked as the --assess-* options say; None
+    for none."""
+    if args.assess is None:
+        return None
+    return AssessRequest(
+        args.assess,
+        effort=args.assess_effort or "",
+        context=args.assess_context,
+        instructions=args.assess_instructions or "",
+        timeout=args.assess_timeout,
+        save_prompt=args.assess_save_prompt,
+        annotate=args.assess_annotate,
+    )
+
+
+def _say(stage: str) -> None:
+    """A stage of the run, on stderr: only asking the AI, which takes long."""
+    if stage.startswith("Asking"):
+        stage = stage.replace("…", "...")
+        print(f"{PROG}: {stage[0].lower()}{stage[1:]}", file=sys.stderr)
 
 
 def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
@@ -663,37 +647,29 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         language=args.language,
         encoding=args.encoding,
     )
+    output = args.output or (default_output() if args.open else review_page(path))
+    run = Run(
+        "review",
+        str(path),
+        Path(output),
+        options=options,
+        align=args.align,
+        request=_request(args),
+        documents=args.assess_documents,
+    )
     try:
-        comparison = review_file(path, options)
+        done = execute(run, _say)
     except (FilterError, SourceError) as e:
         print(f"{PROG}: {e}", file=sys.stderr)
         return 1
-    print(f"{PROG}: asking {args.assess} to review {path.name}...", file=sys.stderr)
-    request = AssessRequest(
-        args.assess,
-        effort=args.assess_effort or "",
-        instructions=args.assess_instructions or "",
-        timeout=args.assess_timeout,
-        save_prompt=args.assess_save_prompt,
-        annotate=args.assess_annotate,
-    )
-    assessment = assess_comparison(comparison, request)
+    assessment = done.assessment
     if assessment.error:
         print(f"{PROG}: the review failed: {assessment.error}", file=sys.stderr)
-    output = args.output or (default_output() if args.open else review_page(path))
-    output = write_output(
-        comparison,
-        output,
-        align=args.align,
-        split="paragraph",
-        assessment=assessment,
-        documents=args.assess_documents,
-    )
     verdict = f" ({assessment.verdict})" if assessment.verdict else ""
     marked = counted(len(assessment.annotations), "problem")
-    print(f"{PROG}: {path.name} reviewed{verdict}, {marked} marked -> {output}")
+    print(f"{PROG}: {path.name} reviewed{verdict}, {marked} marked -> {done.path}")
     if args.open:
-        open_output(output)
+        open_output(done.path)
     return 0
 
 
