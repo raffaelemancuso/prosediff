@@ -13,7 +13,9 @@
   --move-line: #fbefff; --move: #8250df; --current: #bf8700;
   --fmt: #9a6700; --fmt-bg: #fff8c5; --flash: #ffd33d99;
 }
-@media (prefers-color-scheme: dark) {
+/* On paper, the light colours even when the browser is in dark mode: no
+   page printed dark. */
+@media screen and (prefers-color-scheme: dark) {
   :root {
     --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --border: #30363d;
     --panel: #161b22; --del-line: #f851491a; --del-word: #f8514966;
@@ -21,18 +23,6 @@
     --add: #3fb950; --rem: #f85149; --link: #4493f8;
     --move-line: #ab7df826; --move: #ab7df8; --current: #d29922;
     --fmt: #d29922; --fmt-bg: #bb800933; --flash: #e3b34166;
-  }
-}
-/* On paper, the light colours even when the browser is in dark mode: no
-   page printed dark. */
-@media print {
-  :root {
-    --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
-    --panel: #f6f8fa; --del-line: #ffebe9; --del-word: #ff818266;
-    --ins-line: #e6ffec; --ins-word: #4ac26b66; --skip: #ddf4ff;
-    --add: #1a7f37; --rem: #cf222e; --link: #0969da;
-    --move-line: #fbefff; --move: #8250df; --current: #bf8700;
-    --fmt: #9a6700; --fmt-bg: #fff8c5; --flash: #ffd33d99;
   }
 }
 * { box-sizing: border-box; }
@@ -137,8 +127,8 @@ body.unified .col-resizer, body.review .col-resizer { display: none; }
 body.no-notes col.notes, body:not(.margin) col.notes { width: 0 !important; }
 body.no-notes td.notes, body:not(.margin) td.notes,
 body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
-.toolbar .margin-button { padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg); }
+.toolbar .margin-button, .toolbar .review-button { padding: 3px 10px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .toolbar .margin-button[aria-pressed="false"] { color: var(--muted); }
 /* The one style of the buttons in the page: link-coloured text, a tint on
    hover, and, pressed, a tinted box ringed in the link colour, as the
@@ -168,16 +158,13 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
 .prompt-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85em;
   max-height: 70vh; overflow: auto; margin: 8px 0 0; }
 .verdict { font-weight: 600; padding: 0 8px; border-radius: 999px; }
-.verdict-improves { color: var(--add); background: var(--ins-line); }
-.verdict-mixed { color: var(--fmt); background: var(--fmt-bg); }
-.verdict-worsens { color: var(--rem); background: var(--del-line); }
-/* whether the new text reads as written by an AI */
-.verdict-likely { color: var(--rem); background: var(--del-line); }
-.verdict-possibly { color: var(--fmt); background: var(--fmt-bg); }
-.verdict-unlikely { color: var(--add); background: var(--ins-line); }
-.verdict-good { color: var(--add); background: var(--ins-line); }
-.verdict-fair { color: var(--fmt); background: var(--fmt-bg); }
-.verdict-poor { color: var(--rem); background: var(--del-line); }
+/* the changes', the review's, and whether the new text reads as written
+   by an AI */
+.verdict-improves, .verdict-good, .verdict-unlikely { color: var(--add);
+  background: var(--ins-line); }
+.verdict-mixed, .verdict-fair, .verdict-possibly { color: var(--fmt); background: var(--fmt-bg); }
+.verdict-worsens, .verdict-poor, .verdict-likely { color: var(--rem);
+  background: var(--del-line); }
 .assess-body { max-width: 80em; }
 .assess-body h1, .assess-body h2, .assess-body h3 { font-size: 14px; margin: 14px 0 4px; }
 .assess-body p, .assess-body ul, .assess-body ol { margin: 4px 0; }
@@ -259,8 +246,8 @@ td.no { color: var(--muted); text-align: right; user-select: none;
   border-right: 1px solid var(--border); white-space: nowrap; }
 /* +, − and ~ in the gutter: the kind of change without relying on colour. */
 .sign { display: inline-block; width: 1.1em; text-align: center; font-weight: 700; }
-tr.delete .sign, tr.replace td.l .sign, tr.moved-out .sign { color: var(--rem); }
-tr.insert .sign, tr.replace td.r .sign, tr.moved-in .sign { color: var(--add); }
+tr.delete .sign, tr.replace td.l .sign { color: var(--rem); }
+tr.insert .sign, tr.replace td.r .sign { color: var(--add); }
 tr.moved-out .sign, tr.moved-in .sign { color: var(--move); }
 /* Long lines wrap instead of scrolling sideways, so prose stays readable.
    Justified, the last line of each wrapped line stays ragged. */
@@ -367,10 +354,9 @@ svg.new-comment .sign, svg.removed-comment .sign { fill: none; stroke: #fff;
 #tip b, #tip .line { display: block; }
 #tip .when { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 tr.current td, tr.target td { box-shadow: inset 0 2px 0 var(--current); }
-tr.skip td { background: var(--skip); padding: 2px 8px;
-  font-family: -apple-system, "Segoe UI", sans-serif; }
 /* room made after a fold, as after a row (--push): blank, under its band */
-tr.skip td { padding-bottom: calc(2px + var(--push, 0px));
+tr.skip td { padding: 2px 8px calc(2px + var(--push, 0px));
+  font-family: -apple-system, "Segoe UI", sans-serif;
   background: linear-gradient(var(--skip), var(--skip)) no-repeat top left /
     100% calc(100% - var(--push, 0px)); }
 tr.skip .omitted { color: var(--muted); }
@@ -434,8 +420,6 @@ footer a { color: inherit; }
 .toolbar .doc-button:hover { border-color: var(--link); }
 .toolbar .verdict-button .role, .toolbar .doc-button .role { font-size: 12px; }
 .toolbar .doc-button { gap: 4px; }
-.toolbar .review-button { padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--bg); }
 .toolbar .review-button[aria-pressed="true"] { background: var(--skip); color: var(--fg);
   border-color: var(--link); font-weight: 600; }
 .toolbar .comment-counter { color: var(--add); font-weight: 600; min-width: 4em;
@@ -444,15 +428,10 @@ footer a { color: inherit; }
 /* Icon buttons: the view switches, drawn in the text colour; a pressed one
    sits on a tinted square. */
 .toolbar button.icon { display: inline-flex; padding: 4px; border-radius: 5px; }
-.toolbar button.icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor;
-  stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.toolbar button.icon svg, .spacing-icon svg { width: 18px; height: 18px; fill: none;
+  stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .toolbar button.icon svg .fill { fill: currentColor; stroke: none; }
 .spacing-icon { display: inline-flex; color: var(--link); }
-.spacing-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor;
-  stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
-.toolbar button.icon[aria-checked="true"] { background: var(--skip);
-  box-shadow: inset 0 0 0 1px var(--link); }
-.toolbar button.icon[aria-checked="false"] { color: var(--muted); }
 .toolbar button.icon svg .soft { opacity: 0.3; }
 .toolbar button.icon:hover { background: var(--skip); }
 .toolbar button.icon[aria-pressed="true"] { background: var(--skip);
@@ -960,10 +939,15 @@ thead.print, .print-note { display: none; }
   var counter = document.querySelector(".toolbar .counter");
   var current = -1;
   var fmt = function (n) { return n.toLocaleString("en-US"); };
+  // What is shown: the whole report, or, when it holds both splits, the one
+  // shown.
+  function shownRoot() {
+    return document.querySelector(".split:not([hidden])") || document;
+  }
   // The changes of what is shown: the whole report, or, when it holds both
   // splits, the one shown.
   function refreshChanges() {
-    var root = document.querySelector(".split:not([hidden])") || document;
+    var root = shownRoot();
     changes = Array.prototype.slice.call(root.querySelectorAll("tr.first-change"));
     current = -1;
     counter.textContent = fmt(changes.length);
@@ -1075,7 +1059,13 @@ thead.print, .print-note { display: none; }
     verb.textContent = "show ";
     button.appendChild(verb);
     button.appendChild(document.createTextNode(
-      n.toLocaleString("en-US") + " unchanged line" + (n === 1 ? "" : "s")));
+      fmt(n) + " unchanged line" + (n === 1 ? "" : "s")));
+  }
+  // The unchanged lines el is folded among, unfolded.
+  function unfoldAround(el) {
+    var body = el.closest("tbody[hidden]");
+    var fold = body && body.previousElementSibling;
+    if (fold && fold.classList.contains("fold")) unfold(fold);
   }
   function unfoldRow(row) {
     var body = row.closest("tbody[hidden]"), fold = body && body.previousElementSibling;
@@ -1100,10 +1090,7 @@ thead.print, .print-note { display: none; }
   // them.
   function unfoldFormats() {
     document.querySelectorAll("tbody[hidden] tr.fmt-row").forEach(function (row) {
-      var body = row.closest("tbody[hidden]");
-      if (body && body.previousElementSibling && body.previousElementSibling.classList.contains("fold")) {
-        unfold(body.previousElementSibling);
-      }
+      unfoldAround(row);
     });
   }
 
@@ -1188,10 +1175,7 @@ thead.print, .print-note { display: none; }
   function openTarget() {
     var t = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
     if (!t) return;
-    var body = t.closest("tbody[hidden]");
-    if (body && body.previousElementSibling && body.previousElementSibling.classList.contains("fold")) {
-      unfold(body.previousElementSibling);
-    }
+    unfoldAround(t);
     var file = t.tagName === "DETAILS" ? t : t.closest("details.file");
     if (file) file.open = true;
     if (t.tagName === "TR") {
@@ -1488,10 +1472,7 @@ thead.print, .print-note { display: none; }
   // Something of a row brought into view, its unchanged lines unfolded and
   // its file opened if need be.
   function reveal(el) {
-    var body = el.closest("tbody[hidden]");
-    if (body && body.previousElementSibling && body.previousElementSibling.classList.contains("fold")) {
-      unfold(body.previousElementSibling);
-    }
+    unfoldAround(el);
     var file = el.closest("details.file");
     if (file) file.open = true;
     el.scrollIntoView({ block: "center" });
@@ -1681,7 +1662,7 @@ thead.print, .print-note { display: none; }
   var commentCounter = document.querySelector(".comment-counter");
   var commentCurrent = null;
   function shownCards(kind) {
-    var root = document.querySelector(".split:not([hidden])") || document;
+    var root = shownRoot();
     return Array.prototype.slice.call(root.querySelectorAll(".card." + kind));
   }
   function countComments() {
@@ -1735,7 +1716,12 @@ thead.print, .print-note { display: none; }
   // reads as written by an AI): drawers, each opened and closed by its
   // verdict in the top bar (or Esc), one at a time, the page scrolling
   // under them.
-  var drawer = document.getElementById("assessment");
+  // The rows and file review mode marked, unmarked.
+  function clearReview() {
+    document.querySelectorAll(".review-row").forEach(function (r) { r.classList.remove("review-row"); });
+    document.querySelectorAll(".review-file").forEach(function (f) { f.classList.remove("review-file"); });
+    unpin();
+  }
   function setDrawer(open, id) {
     document.querySelectorAll(".drawer").forEach(function (d) {
       d.hidden = !(open && d.id === (id || "assessment"));
@@ -1985,7 +1971,7 @@ thead.print, .print-note { display: none; }
   function buildReview() {
     reviewList.textContent = "";
     reviewItems = [];
-    var root = document.querySelector(".split:not([hidden])") || document;
+    var root = shownRoot();
     function add(item, ref, what) {
       var b = el("button");
       b.type = "button";
@@ -2044,9 +2030,7 @@ thead.print, .print-note { display: none; }
       it.button.setAttribute("aria-current", i === k ? "true" : "false");
     });
     item.button.scrollIntoView({ block: "nearest" });
-    document.querySelectorAll(".review-row").forEach(function (r) { r.classList.remove("review-row"); });
-    document.querySelectorAll(".review-file").forEach(function (f) { f.classList.remove("review-file"); });
-    unpin();
+    clearReview();
     var which = reviewHead.querySelector(".which"), where = reviewHead.querySelector(".where");
     if (item.kind === "assessment") {
       setDrawer(true, item.id);
@@ -2078,9 +2062,7 @@ thead.print, .print-note { display: none; }
     reviewing = on;
     document.body.classList.toggle("review", on);
     if (reviewButton) reviewButton.setAttribute("aria-pressed", on ? "true" : "false");
-    document.querySelectorAll(".review-row").forEach(function (r) { r.classList.remove("review-row"); });
-    document.querySelectorAll(".review-file").forEach(function (f) { f.classList.remove("review-file"); });
-    unpin();
+    clearReview();
     if (on) {
       buildReview();
       var first = reviewItems.findIndex(function (it) {
