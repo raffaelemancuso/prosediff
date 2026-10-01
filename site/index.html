@@ -161,6 +161,13 @@ h2 { font-size: var(--step-3); max-width: 40rem; }
 .spot-figs { display: grid; gap: 2rem; min-width: 0; }
 .spot-fig { min-width: 0; }
 .spot-narrow { max-width: 30rem; }
+/* A screenshot dense with text gets the page's full width, under its text. */
+@media (min-width: 60rem) {
+  .spot-grid.spot-wide { grid-template-columns: minmax(0, 1fr); }
+  .spot-wide .intro { max-width: 52rem; }
+  .spot-wide .points { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none; gap: 0.7rem 2.5rem; }
+}
+.shot { display: block; cursor: zoom-in; }
 
 /* The moved-paragraph example */
 .movedemo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
@@ -279,7 +286,7 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
   </div>
 
   <section class="spot" id="side-by-side">
-    <div class="wrap spot-grid">
+    <div class="wrap spot-grid spot-wide">
       <div class="spot-text">
         <p class="eyebrow">Side by side</p>
         <h2>Read both versions as prose, not as a list of lines</h2>
@@ -292,7 +299,7 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
         </ul>
       </div>
       <figure class="spot-fig">
-        <img src="screenshot_page.png" width="1280" height="1312" loading="lazy" alt="An HTML report from prosediff: two versions of a text on free fall side by side, changed words highlighted, with a margin of cards for comments and for the problems the AI found.">
+        <a class="shot" href="screenshot_page.png" title="Open full size"><img src="screenshot_page.png" width="1280" height="1312" loading="lazy" alt="An HTML report from prosediff: two versions of a text on free fall side by side, changed words highlighted, with a margin of cards for comments and for the problems the AI found."></a>
         <figcaption>A report: three paragraphs changed, two comments, and six problems marked by the AI in the margin.</figcaption>
       </figure>
     </div>
@@ -346,11 +353,11 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
       </div>
       <div class="spot-figs">
         <figure class="spot-fig">
-          <img src="screenshot_marks.png" width="1280" height="291" loading="lazy" alt="Two problems marked by the AI in a prosediff report: a numbered warning sign in the text and, in the margin, a card explaining each problem and proposing a correction.">
+          <a class="shot" href="screenshot_marks.png" title="Open full size"><img src="screenshot_marks.png" width="1280" height="291" loading="lazy" alt="Two problems marked by the AI in a prosediff report: a numbered warning sign in the text and, in the margin, a card explaining each problem and proposing a correction."></a>
           <figcaption>Problems are marked in the text, with an explanation and a proposed fix beside them.</figcaption>
         </figure>
         <figure class="spot-fig">
-          <img src="screenshot_assessment.png" width="1280" height="1125" loading="lazy" alt="The AI assessment drawer of a prosediff report, with a verdict, a summary of what changed, improvements, and a numbered list of problems to fix.">
+          <a class="shot" href="screenshot_assessment.png" title="Open full size"><img src="screenshot_assessment.png" width="1280" height="1125" loading="lazy" alt="The AI assessment drawer of a prosediff report, with a verdict, a summary of what changed, improvements, and a numbered list of problems to fix."></a>
           <figcaption>The full assessment: verdict, what changed section by section, what improved, and the problems to fix, most serious first.</figcaption>
         </figure>
       </div>
@@ -395,7 +402,7 @@ footer nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
         <p class="intro">Run <code>prosediff-gui</code>, pick two files, two folders or two commits, choose whether an AI should assess the changes, and press Compare. To have one document reviewed instead, use the One file tab. The report opens in your browser.</p>
       </div>
       <figure class="spot-fig spot-narrow">
-        <img src="screenshot_window.png" width="780" height="815" loading="lazy" alt="The prosediff window, with tabs for Git repository, Files, Folders and One file, and options for tracked changes, comments, output format and AI assessment.">
+        <a class="shot" href="screenshot_window.png" title="Open full size"><img src="screenshot_window.png" width="780" height="815" loading="lazy" alt="The prosediff window, with tabs for Git repository, Files, Folders and One file, and options for tracked changes, comments, output format and AI assessment."></a>
       </figure>
     </div>
   </section>
