@@ -109,9 +109,7 @@ def timed_align(old: list[str], new: list[str], ops, **options) -> tuple[list, f
 def clear_caches() -> None:
     """Forget the word comparisons cached by a previous run, so that each run
     is timed from scratch."""
-    cache = getattr(diff, "_word_ops", None)
-    if cache is not None:
-        cache.cache_clear()
+    diff.word_ops.cache_clear()
 
 
 def words(text: str) -> int:

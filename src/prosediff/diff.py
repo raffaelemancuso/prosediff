@@ -19,8 +19,8 @@ import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
-from functools import lru_cache
-from itertools import groupby
+from functools import cache, lru_cache
+from itertools import accumulate, groupby
 from pathlib import Path
 from typing import Literal
 
@@ -149,6 +149,8 @@ def context_for(context: Context, prose: bool) -> int | None:
 
 # Images up to this size are embedded in the HTML report, old and new side by side.
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# Images a browser shows, embedded in the page (mimetypes also knows TIFF
+# and HEIC, which it cannot).
 IMAGE_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -788,10 +790,7 @@ PARTIAL_INS = Markup('<ins class="partial">{}</ins>')
 
 
 def _offsets(tokens: list[str]) -> list[int]:
-    out = [0]
-    for t in tokens:
-        out.append(out[-1] + len(t))
-    return out
+    return list(accumulate(map(len, tokens), initial=0))
 
 
 def comments_only(old: str, new: str) -> bool:
@@ -837,42 +836,24 @@ def merge_across_spaces(ops: list[Opcode], a: list[str]) -> list[Opcode]:
     return merged
 
 
-def word_ops(old: str, new: str) -> list[Opcode]:
-    """The changes between two lines word by word, as opcodes over their
-    characters: the one word pairing of prosediff, that of the HTML report's
-    changed lines and of the word diff. Changes separated only by whitespace
-    are one change."""
-    return list(_word_ops(old, new))
-
-
 # Almost all the time of a comparison is spent here, and a changed line is
 # compared word by word up to three times (drawn, searched for moved
 # passages, drawn again around them): each pair of lines is compared once.
-WORD_OPS_CACHE = 4096
-
-
-def patience_opcodes(a: list[str], b: list[str]) -> list[Opcode]:
-    """The words of two lines paired by patiencediff's patience diff (in
+@lru_cache(maxsize=4096)
+def word_ops(old: str, new: str) -> tuple[Opcode, ...]:
+    """The changes between two lines word by word, as opcodes over their
+    characters: the one word pairing of prosediff, that of the HTML report's
+    changed lines and of the word diff. Changes separated only by whitespace
+    are one change. The words are paired by patiencediff's patience diff (in
     Rust): difflib's pairing but on 4 of 2,776 changed lines, 14 times as
     fast (docs/word_matcher_benchmark.md)."""
-    return PatienceSequenceMatcher(None, a, b).get_opcodes()
-
-
-def word_opcodes(
-    old: str, new: str, pair: Callable[[list[str], list[str]], list] = patience_opcodes
-) -> tuple[Opcode, ...]:
-    """word_ops, the words paired by pair (tokens, tokens -> opcodes over
-    them); docs/word_matcher_benchmark.py tries other matchers."""
     a, b = TOKEN.findall(old), TOKEN.findall(new)
     ao, bo = _offsets(a), _offsets(b)
+    pairs = PatienceSequenceMatcher(None, a, b).get_opcodes()
     ops = [
-        (op, ao[i1], ao[i2], bo[j1], bo[j2])
-        for op, i1, i2, j1, j2 in merge_across_spaces(pair(a, b), a)
+        (op, ao[i1], ao[i2], bo[j1], bo[j2]) for op, i1, i2, j1, j2 in merge_across_spaces(pairs, a)
     ]
     return tuple(slide_ops(ops, old, new))
-
-
-_word_ops = lru_cache(maxsize=WORD_OPS_CACHE)(word_opcodes)
 
 
 # Where a change reads best: at the start or end of the line; after the end
@@ -1275,22 +1256,8 @@ def git_opcodes(
 # Rows -------------------------------------------------------------------------
 
 
-class Styler:
-    """The styles of lines: a document's own, those of Markdown's syntax
-    (computed once each), or none at all."""
-
-    def __init__(self, markdown: bool) -> None:
-        self.markdown = markdown
-        self._cache: dict[str, list[set[str]]] = {}
-
-    def __call__(self, line: str) -> Styles:
-        if isinstance(line, Line):  # a document's: its own styles
-            return line.styles
-        if not self.markdown:
-            return None
-        if line not in self._cache:
-            self._cache[line] = md_styles(line)
-        return self._cache[line]
+# The styles of a line: a document's own, those of Markdown's syntax, or none.
+Styler = Callable[[str], Styles]
 
 
 def whole_row(kind: str, number: int, line: str, style: Styler) -> Row:
@@ -1448,7 +1415,8 @@ def candidate_pairs(
     matching: every one, or past ps.max_pairs of them those sharing rare
     words (words_of: the content words of one; rare, in at most
     ps.rare_share of them or ps.rare_min), the most rare words shared first,
-    at most ps.max_pairs."""
+    at most ps.max_pairs. A passage moved keeps most of its words, rare ones
+    included; two passages alike by chance seldom share one."""
     max_pairs = ps.max_pairs
     if len(outs) * len(ins) <= max_pairs:
         return [(i, j) for i in range(len(outs)) for j in range(len(ins))]
@@ -1473,37 +1441,11 @@ def candidate_pairs(
 # Moved passages ------------------------------------------------------------------
 
 # A passage is a run of text removed from (or added to) a line: the changes
-# of its word diff, separated by at most MAX_HOLE_WORDS unchanged words (a
-# moved sentence lands next to words it happens to share with its new
-# place), at least MIN_PASSAGE_WORDS words long (and MIN_PASSAGE_CHARS
-# characters, spaces aside). A passage shorter than PARTIAL_SHARE of the other is also
-# looked for inside it, as a window of it as long as itself: a sentence
-# moved out of a paragraph deleted or rewritten. What is left of a passage
-# around such a window is matched again, up to PASSAGE_ROUNDS times.
-MIN_PASSAGE_WORDS = 4
-MIN_PASSAGE_CHARS = 15
-# Two passages are one moved only if they share MIN_SHARED_CONTENT words of
-# CONTENT_LETTERS letters or more: short ones alike in their articles and
-# prepositions alone ("in several members of the same", "in both of the
-# same") are not (docs/passage_benchmark.py).
-MIN_SHARED_CONTENT = 2
-CONTENT_LETTERS = 4
-MAX_HOLE_WORDS = 2
-PARTIAL_SHARE = 0.8
-PASSAGE_ROUNDS = 4
+# of its word diff, a few unchanged words apart at most (a moved sentence
+# lands next to words it happens to share with its new place). Moved
+# passages are looked for unless turned off (--no-move-passages); how, the
+# MovedPassageSettings tell.
 MOVE_PASSAGES = True
-# The smallest run of words and punctuation two passages share that can
-# start or end the part of them that moved: a word or two in common by
-# chance at an edge is not.
-MIN_EDGE_RUN = 2
-# Past MOVE_MAX_CELLS pairs of removed and added passages (a long document
-# revised throughout), not every pair is tried: only those sharing a rare
-# word (of CONTENT_LETTERS letters or more, in at most RARE_SHARE of the
-# passages or RARE_MIN of them), most rare words shared first, at most
-# MOVE_MAX_CELLS of them. A passage moved keeps most of its words, rare ones
-# included; two passages alike by chance seldom share one.
-RARE_SHARE = 0.01
-RARE_MIN = 20
 
 
 def _setting(default: float, label: str, help: str, low: int = 1, share: bool = False):
@@ -1517,23 +1459,23 @@ def _setting(default: float, label: str, help: str, low: int = 1, share: bool = 
 
 @dataclass(frozen=True)
 class MovedPassageSettings:
-    """How moved passages are found (mark_moves); each default is the
-    constant of the same meaning above, chosen with docs/passage_benchmark.py.
+    """How moved passages are found (mark_moves); the defaults chosen with
+    docs/passage_benchmark.py.
     Set from the command line (--passage-NAME, NAME a field with - for _) and
     the GUI's advanced settings, both made from these fields."""
 
     min_words: int = _setting(
-        MIN_PASSAGE_WORDS,
+        4,
         "Shortest passage, words",
         "the fewest words a moved passage has: shorter runs of words alike are taken for chance",
     )
     min_chars: int = _setting(
-        MIN_PASSAGE_CHARS,
+        15,
         "Shortest passage, characters",
         "the fewest characters, spaces aside, a moved passage has",
     )
     max_gap: int = _setting(
-        MAX_HOLE_WORDS,
+        2,
         "Unchanged words inside a passage",
         "how many unchanged words may sit between two changes of one passage (a "
         "moved sentence lands next to words it happens to share with its new place), "
@@ -1541,31 +1483,31 @@ class MovedPassageSettings:
         low=0,
     )
     shared_words: int = _setting(
-        MIN_SHARED_CONTENT,
+        2,
         "Words two passages share",
         "how many words of --passage-content-letters letters or more two passages must "
         "share to be one passage moved: not only their articles and prepositions",
     )
     content_letters: int = _setting(
-        CONTENT_LETTERS,
+        4,
         "Letters of a shared word",
         "how many letters a word needs to count among the words two passages share",
     )
     edge_run: int = _setting(
-        MIN_EDGE_RUN,
+        2,
         "Words in common at an edge",
         "the fewest words and punctuation in a row, the same in both passages, that "
         "can start or end the part of them that moved",
     )
     partial_share: float = _setting(
-        PARTIAL_SHARE,
+        0.8,
         "Passage looked for inside a longer one",
         "a passage shorter than this share of the other (0 to 1) is also looked for "
         "inside it: a sentence moved out of a paragraph deleted or rewritten",
         share=True,
     )
     rounds: int = _setting(
-        PASSAGE_ROUNDS,
+        4,
         "Rounds of matching",
         "how many times what is left of a passage around a part of it found moved is matched again",
     )
@@ -1577,14 +1519,14 @@ class MovedPassageSettings:
         "this many",
     )
     rare_share: float = _setting(
-        RARE_SHARE,
+        0.01,
         "Rare word, share of passages",
         "with too many pairs, a word is rare when it is in at most this share of the "
         "passages (0 to 1) or --passage-rare-min of them",
         share=True,
     )
     rare_min: int = _setting(
-        RARE_MIN,
+        20,
         "Rare word, passages",
         "with too many pairs, a word in at most this many passages is rare",
     )
@@ -1653,7 +1595,7 @@ def _passage(
     start: int,
     end: int,
     ops: tuple[int, int],
-    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
+    ps: MovedPassageSettings,
 ) -> Passage | None:
     """The passage start:end of the line, its spaces trimmed; None when too
     short to be told from a chance likeness."""
@@ -1664,26 +1606,24 @@ def _passage(
     return Passage(row, old, start, end, *ops) if long_enough(line[start:end], ps) else None
 
 
-def long_enough(text: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS) -> bool:
+def long_enough(text: str, ps: MovedPassageSettings) -> bool:
     """Whether a passage is long enough to be told from a chance likeness."""
     return len(WORD.findall(text)) >= ps.min_words and len("".join(text.split())) >= ps.min_chars
 
 
-def content_words(text: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS) -> Counter:
+def content_words(text: str, ps: MovedPassageSettings) -> Counter:
     """The words of text long enough to carry meaning (ps.content_letters or
     more), case aside: what two passages must share, beyond "of the" and
     "in the", to be one passage moved."""
     return Counter(w.casefold() for w in WORD.findall(text) if len(w) >= ps.content_letters)
 
 
-def shares_content(a: str, b: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS) -> bool:
+def shares_content(a: str, b: str, ps: MovedPassageSettings) -> bool:
     shared = content_words(a, ps) & content_words(b, ps)
     return sum(shared.values()) >= ps.shared_words
 
 
-def passages_of(
-    row: Row, old_line: str, new_line: str, ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS
-) -> list[Passage]:
+def passages_of(row: Row, old_line: str, new_line: str, ps: MovedPassageSettings) -> list[Passage]:
     """The passages removed from and added to one changed row: a line
     removed or added whole is one passage, an edited one has its runs of
     changes (holes of up to ps.max_gap words allowed)."""
@@ -1738,7 +1678,7 @@ def _core(
     a2: int,
     b1: int,
     b2: int,
-    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
+    ps: MovedPassageSettings,
 ) -> tuple[int, int, int, int] | None:
     """Parts a1:a2 of line la and b1:b2 of line lb cut down to what they
     have in common: from the first run of at least ps.edge_run tokens both
@@ -1777,11 +1717,11 @@ def mark_moves(
     rows: list[Row],
     old: list[str],
     new: list[str],
-    style: Styler | None = None,
-    similarity: float = MOVE_SIMILARITY,
-    algorithm: str = MOVE_ALGORITHM,
-    passages: bool = MOVE_PASSAGES,
-    ps: MovedPassageSettings = MOVED_PASSAGE_DEFAULTS,
+    style: Styler,
+    similarity: float,
+    algorithm: str,
+    passages: bool,
+    ps: MovedPassageSettings,
 ) -> None:
     """Find what moved: removed lines that reappear as added lines and, with
     passages, the passages removed in one place and added in another, within
@@ -1804,7 +1744,6 @@ def mark_moves(
     no longer counted as removed or added (but for those edited on the way);
     such a row keeps, in without_passages, how it looked before.
     """
-    style = style or Styler(False)
     pair = 0  # the moves found, numbered for the HTML report
     removed: dict[str, list[Row]] = defaultdict(list)
     for r in rows:
@@ -2138,7 +2077,13 @@ def align(
     moved as passages.
     """
     ops = difflib_opcodes(old, new) if opcodes is None else opcodes
-    style = Styler(markdown)
+    md_style = cache(md_styles)  # each line's computed once
+
+    def style(line: str) -> Styles:
+        if isinstance(line, Line):  # a document's: its own styles
+            return line.styles
+        return md_style(line) if markdown else None
+
     if all(tag == "equal" for tag, *_ in ops) and not any(
         format_marks(o, style(o), style(n)) for o, n in zip(old, new, strict=False)
     ):
@@ -2439,24 +2384,8 @@ class Options:
             encoding=check_encoding(self.encoding),
         )
 
-    def move_settings(self, sentences: bool) -> tuple[float, str]:
-        """The moved-line similarity and algorithm where lines are sentences
-        (or paragraphs, lines): those chosen, else prosediff's defaults."""
-        return (self.sentence_moves if sentences else self.paragraph_moves).resolved(sentences)
-
 
 DEFAULT_OPTIONS = Options()
-
-
-def compare_split(
-    run: Callable[[Options], "Comparison"], options: Options, split: str
-) -> tuple["Comparison", "Comparison | None"]:
-    """The comparison split says: paragraph by paragraph ("paragraph"),
-    sentence by sentence ("sentence"), or both, the paragraphs first; run
-    makes one comparison from its options."""
-    comparison = run(replace(options, by_sentence=split == "sentence"))
-    sentences = run(replace(options, by_sentence=True)) if split == "both" else None
-    return comparison, sentences
 
 
 Labels = list[str] | None
@@ -2638,7 +2567,9 @@ def build_files(
     for (fd, old, new, old_labels, new_labels, fn), ops in zip(texts, all_ops, strict=False):
         token = footnotes.use_for_tooltips(fn)
         # prose compared sentence by sentence, or line by line (paragraphs)
-        similarity, algorithm = options.move_settings(options.by_sentence and fd.markdown)
+        sentences = options.by_sentence and fd.markdown
+        moves = options.sentence_moves if sentences else options.paragraph_moves
+        similarity, algorithm = moves.resolved(sentences)
         pairs = line_pairs(ops, old, new, similarity, algorithm)
         fd.pairs = [(i, j) for _, i, j in pairs]
         if fd.markdown:

@@ -6,7 +6,7 @@ output. Each front end turns its own input into a Run, and reports the
 Result, and the errors, its own way."""
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
@@ -17,7 +17,6 @@ from prosediff.diff import (
     Options,
     compare,
     compare_paths,
-    compare_split,
     review_file,
 )
 from prosediff.render import assess_comparison, write_output
@@ -126,7 +125,11 @@ def execute(
                 )
             return compare_paths(run.old, run.new, options, paths=run.paths, include=run.include)
 
-        comparison, sentences = compare_split(compared, run.options, run.split)
+        # paragraph by paragraph, sentence by sentence, or both (the paragraphs first)
+        comparison = compared(replace(run.options, by_sentence=run.split == "sentence"))
+        sentences = (
+            compared(replace(run.options, by_sentence=True)) if run.split == "both" else None
+        )
         split = run.split
     write = partial(
         write_output,

@@ -23,12 +23,13 @@ from prosediff.gui import (
     App,
     Settings,
     default_sides,
-    generate,
     list_choices,
     load_settings,
+    run_of,
     save_settings,
     settings_from_args,
 )
+from prosediff.pipeline import execute
 
 
 def test_no_second_console_when_there_is_one(monkeypatch):
@@ -38,26 +39,6 @@ def test_no_second_console_when_there_is_one(monkeypatch):
     assert gui.invisible_console() is False
     monkeypatch.setattr(gui.sys, "platform", "linux")
     assert gui.invisible_console() is False
-
-
-def test_every_drop_down_item_has_a_hint():
-    """Each item of the drop-down lists is explained when the pointer rests
-    on it (gui.item_hints); a language code by the language's name."""
-    from prosediff.diff import COMMENT_MODES, MOVE_ALGORITHMS
-    from prosediff.render import ALIGNMENTS
-    from prosediff.sources import DOCX_CHANGES
-
-    for values, hints in (
-        (DOCX_CHANGES, gui.DOCX_CHANGE_HINTS),
-        (COMMENT_MODES, gui.COMMENT_HINTS),
-        (ALIGNMENTS, gui.ALIGNMENT_HINTS),
-        (tuple(MOVE_ALGORITHMS), gui.MOVE_ALGORITHM_HINTS),
-        (gui.ENCODINGS, gui.ENCODING_HINTS),
-    ):
-        assert set(values) == set(hints)
-    assert set(gui.DOCX_CHANGE_LABELS) == set(DOCX_CHANGES)
-    assert set(gui.LANGUAGE_HINTS) < set(gui.LANGUAGES)
-    assert gui.language_name("it") == "Italian"
 
 
 def test_arguments_prefill_a_repository(history):
@@ -163,7 +144,9 @@ def test_generate_git(history, tmp_path):
     b, shas = history
     for target in ("worktree", "index", shas[4]):
         out = tmp_path / f"{target}.html"
-        done = generate(Settings(repo=str(b.path), base=shas[0], target=target, output=str(out)))
+        done = execute(
+            run_of(Settings(repo=str(b.path), base=shas[0], target=target, output=str(out)))
+        )
         path, c = done.path, done.comparison
         assert path == out and out.read_bytes().startswith(b"<!DOCTYPE html>")
         short = {"worktree": "working tree", "index": "index"}.get(target, shas[4][:7])
@@ -181,21 +164,21 @@ def test_generate_files_and_default_output(tmp_path):
         f"First paragraph here.\n\nSecond paragraph. {moved}\n",
     )
     s = Settings(mode="files", old=str(a), new=str(b))
-    done = generate(s)
+    done = execute(run_of(s))
     path, c = done.path, done.comparison
     assert path == tmp_path / "a_vs_b.html" and len(c.files) == 1
     assert c.counts.moved == 0
     s.split = "sentence"
-    assert generate(s).comparison.counts.moved == 1
+    assert execute(run_of(s)).comparison.counts.moved == 1
     s.output_format = "diff"
-    path = generate(s).path
+    path = execute(run_of(s)).path
     assert path.suffix == ".diff" and path.read_text().startswith("--- a/a.md\n+++ b/b.md\n")
     s.output = str(tmp_path / "a_vs_b.html")  # the format chosen wins over the suffix
-    assert generate(s).path == tmp_path / "a_vs_b.diff"
+    assert execute(run_of(s)).path == tmp_path / "a_vs_b.diff"
     with pytest.raises(ValueError, match="old and the new file"):
-        generate(Settings(mode="files"))
+        execute(run_of(Settings(mode="files")))
     with pytest.raises(ValueError, match="old and the new folder"):
-        generate(Settings(mode="folders", old=s.old, new=s.new))
+        execute(run_of(Settings(mode="folders", old=s.old, new=s.new)))
 
 
 def test_settings_are_remembered(tmp_path):
@@ -287,11 +270,13 @@ def finish(root, app, seconds: float = 60) -> None:
 
 
 def test_the_stages_are_told(tmp_path):
-    """generate tells each stage as it starts: both comparisons, then the
+    """The run tells each stage as it starts: both comparisons, then the
     report."""
     old, new = two_files(tmp_path, "One.\n", "Two.\n")
     stages = []
-    generate(Settings(mode="files", old=str(old), new=str(new), open_page=False), stages.append)
+    execute(
+        run_of(Settings(mode="files", old=str(old), new=str(new), open_page=False)), stages.append
+    )
     assert stages == [
         "Comparing paragraph by paragraph…",
         "Comparing sentence by sentence…",
@@ -299,7 +284,7 @@ def test_the_stages_are_told(tmp_path):
     ]
     stages.clear()
     s = Settings(mode="files", old=str(old), new=str(new), output_format="wdiff")
-    generate(s, stages.append)
+    execute(run_of(s), stages.append)
     assert stages == ["Comparing…", "Writing the diff…"]
 
 
@@ -317,11 +302,11 @@ def test_the_ai_reads_only_an_approved_preview(tmp_path, monkeypatch):
         assert path.is_file()  # written before the question
         return False
 
-    done = generate(s, approve=refuse)
+    done = execute(run_of(s), approve=refuse)
     path, assessment = done.path, done.assessment
     assert previews == [path] and asked == [] and assessment is None
     stages = []
-    generate(s, stages.append, approve=lambda path: True)
+    execute(run_of(s), stages.append, approve=lambda path: True)
     assert len(asked) == 1
     assert stages == [
         "Comparing…",
@@ -329,9 +314,6 @@ def test_the_ai_reads_only_an_approved_preview(tmp_path, monkeypatch):
         "Asking claude to assess the changes…",
         "Writing the report…",
     ]
-    asked.clear()
-    generate(replace(s, assess_preview=False), approve=refuse)  # switched off: no question
-    assert len(asked) == 1
 
 
 def test_the_preview_is_asked_about_in_the_window(root, tmp_path, monkeypatch):
@@ -383,10 +365,10 @@ def test_a_comparison_runs_apart_and_can_be_cancelled(root, tmp_path):
     assert "changed" in app.status.get()
 
 
-def test_the_model_list_says_loading_until_the_ai_answers(root, monkeypatch):
+def test_the_model_list_waits_for_the_ai_to_answer(root, monkeypatch):
     """The AI, model and effort saved are shown at once, checked once the AI
-    reports its models; an AI chosen then shows Loading in the model and
-    effort fields, which cannot be used, until it does."""
+    reports its models; an AI chosen then has its model and effort fields
+    greyed out, its own default asked for, until it does."""
     import threading
 
     answer = threading.Event()
@@ -406,8 +388,9 @@ def test_the_model_list_says_loading_until_the_ai_answers(root, monkeypatch):
     s = app.collect()
     assert (s.assess, s.assess_effort) == ("claude/opus", "max")
     app.assess_ai.set("codex")
-    assert app.assess_model.get() == "Loading…" and app.model_box.instate(["disabled"])
-    assert app.assess_effort.get() == "Loading…" and app.effort_box.instate(["disabled"])
+    assert app.model_box.instate(["disabled"]) and app.effort_box.instate(["disabled"])
+    s = app.collect()
+    assert (s.assess, s.assess_effort) == ("codex", "")
     answer.set()
     settle(root, app, "codex")
     assert app.assess_model.get() == "gpt-6-astra" and not app.model_box.instate(["disabled"])
@@ -476,7 +459,6 @@ def test_ai_model_and_effort_as_the_ai_reports(root):
     # Claude says no default effort: "default", its own, shown, not an empty box
     assert list(app.effort_box["values"]) == ["default", "low", "max"]
     assert app.assess_effort.get() == "default" and app.collect().assess_effort == ""
-    assert "own default" in app.effort_hint("default")
     app.assess_model.set("opus")
     assert app.assess_effort.get() == "default"
     app.assess_effort.set("max")
@@ -488,8 +470,6 @@ def test_ai_model_and_effort_as_the_ai_reports(root):
     settle(root, app, "codex")
     assert list(app.model_box["values"]) == ["gpt-6-astra", "gpt-5.5"]
     assert (app.assess_model.get(), app.assess_effort.get()) == ("gpt-6-astra", "low")
-    assert app.model_hint("gpt-6-astra") == "GPT-6-Astra, Codex's default"
-    assert app.effort_hint("low") == "Fast (the model's default)"
     app.assess_model.set("gpt-5.5")
     assert app.assess_effort.get() == "medium"
     app.assess_ai.set("ollama")
@@ -761,9 +741,12 @@ def test_linux_colour_scheme_from_the_portal(monkeypatch):
     assert gui.portal_color_scheme() == 2 and calls == ["ReadOne", "Read"]
     monkeypatch.setattr(sys, "platform", "linux")
     fake_jeepney({"ReadOne": ("u", 1)})
+    gui.system_dark.cache_clear()  # asked once: asked again here
     assert gui.system_dark()
     monkeypatch.setitem(sys.modules, "jeepney", None)  # not installed
+    gui.system_dark.cache_clear()
     assert gui.portal_color_scheme() is None and not gui.system_dark()
+    gui.system_dark.cache_clear()  # this system's answer for the windows after
 
 
 def test_options_saved_only_when_asked_and_reset(root, tmp_path, monkeypatch):
@@ -835,12 +818,12 @@ def test_move_settings_of_paragraphs_and_sentences(root, tmp_path):
     old.write_bytes(b"One sentence here. Another one there.\n")
     new.write_bytes(b"Another one there. One sentence here.\n")
     s.mode, s.old, s.new, s.output = "files", str(old), str(new), str(tmp_path / "r.html")
-    path = generate(s).path
+    path = execute(run_of(s)).path
     page = path.read_text(encoding="utf-8")
     assert 'data-split="paragraph"' in page and 'data-split="sentence"' in page
     # a diff holds one split: both compares paragraph by paragraph
     s.output_format, s.output = "diff", str(tmp_path / "r.diff")
-    path = generate(s).path
+    path = execute(run_of(s)).path
     assert path.suffix == ".diff" and path.read_text(encoding="utf-8")
 
 
@@ -858,11 +841,16 @@ def test_advanced_moved_passage_settings(root, tmp_path):
     assert app.advanced_window.state() == "withdrawn"
     # one field for each setting, at its default
     assert set(app.passage_vars) == {f.name for f in fields(MovedPassageSettings)}
-    assert app.passage_vars["max_pairs"].get() == f"{MOVED_PASSAGE_DEFAULTS.max_pairs:,}"
+    assert app.passage_vars["max_pairs"].get() == MOVED_PASSAGE_DEFAULTS.max_pairs
     assert app.collect().moved_passages == {}
     app.passage_vars["min_words"].set("6")
     app.passage_vars["partial_share"].set("0.5")
-    app.passage_vars["rounds"].set("not a number")  # keeps the default
+    app.passage_vars["rounds"].set("not a number")  # refused, as Compare says
+    with pytest.raises(ValueError, match="must be a number"):
+        app.collect()
+    app.run()
+    assert app.job is None and "must be a number" in root.shown[-1]
+    app.passage_vars["rounds"].set(MOVED_PASSAGE_DEFAULTS.rounds)
     s = app.collect()
     assert s.moved_passages == {"min_words": 6, "partial_share": 0.5}
     assert MovedPassageSettings.from_choices(s.moved_passages).min_words == 6
@@ -873,15 +861,14 @@ def test_advanced_moved_passage_settings(root, tmp_path):
     assert app.collect().moved_passages == {}
 
 
-def test_moved_passage_settings_loaded_and_checked(tmp_path):
+def test_settings_no_longer_offered_give_way(tmp_path):
+    """A setting saved that is no choice the window offers any more
+    (prosediff upgraded) gives way to its default; a moved-passage setting
+    out of range is refused."""
     path = tmp_path / "gui.json"
-    path.write_text(
-        json.dumps({"moved_passages": {"min_words": 5, "unknown": 3, "rounds": "x"}}),
-        encoding="utf-8",
-    )
-    assert load_settings(path).moved_passages == {"min_words": 5}
-    path.write_text(json.dumps({"moved_passages": [1, 2]}), encoding="utf-8")
-    assert load_settings(path).moved_passages == {}
+    path.write_text(json.dumps({"output_format": "pdf", "split": "sentence"}), encoding="utf-8")
+    s = load_settings(path)
+    assert (s.output_format, s.split) == ("html", "sentence")
     with pytest.raises(ValueError, match="partial_share"):
         MovedPassageSettings.from_choices({"partial_share": 3})
 
@@ -896,9 +883,9 @@ def test_documents_to_download(tmp_path, monkeypatch, root):
     old, new = pair(tmp_path, "docx")
     monkeypatch.setattr(pipeline, "assess_comparison", lambda c, request: assessment([FIXED]))
     s = Settings(mode="files", old=str(old), new=str(new), assess="claude", assess_preview=False)
-    path = generate(s).path
+    path = execute(run_of(s)).path
     assert path.read_text(encoding="utf-8").count('class="ai-document"') == 2
-    path = generate(replace(s, assess_documents=False)).path
+    path = execute(run_of(replace(s, assess_documents=False))).path
     assert 'class="ai-document"' not in path.read_text(encoding="utf-8")
     app = App(root, Settings(mode="files"))
     settle(root, app)
@@ -930,7 +917,7 @@ def test_one_file_reviewed(root, tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "assess_comparison", assessed)
     s = Settings(mode="review", single=str(path), assess="claude", assess_preview=False)
     stages = []
-    done = generate(s, stages.append)
+    done = execute(run_of(s), stages.append)
     out, c, a = done.path, done.comparison, done.assessment
     assert out == tmp_path / "paper_review.html" and c.single and a.verdict == "good"
     assert stages == [
@@ -940,9 +927,9 @@ def test_one_file_reviewed(root, tmp_path, monkeypatch):
     ]
     assert out.read_text(encoding="utf-8").count('class="ai-document"') == 1
     with pytest.raises(ValueError, match="choose an AI"):
-        generate(replace(s, assess=""))
+        execute(run_of(replace(s, assess="")))
     with pytest.raises(ValueError, match="choose the file"):
-        generate(replace(s, single=""))
+        execute(run_of(replace(s, single="")))
     app = App(root, Settings(mode="files", output_format="wdiff"))
     settle(root, app)
     app.mode.set("review")
@@ -980,7 +967,6 @@ def test_the_window_has_the_options_of_the_command_line(root, tmp_path):
     refuses them, and reset to their defaults."""
     from prosediff.assess import ASSESS_TIMEOUT
     from prosediff.diff import MAX_HIDDEN
-    from prosediff.gui import run_of
 
     old, new = two_files(tmp_path, "One.\n", "Two.\n")
     s = Settings(mode="files", old=str(old), new=str(new), md_filter="cat", max_hidden=7)
@@ -1033,23 +1019,6 @@ def test_a_failed_ai_writing_assessment_is_shown(root, tmp_path, monkeypatch):
     app.job, app.job_settings = object(), s
     app.handle(kind, result)
     assert "The AI-writing assessment failed: no login" in root.shown
-
-
-def test_a_number_box_steps_the_number_it_shows(root):
-    """A box showing 250,000 steps from 250,000, not from 250 (as Tk's own
-    arrows read it), keeps its thousands separated, and stays in range."""
-    from prosediff.gui import number_box
-
-    var = tk.StringVar(value="250,000")
-    box = number_box(root, var, 0, 1_000_000, 100)
-    box.event_generate("<<Decrement>>")
-    assert var.get() == "249,900"
-    var.set("999,950")
-    box.event_generate("<<Increment>>")
-    assert var.get() == "1,000,000"
-    var.set("none")
-    box.event_generate("<<Increment>>")
-    assert var.get() == "100"
 
 
 def test_compare_by_offers_the_splits_the_output_can_hold(root, tmp_path):

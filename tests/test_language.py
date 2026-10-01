@@ -9,6 +9,7 @@ from helpers import docx_xml, odt_xml, strip_tags, two_folders
 
 from prosediff import Options, compare_paths, render
 from prosediff.cli import main
+from prosediff.document import Line
 from prosediff.flags import flag_css, flag_html
 from prosediff.language import detect_language, flag_code, normalize_language
 from prosediff.sentences import split_sentences
@@ -266,13 +267,13 @@ def test_odt_paragraph_languages(tmp_path):
 
 
 def test_sentences_split_by_each_line_language():
-    """A line with a language of its own is split by that language's rules:
-    English knows "Mr." ends no sentence; the stand-in rule for an unknown
-    language does not."""
-    line = "Mr. Smith went home. He slept."
-    assert len(split_sentences([line], "xx")[0]) == 3
-    assert len(split_sentences([line], "xx", ["en"])[0]) == 2
-    assert len(split_sentences([line], "xx", [None])[0]) == 3
+    """A document's line with a language of its own is split by that
+    language's rules: English knows "Mr." ends no sentence; the stand-in
+    rule for an unknown language does not."""
+    text = "Mr. Smith went home. He slept."
+    assert len(split_sentences([text], "xx")[0]) == 3
+    assert len(split_sentences([Line(text, lang="en")], "xx")[0]) == 2
+    assert len(split_sentences([Line(text)], "xx")[0]) == 3
 
 
 def test_flags():

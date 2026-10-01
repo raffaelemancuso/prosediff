@@ -39,6 +39,7 @@ from prosediff.diff import (
     check_move_similarity,
     setting_type,
 )
+from prosediff.document import CHANGES
 from prosediff.gitsetup import SetupError, document_name, setup_git
 from prosediff.language import DEFAULT, normalize_language
 from prosediff.pipeline import OutputError, Run, execute, request_of
@@ -55,11 +56,10 @@ from prosediff.render import (
     package_version,
 )
 from prosediff.sources import (
-    DOCX_CHANGES,
     FOLDER_FILES,
     SourceError,
-    default_page,
     document_to_markdown,
+    page_of,
     review_page,
 )
 from prosediff.tracked import TRACKED_FORMATS, check_paths
@@ -243,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--docx-changes",
-        choices=DOCX_CHANGES,
+        choices=CHANGES,
         default="accept-all",
         help="the tracked changes of Word and OpenDocument documents: accept-all, "
         "reject-all, or show them as markup (default: accept-all)",
@@ -530,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
     run = Run(
         mode,
         args.repo,
-        _output_path(args, fmt),
+        _output_path(args, mode, fmt),
         new=args.base,
         target=args.target,
         cached=args.cached,
@@ -737,16 +737,16 @@ def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, m
         ap.error("--untracked needs the working tree: give no TARGET and no --cached")
 
 
-def _output_path(args: argparse.Namespace, fmt: str) -> Path:
+def _output_path(args: argparse.Namespace, mode: str, fmt: str) -> Path:
     """Where the output goes: -o; with --open, a file in the temporary
     folder (git difftool -d gives two temporary folders, gone once prosediff
     returns); comparing two folders or two files, into the new folder or next
-    to the new file (default_page); else diff.html (.diff, .wdiff) here."""
+    to the new file (page_of); else diff.html (.diff, .wdiff) here."""
     output = args.output
     if output is None and args.open:
         output = default_output(fmt)
-    if output is None and (args.folders or args.files):
-        output = default_page(Path(args.repo), Path(args.base), FORMATS[fmt])
+    if output is None:
+        output = page_of(mode, args.repo, args.base, FORMATS[fmt])
     if output is None:
         output = Path("diff").with_suffix(FORMATS[fmt])
     return output

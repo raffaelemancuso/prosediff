@@ -20,6 +20,7 @@ Windows; switches for the yes-or-no options, Bootstrap icons on the buttons.
 
 import contextlib
 import ctypes
+import functools
 import json
 import multiprocessing
 import os
@@ -58,16 +59,15 @@ from prosediff.diff import (
     MAX_HIDDEN,
     MOVE_ALGORITHMS,
     Context,
-    FilterError,
     MovedPassageSettings,
     MoveSettings,
     Options,
     check_encoding,
     move_defaults,
-    setting_type,
 )
-from prosediff.language import DEFAULT, DOCUMENT, GUESS, language_name, normalize_language
-from prosediff.pipeline import Result, Run, execute, request_of
+from prosediff.document import CHANGES as DOCX_CHANGES
+from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
+from prosediff.pipeline import Run, execute, request_of
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
@@ -80,12 +80,7 @@ from prosediff.render import (
     format_of,
     open_output,
 )
-from prosediff.sources import (
-    DOCX_CHANGES,
-    FOLDER_FILES,
-    SourceError,
-    page_of,
-)
+from prosediff.sources import FOLDER_FILES, page_of
 from prosediff.tracked import TRACKED_FORMATS, check_paths
 
 MAX_COMMITS = 200
@@ -98,57 +93,14 @@ LANGUAGES += ("en", "it", "de", "fr", "es", "pt", "nl", "pl", "sv", "da", "fi", 
 # chosen among those the AI reports (models_of), its own default first;
 # any can be typed.
 NO_ASSESSMENT = "none"
-# What the model and effort fields say while the AI reports its models.
+# What the AI field says while the AIs are being found.
 LOADING = "Loading…"
 # The effort item of a model that says no default of its own: that default.
 MODEL_DEFAULT = "default"
 AIS = (NO_ASSESSMENT, "claude", "codex", "ollama")
-AI_HINTS = {
-    NO_ASSESSMENT: "No assessment.",
-    "claude": "Claude Code, on your Claude login (prosediff[claude]).",
-    "codex": "ChatGPT through Codex, on your ChatGPT login (prosediff[codex]); log in "
-    "once with prosediff --login-codex.",
-    "ollama": "A local Ollama model: nothing leaves this computer (prosediff[models]).",
-}
-# What each item of the drop-down lists means (item_hints).
-ENCODING_HINTS = {
-    AUTO_ENCODING: "UTF-8, unless a file cannot be read in it; then guessed.",
-    "utf-8": "Unicode, the usual encoding today.",
-    "cp1252": "Windows, Western European languages.",
-    "latin-1": "ISO 8859-1, Western European languages.",
-    "utf-16": "Unicode in two bytes a character, as some Windows programs save text.",
-    "cp1250": "Windows, Central European languages.",
-    "cp1251": "Windows, Cyrillic.",
-}
-LANGUAGE_HINTS = {
-    DEFAULT: "The language Word and OpenDocument files are marked with (guessed when they "
-    "mark none); guessed for the other files.",
-    DOCUMENT: "The language Word and OpenDocument files are marked with.",
-    GUESS: "Guessed from each file's text.",
-}
 # How the tracked changes are settled (DOCX_CHANGES), as the list names it.
 DOCX_CHANGE_LABELS = {"accept-all": "accept all", "reject-all": "reject all", "show": "show"}
 DOCX_CHANGE_VALUES = {label: value for value, label in DOCX_CHANGE_LABELS.items()}
-DOCX_CHANGE_HINTS = {
-    "accept-all": "Compare the documents with every tracked change accepted.",
-    "reject-all": "Compare the documents with every tracked change rejected.",
-    "show": "Show the tracked changes as Word does: insertions and deletions marked.",
-}
-COMMENT_HINTS = {
-    "markers": "Only the comments added or removed, set apart: a marker and a panel in the "
-    "HTML report, CriticMarkup in the diffs.",
-    "text": "Compared as part of the text, as pandoc writes them.",
-    "none": "Left out.",
-}
-ALIGNMENT_HINTS = {
-    "left": "Aligned on the left, ragged on the right.",
-    "justify": "Justified on both sides, hyphenated.",
-}
-MOVE_ALGORITHM_HINTS = {
-    "token-sort": "The share of their words and punctuation in common, whatever their order.",
-    "token-set": "The words both share against the rest of each, whatever their order: a "
-    "line inside a longer one scores high.",
-}
 WORKTREE = "Working tree (uncommitted changes)"
 INDEX = "Index (staged changes)"
 
@@ -276,6 +228,10 @@ MODES = ("git", "files", "folders", "review")
 PREFILLED_FILES = (".md", ".docx", ".odt")
 # The space around the fields of the window.
 PAD = {"padx": 6, "pady": 4}
+# What is compared, which Reset to defaults leaves as it is.
+COMPARED = ("mode", "repo", "old", "new", "old_folder", "new_folder", "single")
+# The settings of a box of a number, as its error names them.
+NUMBER_NAMES = {"max_hidden": "Hidden lines", "assess_timeout": "The AI's timeout"}
 
 
 def prefillable(path: Path) -> bool:
@@ -359,57 +315,31 @@ def settings_file() -> Path:
     return Path(base) / "prosediff" / "gui.json"
 
 
-# The settings that are one of a list of choices: the choices, and the
-# default a value outside them gives way to.
+# The settings that are one of a list of choices: a value saved that is no
+# longer among them (prosediff upgraded) gives way to the default.
 CHOICES = {
-    "mode": (MODES, "git"),
-    "split": (SPLITS, "both"),
-    "comments": (COMMENT_MODES, "markers"),
-    "docx_changes": (DOCX_CHANGES, "accept-all"),
-    "output_format": (tuple(FORMATS), "html"),
-    "assess_context": (CONTEXTS, "document"),
+    "mode": MODES,
+    "split": SPLITS,
+    "comments": COMMENT_MODES,
+    "docx_changes": DOCX_CHANGES,
+    "output_format": tuple(FORMATS),
+    "assess_context": CONTEXTS,
 }
-
-
-def sanitized(s: Settings) -> Settings:
-    """The settings, each value that is no choice the window offers
-    replaced by its default (CHOICES), as is a number of hidden lines or a
-    timeout that is no number; of the moved-passage settings, only the
-    numbers of settings known kept."""
-    fixed = {
-        name: default
-        for name, (choices, default) in CHOICES.items()
-        if getattr(s, name) not in choices
-    }
-    if not is_number(s.max_hidden, int):
-        fixed["max_hidden"] = MAX_HIDDEN
-    if not is_number(s.assess_timeout):
-        fixed["assess_timeout"] = ASSESS_TIMEOUT
-    if not isinstance(s.md_filter, str):
-        fixed["md_filter"] = ""
-    known_passage = {f.name for f in fields(MovedPassageSettings)}
-    passages = s.moved_passages if isinstance(s.moved_passages, dict) else {}
-    fixed["moved_passages"] = {
-        k: v for k, v in passages.items() if k in known_passage and is_number(v)
-    }
-    return replace(s, **fixed)
-
-
-def is_number(v: object, kinds: type | tuple[type, ...] = (int, float)) -> bool:
-    """Whether v is a number of kinds, a JSON true or false being none."""
-    return isinstance(v, kinds) and not isinstance(v, bool)
 
 
 def load_settings(path: Path | None = None) -> Settings:
     """The choices saved (Save options), or the defaults; a value that is
-    no choice the window offers gives way to its default."""
+    no choice the window offers any more gives way to its default."""
     try:
         data = json.loads((path or settings_file()).read_text(encoding="utf-8"))
         known = Settings.__dataclass_fields__
         s = Settings(**{k: v for k, v in data.items() if k in known})
     except (OSError, ValueError, TypeError):
         return Settings()
-    return sanitized(s)
+    d = Settings()
+    return replace(
+        s, **{k: getattr(d, k) for k, choices in CHOICES.items() if getattr(s, k) not in choices}
+    )
 
 
 def save_settings(s: Settings, path: Path | None = None) -> bool:
@@ -447,19 +377,6 @@ def context_of(s: Settings) -> Context:
     if lines < 0:
         raise ValueError("Context lines must be 0 or more (or auto).")
     return lines
-
-
-def generate(
-    s: Settings,
-    progress: Callable[[str], None] = lambda stage: None,
-    approve: Callable[[Path], bool] | None = None,
-) -> Result:
-    """Compare as the settings say and write the output (pipeline.execute):
-    progress is told each stage as it starts ("Comparing…"). With an AI to
-    assess and s.assess_preview, the report is first written without the
-    assessment, and approve, given its path, says whether the text goes to
-    the AI (no approve: it goes)."""
-    return execute(run_of(s), progress, approve if s.assess_preview else None)
 
 
 def run_of(s: Settings) -> Run:
@@ -532,20 +449,6 @@ def run_of(s: Settings) -> Run:
     return run
 
 
-# Why a comparison can fail: the errors the window reports, others being bugs.
-JOB_ERRORS = (
-    git.InvalidGitRepositoryError,
-    git.NoSuchPathError,
-    git.BadName,
-    git.GitCommandError,
-    FilterError,
-    RuntimeError,  # git diff failed or timed out (git_opcodes)
-    SourceError,
-    ValueError,
-    OSError,
-)
-
-
 @dataclass
 class JobResult:
     """What the window needs of a finished comparison: where it went, what
@@ -566,9 +469,21 @@ class JobResult:
 # unanswered, it does not.
 PREVIEW_WAIT_S = 3600
 
+# Why a comparison can fail: the errors the window reports, others being bugs.
+JOB_ERRORS = (
+    git.InvalidGitRepositoryError,
+    git.NoSuchPathError,
+    git.BadName,
+    git.GitCommandError,
+    RuntimeError,  # git diff failed or timed out, FilterError, SourceError
+    ValueError,
+    OSError,
+)
+
 
 def run_job(s: Settings, messages, replies) -> None:
-    """generate, in a process of its own that the window can stop: each
+    """Compare as the settings say and write the output (pipeline.execute),
+    in a process of its own that the window can stop: each
     stage, then the result or the error, sent back on messages, as
     ("stage", text), ("done", JobResult) or ("error", text). A preview is
     sent as ("preview", path), and the window's answer, whether the AI
@@ -583,7 +498,11 @@ def run_job(s: Settings, messages, replies) -> None:
             return False
 
     try:
-        done = generate(s, lambda stage: messages.put(("stage", stage)), approve)
+        done = execute(
+            run_of(s),
+            lambda stage: messages.put(("stage", stage)),
+            approve if s.assess_preview else None,
+        )
     except JOB_ERRORS as e:
         messages.put(("error", str(e) or type(e).__name__))
         return
@@ -654,7 +573,10 @@ class App:
     def __init__(self, root: tk.Tk | tk.Toplevel, settings: Settings | None = None) -> None:
         self.root = root
         use_theme(root)
-        self.s = sanitized(settings or load_settings())
+        self.s = settings or load_settings()
+        # the widget variable of each setting shown as it is, by its name in
+        # Settings (setting): collect reads them, reset_options resets them
+        self.vars: dict[str, tk.Variable] = {}
         self.choices: dict[str, str] = {}  # label -> ref
         # the comparison running (a process of its own), what it sends back,
         # its settings, and the stage it is at
@@ -669,7 +591,7 @@ class App:
 
         # What is compared: a git repository, two files or two folders, one
         # at a time, chosen with a segmented button
-        self.mode = tk.StringVar(value=self.s.mode)
+        self.mode = self.setting("mode")
         switch = ttk.Frame(page)
         switch.pack(fill="x", pady=(0, 8))
         for value, text, icon in (
@@ -717,7 +639,7 @@ class App:
 
     def build_git_side(self, git_side: ttk.Frame) -> None:
         """The fields of a git repository: where, which versions, which paths."""
-        self.repo = tk.StringVar(value=self.s.repo)
+        self.repo = self.setting("repo")
         ttk.Label(git_side, text="Repository").grid(row=0, column=0, sticky="w", **PAD)
         repo_entry = ttk.Entry(git_side, textvariable=self.repo)
         repo_entry.grid(row=0, column=1, sticky="ew", **PAD)
@@ -743,16 +665,16 @@ class App:
         paths_entry = ttk.Entry(git_side, textvariable=self.paths)
         paths_entry.grid(row=3, column=1, columnspan=2, sticky="ew", **PAD)
         hint(paths_entry, "Optional: files or folders of the repository, separated by ;")
-        self.untracked = tk.BooleanVar(value=self.s.untracked)
+        self.untracked = self.setting("untracked")
         self.untracked_box = toggle(git_side, "Include untracked files", self.untracked)
         self.untracked_box.grid(row=4, column=1, sticky="w", **PAD)
 
     def build_path_sides(self, files_side: ttk.Frame, folders_side: ttk.Frame) -> None:
         """The fields of two files, and of two folders."""
-        self.old = tk.StringVar(value=self.s.old)
-        self.new = tk.StringVar(value=self.s.new)
-        self.old_folder = tk.StringVar(value=self.s.old_folder)
-        self.new_folder = tk.StringVar(value=self.s.new_folder)
+        self.old = self.setting("old")
+        self.new = self.setting("new")
+        self.old_folder = self.setting("old_folder")
+        self.new_folder = self.setting("new_folder")
         for side, folder, old, new, what in (
             (files_side, False, self.old, self.new, "file"),
             (folders_side, True, self.old_folder, self.new_folder, "folder"),
@@ -779,7 +701,7 @@ class App:
             bootstyle="secondary",
         ).grid(row=2, column=1, sticky="w", padx=6)
         ttk.Label(folders_side, text="Only").grid(row=2, column=0, sticky="w", **PAD)
-        self.include = tk.StringVar(value=self.s.include)
+        self.include = self.setting("include")
         include_entry = ttk.Entry(folders_side, textvariable=self.include)
         include_entry.grid(row=2, column=1, sticky="ew", **PAD)
         hint(
@@ -790,7 +712,7 @@ class App:
 
     def build_review_side(self, side: ttk.Frame) -> None:
         """The field of one file, reviewed alone."""
-        self.single = tk.StringVar(value=self.s.single)
+        self.single = self.setting("single")
         ttk.Label(side, text="File").grid(row=0, column=0, sticky="w", **PAD)
         ttk.Entry(side, textvariable=self.single).grid(row=0, column=1, sticky="ew", **PAD)
         browse(side, lambda: self.pick(self.single, False), "Choose the file to review").grid(
@@ -814,40 +736,33 @@ class App:
             compared,
             0,
             "Tracked changes",
-            choice_box(
-                compared,
-                self.docx,
-                [DOCX_CHANGE_LABELS[v] for v in DOCX_CHANGES],
-                lambda label: DOCX_CHANGE_HINTS.get(DOCX_CHANGE_VALUES.get(label, ""), ""),
-            ),
+            choice_box(compared, self.docx, [DOCX_CHANGE_LABELS[v] for v in DOCX_CHANGES]),
             "Word and OpenDocument tracked changes: accept them all, reject them all, or "
             "show them, as Word does.",
         )
-        self.language = tk.StringVar(value=self.s.language)
+        self.language = self.setting("language")
         # any code can be typed; the list holds the common ones
         field_row(
             compared,
             1,
             "Language",
-            item_hints(
-                ttk.Combobox(compared, textvariable=self.language, values=LANGUAGES, width=12),
-                lambda code: LANGUAGE_HINTS.get(code) or language_name(code),
-            ),
+            ttk.Combobox(compared, textvariable=self.language, values=LANGUAGES, width=12),
             "Splits sentences and hyphenates lines. default: the language Word and "
-            "OpenDocument files are marked with, else guessed; or a code such as it.",
+            "OpenDocument files are marked with, else guessed; document: only that; guess: "
+            "guessed from each file's text; or a code such as it.",
         )
-        self.comments = tk.StringVar(value=self.s.comments)
+        self.comments = self.setting("comments")
         field_row(
             right,
             0,
             "Comments",
-            choice_box(right, self.comments, COMMENT_MODES, COMMENT_HINTS.get),
+            choice_box(right, self.comments, COMMENT_MODES),
             "markers: only the comments added or removed, set apart (a marker and a panel in "
             "the HTML report, CriticMarkup in the diffs); text: compared as text; none: left "
             "out.",
         )
         self.comments.trace_add("write", lambda *_: self.update_empty_comments())
-        self.split = tk.StringVar(value=self.s.split)
+        self.split = self.setting("split")
         splits = ttk.Frame(compared)
         split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
         # what only a comparison has, greyed out reviewing one file (show_mode)
@@ -869,7 +784,7 @@ class App:
             "moved between paragraphs is recognised), or both, in one HTML report whose "
             "toolbar switches between the two.",
         )
-        self.ignore_ws = tk.BooleanVar(value=self.s.ignore_whitespace)
+        self.ignore_ws = self.setting("ignore_whitespace")
         self.comparing_only.append(
             switch_row(
                 right,
@@ -886,7 +801,7 @@ class App:
         compared.grid(row=0, column=0, sticky="nw")
         shown = ttk.Frame(card)
         shown.grid(row=0, column=1, sticky="nw", padx=(18, 0))
-        self.context = tk.StringVar(value=self.s.context_lines)
+        self.context = self.setting("context_lines")
         # "auto": 0 around the changes of Markdown and Word, 3 of other files
         field_row(
             compared,
@@ -896,24 +811,32 @@ class App:
             "Unchanged lines shown around each change. auto: none in Markdown files and Word "
             "documents, whose lines are paragraphs; 3 in the others.",
         )
-        self.align = tk.StringVar(value=self.s.align)
+        self.align = self.setting("align")
         field_row(
             compared,
             1,
             "Wrapped lines",
-            choice_box(compared, self.align, ALIGNMENTS, ALIGNMENT_HINTS.get),
-            "How long lines that wrap are aligned in the HTML report.",
+            choice_box(compared, self.align, ALIGNMENTS),
+            "How long lines that wrap are aligned in the HTML report. left: ragged on the "
+            "right; justify: on both sides, hyphenated.",
         )
-        self.max_hidden = tk.StringVar(value=f"{self.s.max_hidden:,}")
+        self.max_hidden = self.setting("max_hidden")
         field_row(
             compared,
             2,
             "Hidden lines",
-            number_box(compared, self.max_hidden, 0, 1_000_000, 100),
+            ttk.Spinbox(
+                compared,
+                from_=0,
+                to=1_000_000,
+                increment=100,
+                textvariable=self.max_hidden,
+                width=10,
+            ),
             "The unchanged lines embedded in the HTML report per gap, for it to reveal; "
             f"longer gaps are left out. Default: {MAX_HIDDEN:,}.",
         )
-        self.move_passages = tk.BooleanVar(value=self.s.move_passages)
+        self.move_passages = self.setting("move_passages")
         switch_row(
             shown,
             0,
@@ -923,9 +846,9 @@ class App:
             "in one place and added in another, as alike as the moved paragraphs (sentences) "
             "must be, are shown as moved, not as a deletion and an unrelated insertion.",
         )
-        self.full = tk.BooleanVar(value=self.s.full)
+        self.full = self.setting("full")
         switch_row(shown, 1, "Whole files", self.full, "Show every line of each changed file.")
-        self.empty_comments = tk.BooleanVar(value=self.s.empty_comments)
+        self.empty_comments = self.setting("empty_comments")
         self.empty_comments_box = switch_row(
             shown,
             2,
@@ -976,7 +899,8 @@ class App:
                 move_fields(moves, similarity, algorithm),
                 f"How alike an edited {what[:-1]} must be to where it reappears to count as "
                 "moved (1: only unchanged), and how that is measured. token-sort: the words "
-                f"in common, whatever their order. Default: {default}"
+                "in common, whatever their order; token-set: the words both share against "
+                f"the rest of each (one inside a longer one scores high). Default: {default}"
                 + (" (lines of files other than prose too)." if not sentences else "."),
             )
         passages = ttk.Labelframe(
@@ -986,15 +910,20 @@ class App:
         )
         passages.pack(fill="x", pady=(8, 0))
         passages.columnconfigure((1, 3), weight=1)
-        self.passage_vars: dict[str, tk.StringVar] = {}
+        self.passage_vars: dict[str, tk.Variable] = {}
         for k, f in enumerate(fields(MovedPassageSettings)):
-            value = self.s.moved_passages.get(f.name, f.default)
-            var = tk.StringVar(value=passage_text(f, value))
+            share = f.metadata["share"]
+            var = (tk.DoubleVar if share else tk.IntVar)(
+                value=self.s.moved_passages.get(f.name, f.default)
+            )
             self.passage_vars[f.name] = var
-            spin = (
-                ttk.Spinbox(passages, from_=0.01, to=1, increment=0.05, textvariable=var, width=10)
-                if f.metadata["share"]
-                else number_box(passages, var, f.metadata["low"], 10**7, 1)
+            spin = ttk.Spinbox(
+                passages,
+                from_=0.01 if share else f.metadata["low"],
+                to=1 if share else 10**7,
+                increment=0.05 if share else 1,
+                textvariable=var,
+                width=10,
             )
             row, col = k // 2, (k % 2) * 2
             label = ttk.Label(passages, text=f.metadata["label"])
@@ -1006,18 +935,16 @@ class App:
             hint(spin, tip)
         reading = ttk.Labelframe(self.advanced, text="Reading files", padding=(10, 8))
         reading.pack(fill="x", pady=(8, 0))
-        self.encoding = tk.StringVar(value=self.s.encoding)
+        self.encoding = self.setting("encoding")
         field_row(
             reading,
             0,
             "Text encoding",
-            item_hints(
-                ttk.Combobox(reading, textvariable=self.encoding, values=ENCODINGS, width=12),
-                ENCODING_HINTS.get,
-            ),
-            "Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed.",
+            ttk.Combobox(reading, textvariable=self.encoding, values=ENCODINGS, width=12),
+            "Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed; or a "
+            "codec such as cp1252 (Windows, Western European).",
         )
-        self.md_filter = tk.StringVar(value=self.s.md_filter)
+        self.md_filter = self.setting("md_filter")
         field_row(
             reading,
             1,
@@ -1028,12 +955,14 @@ class App:
         )
         timing = ttk.Labelframe(self.advanced, text="AI assessment", padding=(10, 8))
         timing.pack(fill="x", pady=(8, 0))
-        self.assess_timeout = tk.StringVar(value=number_text(self.s.assess_timeout))
+        self.assess_timeout = self.setting("assess_timeout")
         field_row(
             timing,
             0,
             "Timeout (seconds)",
-            number_box(timing, self.assess_timeout, 1, 86_400, 60),
+            ttk.Spinbox(
+                timing, from_=1, to=86_400, increment=60, textvariable=self.assess_timeout, width=10
+            ),
             f"Give up on the AI's assessment after this long. Default: {ASSESS_TIMEOUT:,}.",
         )
         ttk.Button(
@@ -1049,7 +978,7 @@ class App:
         formats = ttk.Frame(out)
         formats.grid(row=0, column=1, columnspan=3, sticky="w", **PAD)
         self.format_buttons: dict[str, ttk.Radiobutton] = {}
-        self.output_format = tk.StringVar(value=self.s.output_format)
+        self.output_format = self.setting("output_format")
         for value, text, tip in (
             ("html", "HTML report", "Side by side, in the browser: words, moves, comments."),
             ("diff", "Unified diff", "A .diff, as git diff writes it; a patch for text files."),
@@ -1080,7 +1009,7 @@ class App:
                 command=self.on_format,
             )
         ttk.Label(out, text="Save to").grid(row=1, column=0, sticky="w", **PAD)
-        self.output = tk.StringVar(value=self.s.output)
+        self.output = self.setting("output")
         output_entry = ttk.Entry(out, textvariable=self.output)
         output_entry.grid(row=1, column=1, sticky="ew", **PAD)
         hint(
@@ -1102,7 +1031,7 @@ class App:
         )
         save.grid(row=1, column=2, **PAD)
         hint(save, "Choose where to save it")
-        self.open_page = tk.BooleanVar(value=self.s.open_page)
+        self.open_page = self.setting("open_page")
         toggle(out, "Open when done", self.open_page).grid(
             row=1, column=3, sticky="w", padx=(12, 6), pady=6
         )
@@ -1124,47 +1053,32 @@ class App:
         self.assess_ai = tk.StringVar(value=ai or LOADING)
         self.assess_model = tk.StringVar(value=model or (CLAUDE_DEFAULT if ai == "claude" else ""))
         self.assess_effort = tk.StringVar(value=self.s.assess_effort)
-        self.saved_model = (ai, self.assess_model.get()) if ai else None
         # the models each AI reports, once asked; the AIs being asked; what
         # the background found, for tkinter's own thread
         self.ai_models: dict[str, list[ModelInfo]] = {}
         self.asking: set[str] = set()
         self.found: queue.Queue[tuple[str, list, str]] = queue.Queue()
-        # the model and effort chosen before the list shows "Loading…"
-        self.pending: tuple[str, str] = ("", "")
         ttk.Label(card, text="AI").grid(row=0, column=0, sticky="w", **PAD)
         ai_row = ttk.Frame(card)
         ai_row.grid(row=0, column=1, columnspan=2, sticky="w", **PAD)
-        self.ai_box = item_hints(
-            ttk.Combobox(ai_row, textvariable=self.assess_ai, width=12),
-            lambda value: AI_HINTS.get(
-                value,
-                f"{value}: a model of its API, through any-llm, "
-                "its key in the environment (prosediff[models]).",
-            ),
-        )
+        self.ai_box = ttk.Combobox(ai_row, textvariable=self.assess_ai, width=12)
         self.ai_box.pack(side="left")
         ttk.Label(ai_row, text="Model").pack(side="left", padx=(12, 6))
-        self.model_box = item_hints(
-            ttk.Combobox(ai_row, textvariable=self.assess_model, width=22),
-            self.model_hint,
-        )
+        self.model_box = ttk.Combobox(ai_row, textvariable=self.assess_model, width=22)
         self.model_box.pack(side="left")
         ttk.Label(ai_row, text="Effort").pack(side="left", padx=(12, 6))
-        self.effort_box = item_hints(
-            ttk.Combobox(ai_row, textvariable=self.assess_effort, width=9),
-            self.effort_hint,
-        )
+        self.effort_box = ttk.Combobox(ai_row, textvariable=self.assess_effort, width=9)
         self.effort_box.pack(side="left")
         for w, tip in (
             (
                 self.ai_box,
                 "Have an AI assess the value of the changes as a whole: a verdict, what "
                 "changed, what improved and the problems to fix, at the top of the HTML "
-                "report (the HTML report only). claude: Claude Code; codex: "
-                "ChatGPT through Codex; ollama: a local model; or another provider "
-                "any-llm reaches (openai, anthropic, gemini, ...), its API key in the "
-                "environment.",
+                "report (the HTML report only). claude: Claude Code, on your Claude login; "
+                "codex: ChatGPT through Codex, on your ChatGPT login (log in once with "
+                "prosediff --login-codex); ollama: a local model, nothing leaving this "
+                "computer; or another provider any-llm reaches (openai, anthropic, gemini, "
+                "...), its API key in the environment.",
             ),
             (
                 self.model_box,
@@ -1174,12 +1088,12 @@ class App:
             (
                 self.effort_box,
                 "How hard the model thinks, among the levels it reports it supports; "
-                "empty: its own default. More effort, a closer reading, but slower and "
+                "default, or empty: its own. More effort, a closer reading, but slower and "
                 "costlier.",
             ),
         ):
             hint(w, tip)
-        self.assess_context = tk.StringVar(value=self.s.assess_context)
+        self.assess_context = self.setting("assess_context")
         # what only matters when an AI assesses, greyed out while none is
         # chosen (update_ai_switches)
         self.ai_switches = []
@@ -1207,7 +1121,7 @@ class App:
             self.ai_switches.append(button)
             self.changes_only.append(button)
         field_row(card, 1, "Reads", reads, "What the model is sent, besides the instructions.")
-        self.assess_instructions = tk.StringVar(value=self.s.assess_instructions)
+        self.assess_instructions = self.setting("assess_instructions")
         ttk.Label(card, text="Instructions").grid(row=2, column=0, sticky="w", **PAD)
         entry = ttk.Entry(card, textvariable=self.assess_instructions)
         entry.grid(row=2, column=1, sticky="ew", **PAD)
@@ -1224,11 +1138,11 @@ class App:
         )
         pick.grid(row=2, column=2, **PAD)
         self.ai_switches += [entry, pick]
-        self.assess_annotate = tk.BooleanVar(value=self.s.assess_annotate)
-        self.assess_save_prompt = tk.BooleanVar(value=self.s.assess_save_prompt)
-        self.assess_preview = tk.BooleanVar(value=self.s.assess_preview)
-        self.assess_ai_writing = tk.BooleanVar(value=self.s.assess_ai_writing)
-        self.assess_documents = tk.BooleanVar(value=self.s.assess_documents)
+        self.assess_annotate = self.setting("assess_annotate")
+        self.assess_save_prompt = self.setting("assess_save_prompt")
+        self.assess_preview = self.setting("assess_preview")
+        self.assess_ai_writing = self.setting("assess_ai_writing")
+        self.assess_documents = self.setting("assess_documents")
         switches = ttk.Frame(card)
         switches.grid(row=3, column=1, columnspan=2, sticky="w", **PAD)
         for k, (text, var, tip) in enumerate(
@@ -1333,7 +1247,7 @@ class App:
         if self.assess_ai.get() == LOADING:
             self.ai_box.state(["disabled"])  # until the AIs are known
         self.update_ai_switches()
-        on = self.ai_active() and self.assess_model.get() != LOADING
+        on = self.ai_active() and self.ai_chosen() in self.ai_models
         for box in (self.model_box, self.effort_box):
             enable(box, on)
 
@@ -1408,52 +1322,34 @@ class App:
 
     def update_models(self, keep: bool = False) -> None:
         """The model list of the AI chosen, as the AI reports it (asked for
-        in the background the first time); none for none. The model shown
-        becomes the AI's own default, the first it reports, unless keep and
-        one is already chosen."""
+        in the background the first time, the model and effort greyed out
+        meanwhile); none for none. The model shown becomes the AI's own
+        default, the first it reports, unless keep and one is already
+        chosen: the one saved, said in an error and replaced by the default
+        when the AI no longer offers it."""
         ai = self.ai_chosen()
+        if not keep:  # another AI: its own default, once known
+            self.assess_model.set("")
         enable(self.model_box, self.ai_active())
         if ai in ("", NO_ASSESSMENT):
             self.model_box.configure(values=())
             self.update_efforts()
             return
         if ai not in self.ai_models:
-            # the model saved shown meanwhile, checked once they are known;
-            # else "Loading…" until the AI has said its models, the model
-            # and effort chosen before kept for then
-            if self.saved_model != (ai, self.assess_model.get()):
-                if self.assess_model.get() != LOADING:
-                    self.pending = (
-                        (self.assess_model.get().strip(), self.assess_effort.get().strip())
-                        if keep
-                        else ("", "")
-                    )
-                self.model_box.configure(values=())
-                self.assess_model.set(LOADING)
-                self.assess_effort.set(LOADING)
-                self.model_box.state(["disabled"])
-                self.effort_box.state(["disabled"])
+            self.model_box.configure(values=())
+            self.model_box.state(["disabled"])
+            self.effort_box.state(["disabled"])
             self.ask(ai, lambda: models_of(ai))
             return
         models = [m.name for m in self.ai_models[ai]]
         self.model_box.configure(values=models)
-        if self.saved_model and self.saved_model[0] == ai:
-            saved, self.saved_model = self.saved_model[1], None
-            if models and self.assess_model.get() == saved and saved not in models:
-                self.complain(
-                    f"The model saved, {saved}, is not one {ai} offers any more: its "
-                    f"default, {models[0]}, is chosen instead."
-                )
-                self.assess_model.set(models[0])
-                return
-        if self.assess_model.get() == LOADING:
-            model, effort = self.pending
-            self.pending = ("", "")
-            self.assess_model.set(model or (models[0] if models else ""))
-            if effort and effort in self.effort_box["values"]:
-                self.assess_effort.set(effort)
-            return
-        if keep and self.assess_model.get().strip():
+        saved = self.assess_model.get().strip()
+        if saved and models and saved not in models:
+            self.complain(
+                f"The model saved, {saved}, is not one {ai} offers any more: its "
+                f"default, {models[0]}, is chosen instead."
+            )
+        elif saved:
             self.update_efforts(keep=True)
             return
         self.assess_model.set(models[0] if models else "")
@@ -1479,33 +1375,16 @@ class App:
         default = model.default_effort if model else ""
         self.assess_effort.set(default or (MODEL_DEFAULT if levels else ""))
 
-    def model_hint(self, value: str) -> str:
-        found = self.ai_models.get(self.ai_chosen(), [])
-        return next((m.description for m in found if m.name == value), "")
-
     def effort_chosen(self) -> str:
-        """The effort to ask for: "" for the model's own default; while the
-        models load, the one chosen before."""
+        """The effort to ask for: "" for the model's own default."""
         effort = self.assess_effort.get().strip()
-        if effort == LOADING:
-            return self.pending[1]
         return "" if effort == MODEL_DEFAULT else effort
-
-    def effort_hint(self, value: str) -> str:
-        model = self.chosen_model()
-        if value == MODEL_DEFAULT:
-            return "The model's own default effort: nothing is asked for."
-        said = dict(model.efforts).get(value, "") if model else ""
-        default = " (the model's default)" if model and value == model.default_effort else ""
-        return f"{said}{default}".strip()
 
     def assess_spec(self) -> str:
         """The AI assessment asked for, as --assess takes it: "claude",
         "claude/opus", "ollama/qwen3"; "" for none. Claude Code's own
         default is asked for by naming no model."""
         ai, model = self.ai_chosen(), self.assess_model.get().strip()
-        if model == LOADING:
-            model = self.pending[0]  # the one chosen before, or the AI's default
         if ai in ("", NO_ASSESSMENT):
             return ""
         if not model or (ai == "claude" and model == CLAUDE_DEFAULT):
@@ -1783,9 +1662,26 @@ class App:
         on_worktree = self.ref_of(self.target.get()) in ("worktree", "")
         enable(self.untracked_box, on_worktree)
 
+    def setting(self, name: str) -> tk.Variable:
+        """The widget variable of a setting, holding its value, of its type
+        in Settings (a string for any other); collect reads it and
+        reset_options resets it by name (self.vars)."""
+        kind = Settings.__dataclass_fields__[name].type
+        var = {bool: tk.BooleanVar, int: tk.IntVar, float: tk.DoubleVar}.get(kind, tk.StringVar)
+        self.vars[name] = var(value=getattr(self.s, name))
+        return self.vars[name]
+
     def collect(self) -> Settings:
-        """The settings the window shows."""
-        context = self.context.get().strip()
+        """The settings the window shows; ValueError for a box of a number
+        holding none."""
+        values = {}
+        for name, var in self.vars.items():
+            try:
+                value = var.get()
+            except tk.TclError:
+                raise ValueError(f"{NUMBER_NAMES[name]} must be a number.") from None
+            values[name] = value.strip() if isinstance(value, str) else value
+        context = values["context_lines"]
         # a number as typed, negative too, for run to refuse (context_of)
         if not context.lstrip("-").isdigit():
             context = "auto"
@@ -1805,115 +1701,69 @@ class App:
                 None if algorithm.get() == default_algorithm else algorithm.get(),
             )
         try:
-            language = normalize_language(self.language.get())
+            language = normalize_language(values["language"])
         except ValueError:
             language = DEFAULT
         try:
-            encoding = check_encoding(self.encoding.get())
+            encoding = check_encoding(values["encoding"])
         except ValueError:
             encoding = AUTO_ENCODING
-        # numbers as typed, negative too, for run to refuse (check_numbers);
-        # what is no number, the default
-        try:
-            max_hidden = int(number_in(self.max_hidden.get()))
-        except ValueError:
-            max_hidden = MAX_HIDDEN
-        try:
-            timeout = number_in(self.assess_timeout.get())
-        except ValueError:
-            timeout = ASSESS_TIMEOUT
+        output = self.output.get().strip()
         return Settings(
-            mode=self.mode.get(),
-            repo=self.repo.get().strip(),
-            base=self.ref_of(self.base.get()),
-            target=self.ref_of(self.target.get()),
-            untracked=self.untracked.get(),
-            paths=[p.strip() for p in self.paths.get().split(";") if p.strip()],
-            old=self.old.get().strip(),
-            new=self.new.get().strip(),
-            old_folder=self.old_folder.get().strip(),
-            new_folder=self.new_folder.get().strip(),
-            single=self.single.get().strip(),
-            include=self.include.get().strip(),
-            comments=self.comments.get(),
-            empty_comments=self.empty_comments.get(),
-            docx_changes=DOCX_CHANGE_VALUES.get(self.docx.get(), "accept-all"),
-            align=self.align.get(),
-            context_lines=context,
-            full=self.full.get(),
-            ignore_whitespace=self.ignore_ws.get(),
-            move_similarity=moves[False][0],
-            move_algorithm=moves[False][1],
-            sentence_move_similarity=moves[True][0],
-            sentence_move_algorithm=moves[True][1],
-            move_passages=self.move_passages.get(),
-            moved_passages=self.passage_choices(),
-            split=self.split.get(),
-            language=language,
-            encoding=encoding,
-            md_filter=self.md_filter.get().strip(),
-            max_hidden=max_hidden,
-            # the default is kept as "": it follows the sides next time
-            output=(
-                "" if self.output.get().strip() == self.auto_output else self.output.get().strip()
-            ),
-            output_format=self.output_format.get(),
-            open_page=self.open_page.get(),
-            assess=self.assess_spec(),
-            assess_effort=self.effort_chosen(),
-            assess_context=self.assess_context.get(),
-            assess_instructions=self.assess_instructions.get().strip(),
-            assess_save_prompt=self.assess_save_prompt.get(),
-            assess_timeout=timeout,
-            assess_annotate=self.assess_annotate.get(),
-            assess_preview=self.assess_preview.get(),
-            assess_ai_writing=self.assess_ai_writing.get(),
-            assess_documents=self.assess_documents.get(),
+            **values
+            | {
+                "context_lines": context,
+                "language": language,
+                "encoding": encoding,
+                "base": self.ref_of(self.base.get()),
+                "target": self.ref_of(self.target.get()),
+                "paths": [p.strip() for p in self.paths.get().split(";") if p.strip()],
+                "docx_changes": DOCX_CHANGE_VALUES.get(self.docx.get(), "accept-all"),
+                "move_similarity": moves[False][0],
+                "move_algorithm": moves[False][1],
+                "sentence_move_similarity": moves[True][0],
+                "sentence_move_algorithm": moves[True][1],
+                "moved_passages": self.passage_choices(),
+                # the default is kept as "": it follows the sides next time
+                "output": "" if output == self.auto_output else output,
+                "assess": self.assess_spec(),
+                "assess_effort": self.effort_chosen(),
+            }
         )
 
     def toggle_advanced(self) -> None:
-        """Open the advanced settings' window beside this one (on the side
-        with room for it), or close it."""
+        """Open the advanced settings' window, or close it."""
         top = self.advanced_window
         if top.state() != "withdrawn":
             top.withdraw()
             return
-        top.update_idletasks()
-        width = top.winfo_reqwidth()
-        # frame to frame: winfo_x and winfo_y are those of the window's frame
-        frame = self.root.winfo_rootx() - self.root.winfo_x()
-        x = self.root.winfo_rootx() + self.root.winfo_width() + frame + 8
-        if x + width > self.root.winfo_screenwidth():
-            x = max(self.root.winfo_x() - width - 2 * frame - 8, 0)
-        top.geometry(f"+{x}+{self.root.winfo_y()}")
         top.deiconify()
         top.lift()
         dark_title_bar(top)
 
     def passage_choices(self) -> dict[str, float]:
         """The moved-passage settings shown that differ from prosediff's
-        defaults; a box that holds no number keeps the default."""
+        defaults; ValueError for a box holding no number."""
         chosen: dict[str, float] = {}
         for f in fields(MovedPassageSettings):
-            kind = setting_type(f)
             try:
-                value = kind(number_in(self.passage_vars[f.name].get()))
-            except ValueError:
-                continue
+                value = self.passage_vars[f.name].get()
+            except tk.TclError:
+                raise ValueError(f"{f.metadata['label']} must be a number.") from None
             if value != f.default:
                 chosen[f.name] = value
         return chosen
-
-    def reset_passage_settings(self) -> None:
-        for f in fields(MovedPassageSettings):
-            default = passage_text(f, f.default)
-            self.passage_vars[f.name].set(default)
 
     def save_options(self) -> None:
         """Remember the choices shown, for the next time the window opens:
         only when asked, never on its own."""
         path = settings_file()
-        if save_settings(self.collect(), path):
+        try:
+            s = self.collect()
+        except ValueError as e:
+            self.complain(str(e))
+            return
+        if save_settings(s, path):
             self.status.set(f"Options saved: {path}")
         else:
             self.status.set(f"Options not saved: {path} cannot be written")
@@ -1922,41 +1772,20 @@ class App:
         """Every option to its default (what is compared and where the output
         goes stay as they are); nothing is saved until asked."""
         d = Settings()
-        paragraphs, sentences = moves_of(d, False).resolved(False), moves_of(d, True).resolved(True)
-        for var, value in (
-            (self.comments, d.comments),
-            (self.empty_comments, d.empty_comments),
-            (self.docx, DOCX_CHANGE_LABELS[d.docx_changes]),
-            (self.align, d.align),
-            (self.context, d.context_lines),
-            (self.full, d.full),
-            (self.ignore_ws, d.ignore_whitespace),
-            (self.move_similarity, paragraphs[0]),
-            (self.move_algorithm, paragraphs[1]),
-            (self.sentence_move_similarity, sentences[0]),
-            (self.sentence_move_algorithm, sentences[1]),
-            (self.split, d.split),
-            (self.language, d.language),
-            (self.encoding, d.encoding),
-            (self.md_filter, d.md_filter),
-            (self.max_hidden, f"{d.max_hidden:,}"),
-            (self.assess_timeout, number_text(d.assess_timeout)),
-            (self.include, d.include),
-            (self.untracked, d.untracked),
-            (self.output_format, d.output_format),
-            (self.open_page, d.open_page),
-            (self.assess_ai, d.assess or NO_ASSESSMENT),
-            (self.assess_context, d.assess_context),
-            (self.assess_instructions, d.assess_instructions),
-            (self.assess_save_prompt, d.assess_save_prompt),
-            (self.assess_annotate, d.assess_annotate),
-            (self.assess_preview, d.assess_preview),
-            (self.assess_ai_writing, d.assess_ai_writing),
-            (self.assess_documents, d.assess_documents),
+        for name, var in self.vars.items():
+            if name not in COMPARED:
+                var.set(getattr(d, name))
+        self.docx.set(DOCX_CHANGE_LABELS[d.docx_changes])
+        for sentences, similarity, algorithm in (
+            (False, self.move_similarity, self.move_algorithm),
+            (True, self.sentence_move_similarity, self.sentence_move_algorithm),
         ):
-            var.set(value)
-        self.move_passages.set(d.move_passages)
-        self.reset_passage_settings()
+            value, name = moves_of(d, sentences).resolved(sentences)
+            similarity.set(value)
+            algorithm.set(name)
+        self.assess_ai.set(d.assess or NO_ASSESSMENT)
+        for f in fields(MovedPassageSettings):
+            self.passage_vars[f.name].set(f.default)
         self.split_given_up = None
         self.on_format()
         self.update_untracked()
@@ -1968,8 +1797,8 @@ class App:
     def run(self) -> None:
         if self.job is not None:
             return  # one comparison at a time
-        s = self.collect()
         try:
+            s = self.collect()
             check_numbers(s)
         except ValueError as e:
             self.complain(str(e))
@@ -2148,60 +1977,6 @@ def hint(widget: tk.Misc, text: str) -> None:
     ttk.ToolTip(widget, text=text, wraplength=HINT_WIDTH, delay=HINT_DELAY_MS)
 
 
-def popdown_listbox(combo: ttk.Combobox, popdown: str) -> str | None:
-    """The listbox of a combobox's drop-down list, found among the widgets of
-    its popdown (at .f.l on Windows and X11, elsewhere on macOS); None when
-    it has none."""
-    widgets = [popdown]
-    while widgets:
-        w = widgets.pop()
-        if combo.tk.call("winfo", "class", w) == "Listbox":
-            return w
-        widgets += combo.tk.splitlist(combo.tk.call("winfo", "children", w))
-    return None
-
-
-def number_in(text: str) -> float:
-    """The number a box holds, its thousands separated or not (1,500);
-    ValueError for none."""
-    return float(text.replace(",", "").strip())
-
-
-def number_text(n: float) -> str:
-    """A number as a box shows it: its thousands separated, a whole one
-    without decimals (1,500; 2.5)."""
-    return f"{int(n):,}" if n == int(n) else f"{n:,}"
-
-
-def number_box(
-    parent, variable: tk.StringVar, low: float, high: float, step: float, width: int = 10
-) -> ttk.Spinbox:
-    """A box of a number shown with its thousands separated (1,500), its
-    arrows stepping that number, low to high: Tk's own would read it only
-    up to the first comma, stepping 250,000 to 251."""
-    spin = ttk.Spinbox(
-        parent, from_=low, to=high, increment=step, textvariable=variable, width=width
-    )
-
-    def stepped(sign: int) -> str:
-        try:
-            n = number_in(variable.get())
-        except ValueError:
-            n = low
-        variable.set(number_text(min(high, max(low, n + sign * step))))
-        return "break"  # not Tk's own step
-
-    spin.bind("<<Increment>>", lambda e: stepped(1))
-    spin.bind("<<Decrement>>", lambda e: stepped(-1))
-    return spin
-
-
-def passage_text(f, value: float) -> str:
-    """A setting of moved passages (a field of MovedPassageSettings) as its
-    box shows it: a share as it is, a count with its thousands separated."""
-    return f"{value:g}" if f.metadata["share"] else number_text(int(value))
-
-
 def segment(
     parent,
     variable: tk.StringVar,
@@ -2209,14 +1984,11 @@ def segment(
     text: str,
     tip: str = "",
     padding: tuple[int, int] = (8, 3),
-    command=None,
     bootstyle: str = "secondary-outline-toolbutton",
     **options,
 ) -> ttk.Radiobutton:
     """One button of a segmented choice, packed after the others in
     parent, with its tooltip (tip, if any)."""
-    if command is not None:
-        options["command"] = command
     button = ttk.Radiobutton(
         parent,
         text=text,
@@ -2237,56 +2009,9 @@ def enable(widget, on: bool) -> None:
     widget.state(["!disabled"] if on else ["disabled"])
 
 
-def choice_box(
-    parent, variable: tk.StringVar, values, tip: Callable[[str], str], width: int = 12
-) -> ttk.Combobox:
-    """A drop-down list to choose one of values from, each item's hint
-    shown beside it (item_hints)."""
-    combo = ttk.Combobox(
-        parent, textvariable=variable, values=values, state="readonly", width=width
-    )
-    return item_hints(combo, tip)
-
-
-def item_hints(combo: ttk.Combobox, tip: Callable[[str], str]) -> ttk.Combobox:
-    """What each item of a drop-down list means, shown beside the item under
-    the pointer while the list is open; tip gives an item's hint ("" for
-    none). Tk's combobox list is a plain Tk listbox with no Python widget
-    behind it (ttk::combobox::PopdownWindow), so ttkbootstrap's ToolTip
-    cannot take it: a small window of our own shows the hint."""
-    popdown = combo.tk.eval(f"ttk::combobox::PopdownWindow {combo}")
-    listbox = popdown_listbox(combo, popdown)
-    if listbox is None:
-        return combo  # a Tk that builds its list otherwise: no hints, all else works
-    window: list[tk.Toplevel] = []
-
-    def hide(*_) -> None:
-        while window:
-            window.pop().destroy()
-
-    def show(y: str) -> None:
-        hide()
-        if not int(combo.tk.call("winfo", "ismapped", popdown)):
-            return  # a motion left over once the list closed
-        index = int(combo.tk.call(listbox, "nearest", y))
-        text = tip(str(combo.tk.call(listbox, "get", index)))
-        if not text:
-            return
-        top = tk.Toplevel(combo)
-        top.wm_overrideredirect(True)
-        top.attributes("-topmost", True)
-        ttk.Label(
-            top, text=text, wraplength=HINT_WIDTH, padding=(8, 4), bootstyle="inverse-dark"
-        ).pack()
-        x0, y0 = int(combo.tk.call("winfo", "rootx", listbox)), int(y)
-        width = int(combo.tk.call("winfo", "width", listbox))
-        top.wm_geometry(f"+{x0 + width + 4}+{int(combo.tk.call('winfo', 'rooty', listbox)) + y0}")
-        window.append(top)
-
-    combo.tk.call("bind", listbox, "<Motion>", (combo.register(show), "%y"))
-    combo.tk.call("bind", listbox, "<Leave>", combo.register(hide))
-    combo.tk.call("bind", popdown, "<Unmap>", combo.register(hide))
-    return combo
+def choice_box(parent, variable: tk.StringVar, values, width: int = 12) -> ttk.Combobox:
+    """A drop-down list to choose one of values from."""
+    return ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=width)
 
 
 def browse(parent: tk.Misc, command, tip: str) -> ttk.Button:
@@ -2340,9 +2065,7 @@ def move_fields(parent: tk.Misc, similarity: tk.DoubleVar, algorithm: tk.StringV
         textvariable=similarity,
         width=5,
     ).pack(side="left")
-    choice_box(frame, algorithm, tuple(MOVE_ALGORITHMS), MOVE_ALGORITHM_HINTS.get, width=11).pack(
-        side="left", padx=(6, 0)
-    )
+    choice_box(frame, algorithm, tuple(MOVE_ALGORITHMS), width=11).pack(side="left", padx=(6, 0))
     return frame
 
 
@@ -2427,10 +2150,11 @@ PREFER_DARK = 1
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 
 
+@functools.cache
 def system_dark() -> bool:
     """Whether the system asks for dark windows: Windows' app mode, macOS's
     appearance, Linux's colour scheme (the desktop portal's, which GNOME,
-    KDE and others set); when it cannot be told, light."""
+    KDE and others set); when it cannot be told, light. Asked once."""
     try:
         if sys.platform == "win32":
             import winreg

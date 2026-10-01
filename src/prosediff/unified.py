@@ -24,8 +24,6 @@ applying.
 from prosediff.diff import CONTEXT, Comparison, FileDiff, comment_text, word_ops
 
 Pair = tuple[int | None, int | None]
-# The text formats, by the name --format gives them.
-TEXT_FORMATS = ("diff", "wdiff")
 
 
 def _hunks(pairs: list[Pair], changed: list[bool], context: int | None) -> list[range]:
@@ -113,7 +111,5 @@ def file_diff(f: FileDiff, context: int | None = CONTEXT, fmt: str = "diff") -> 
 def unified(comparison: Comparison, context: int | None = CONTEXT, fmt: str = "diff") -> str:
     """The unified diff (fmt "diff") or word diff ("wdiff") of every changed
     file."""
-    if fmt not in TEXT_FORMATS:
-        raise ValueError(f"format must be one of {TEXT_FORMATS}, not {fmt!r}")
     lines = [line for f in comparison.files for line in file_diff(f, context, fmt)]
     return "\n".join(lines) + "\n" if lines else ""

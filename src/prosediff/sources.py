@@ -10,27 +10,9 @@ from datetime import datetime
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-from prosediff.document import CHANGES as DOCX_CHANGES
 from prosediff.document import Document, to_markdown
 from prosediff.odt import OdtError, read_odt
 from prosediff.word import WordError, read_docx
-
-__all__ = [
-    "DOCUMENT_SUFFIXES",
-    "DOCX_CHANGES",
-    "FOLDER_FILES",
-    "FOLDER_PAGE",
-    "SourceError",
-    "default_page",
-    "describe_side",
-    "document_to_markdown",
-    "is_document",
-    "page_of",
-    "patterns",
-    "read_document",
-    "read_side",
-    "review_page",
-]
 
 # The word-processor documents prosediff reads, and what the HTML report calls them.
 DOCUMENT_SUFFIXES = {".docx": "Word", ".odt": "OpenDocument"}

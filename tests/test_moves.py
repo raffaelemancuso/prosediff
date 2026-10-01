@@ -4,7 +4,15 @@ import pytest
 from helpers import two_files
 
 from prosediff import MoveSettings, Options, compare_paths, render
-from prosediff.diff import MIN_MOVE_CHARS, align, mark_moves
+from prosediff.diff import (
+    MIN_MOVE_CHARS,
+    MOVE_ALGORITHM,
+    MOVE_SIMILARITY,
+    MOVED_PASSAGE_DEFAULTS,
+    MovedPassageSettings,
+    align,
+    mark_moves,
+)
 
 EDITED = "This long sentence travels to the end of the file, almost as it was."
 
@@ -27,7 +35,10 @@ def test_short_lines_are_not_moves():
     rows, add, rem = align([short, "a"], ["a", short], context=None)
     assert "moved-in" not in {r.kind for r in rows}
     assert (add, rem) == (1, 1)
-    mark_moves([], [], [])  # no rows, no moves, no error
+    # no rows, no moves, no error
+    mark_moves(
+        [], [], [], lambda line: None, MOVE_SIMILARITY, MOVE_ALGORITHM, True, MOVED_PASSAGE_DEFAULTS
+    )
 
 
 def test_edited_line_moved_is_a_move_with_its_changes():
@@ -152,8 +163,9 @@ def test_two_move_defaults(tmp_path):
 
 
 def test_edited_moves_past_the_pair_limit_share_rare_words(monkeypatch):
-    """Past MOVE_MAX_CELLS pairs of a removed and an added line, the edited
-    moves are still found, among the pairs sharing rare words."""
+    """Past max_pairs pairs of a removed and an added line, only that many
+    are tried, and the edited moves are still found among them: the pairs
+    sharing rare words."""
     from prosediff import diff
 
     lines = [
@@ -166,6 +178,10 @@ def test_edited_moves_past_the_pair_limit_share_rare_words(monkeypatch):
     ]
     old = [*lines, "a", "b"]
     new = ["a", "b", *edited]
-    monkeypatch.setattr(diff, "MOVE_MAX_CELLS", 3)  # 2 x 2 pairs: past it
-    rows = align(old, new, context=None, move_passages=False)[0]
+    tried = []
+    real = diff.candidate_pairs
+    monkeypatch.setattr(diff, "candidate_pairs", lambda *a: tried.append(real(*a)) or tried[-1])
+    narrow = MovedPassageSettings(max_pairs=3)  # 2 x 2 pairs: past it
+    rows = align(old, new, context=None, move_passages=False, moved_passage_settings=narrow)[0]
+    assert sorted(tried[0]) == [(0, 1), (1, 0)]  # of the 4 pairs, those sharing rare words
     assert sorted(r.right_no for r in rows if r.kind == "moved-in") == [3, 4]

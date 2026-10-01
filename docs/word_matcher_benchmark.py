@@ -48,10 +48,11 @@ import statistics
 import subprocess
 import sys
 import time
-from functools import lru_cache, partial
+from functools import lru_cache
 from pathlib import Path
 
 import passage_benchmark as pb
+from patiencediff import PatienceSequenceMatcher
 from rapidfuzz.distance import Indel
 
 from prosediff import diff
@@ -65,6 +66,10 @@ MATCHER_TIMEOUT = 600
 REPEATS = 3  # timed passes of the word pairing, the best kept
 REPEAT_BUDGET = 60  # seconds: no further pass once the passes took this long
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def patience_opcodes(a: list[str], b: list[str]):
+    return PatienceSequenceMatcher(None, a, b).get_opcodes()
 
 
 def rapidfuzz_opcodes(a: list[str], b: list[str]):
@@ -223,7 +228,7 @@ MATCHERS = {
     "difflib": diff.difflib_opcodes,
     "cydifflib": cydifflib_opcodes,
     "cdifflib": cdifflib_opcodes,
-    "patiencediff": diff.patience_opcodes,
+    "patiencediff": patience_opcodes,
     "rapidfuzz": rapidfuzz_opcodes,
     "Levenshtein": levenshtein_opcodes,
     "histodiff histogram": histodiff_opcodes("histogram"),
@@ -244,10 +249,20 @@ MATCHERS = {
 
 
 def use(matcher) -> None:
-    """Make diff.word_ops pair words with matcher (cached, like the original)."""
-    diff._word_ops = lru_cache(maxsize=diff.WORD_OPS_CACHE)(
-        partial(diff.word_opcodes, pair=matcher)
-    )
+    """Make diff.word_ops pair words with matcher: diff.word_ops itself
+    (cached the same way), its patience diff replaced."""
+
+    @lru_cache(maxsize=diff.word_ops.cache_info().maxsize)
+    def word_ops(old: str, new: str):
+        a, b = diff.TOKEN.findall(old), diff.TOKEN.findall(new)
+        ao, bo = diff._offsets(a), diff._offsets(b)
+        ops = [
+            (op, ao[i1], ao[i2], bo[j1], bo[j2])
+            for op, i1, i2, j1, j2 in diff.merge_across_spaces(matcher(a, b), a)
+        ]
+        return tuple(diff.slide_ops(ops, old, new))
+
+    diff.word_ops = word_ops
 
 
 def line_pairs() -> list[tuple[str, str]]:
@@ -271,7 +286,7 @@ def measure(name: str) -> list[str]:
     except ImportError:
         return [f"{name}: not installed", ""]
     pairs = line_pairs()
-    # difflib's pairing, the reference (diff._word_ops pairs with
+    # difflib's pairing, the reference (diff.word_ops pairs with
     # patiencediff when it is installed)
     use(diff.difflib_opcodes)
     reference = [tuple(diff.word_ops(o, n)) for o, n in pairs]
@@ -280,7 +295,7 @@ def measure(name: str) -> list[str]:
     # they would pass REPEAT_BUDGET: a busy machine slows one pass, not all
     times: list[float] = []
     while len(times) < REPEATS and sum(times) < REPEAT_BUDGET:
-        diff._word_ops.cache_clear()
+        diff.word_ops.cache_clear()
         t0 = time.perf_counter()
         all_ops = [diff.word_ops(o, n) for o, n in pairs]
         times.append(time.perf_counter() - t0)
@@ -295,7 +310,7 @@ def measure(name: str) -> list[str]:
             tag, o1, o2, *_ = ops[k]
             if tag == "equal" and ops[k - 1][0] != "equal" and ops[k + 1][0] != "equal":
                 lone += len(diff.similarity_tokens(o[o1:o2])) == 1
-    diff._word_ops.cache_clear()
+    diff.word_ops.cache_clear()
     with contextlib.redirect_stdout(io.StringIO()):
         report = pb.run(quick=True)
     wanted = ("precision", "recall", "boundary", "passages cost", "Lines are")

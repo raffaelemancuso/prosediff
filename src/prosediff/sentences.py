@@ -148,14 +148,11 @@ def _cut(line: str, start: int, end: int) -> str:
     return line.cut(start, end) if isinstance(line, Line) else line[start:end]
 
 
-def split_sentences(
-    lines: list[str], language: str = "en", line_languages: list[str | None] | None = None
-) -> tuple[list[str], list[str]]:
+def split_sentences(lines: list[str], language: str = "en") -> tuple[list[str], list[str]]:
     """The lines with their prose split into sentences, and each new line's
     label: the number of the line it came from, plus its place among the
-    sentences of that line when there are several ("12.3"). Each line is
-    split by the rules of its language in line_languages, when it has one,
-    else by those of language.
+    sentences of that line when there are several ("12.3"), split by the
+    rules of language.
 
     A line of a Word or OpenDocument text (a Line) is split by the rules of
     its paragraph's language, when marked, and its styles are split with
@@ -217,7 +214,6 @@ def split_sentences(
             i += 1
         else:
             item = LIST_ITEM.match(line)
-            rules = (line_languages[i] if line_languages else None) or language
-            split(i, item.group(0) if item else "", rules)
+            split(i, item.group(0) if item else "", language)
             i += 1
     return out, labels

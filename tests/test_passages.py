@@ -9,6 +9,7 @@ from helpers import two_files
 from prosediff import Options, compare_paths, render
 from prosediff.cli import main
 from prosediff.diff import (
+    MOVED_PASSAGE_DEFAULTS,
     MovedPassageSettings,
     Row,
     align,
@@ -148,13 +149,18 @@ def test_holes_join_the_runs_of_a_passage():
     two."""
     old = "Start here and end here."
     near = "Start with one two three here four five six and end here."
-    (passage,) = [p for p in passages_of(Row("replace"), old, near) if not p.old]
+    (passage,) = [
+        p for p in passages_of(Row("replace"), old, near, MOVED_PASSAGE_DEFAULTS) if not p.old
+    ]
     assert near[passage.start : passage.end] == "with one two three here four five six"
     far = (
         "Start eleven twelve thirteen fourteen here and end "
         "fifteen sixteen seventeen eighteen here."
     )
-    assert len([p for p in passages_of(Row("replace"), old, far) if not p.old]) == 2
+    assert (
+        len([p for p in passages_of(Row("replace"), old, far, MOVED_PASSAGE_DEFAULTS) if not p.old])
+        == 2
+    )
 
 
 def test_move_passages_can_be_turned_off(tmp_path):

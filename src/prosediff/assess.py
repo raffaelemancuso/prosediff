@@ -569,6 +569,10 @@ def _codex(system: str, prompt: str, model: str, effort: str, timeout: float) ->
         from openai_codex.generated.v2_all import ReasoningEffort
     except ImportError as e:
         raise _missing("codex", "OpenAI's Codex SDK") from e
+    try:
+        level = ReasoningEffort(effort) if effort else None
+    except ValueError as e:  # an effort Codex does not know
+        raise AssessError(f"Codex: {e}") from e
 
     async def run(cwd: str) -> tuple[str, str]:
         async with AsyncCodex(CodexConfig(cwd=cwd)) as codex:
@@ -580,20 +584,15 @@ def _codex(system: str, prompt: str, model: str, effort: str, timeout: float) ->
                 model=model or None,
                 cwd=cwd,
             )
-            result = await thread.run(prompt, effort=ReasoningEffort(effort) if effort else None)
+            result = await thread.run(prompt, effort=level)
         if result.error is not None:
             raise AssessError(f"Codex: {getattr(result.error, 'message', result.error)}")
         return result.final_response or "", model
 
+    # the SDK's errors: no login, no binary, a refusal
+    login = " (log in to ChatGPT with prosediff --login-codex)"
     with tempfile.TemporaryDirectory() as cwd:
-        try:
-            return _within(run(cwd), timeout)
-        except AssessError:
-            raise
-        except ValueError as e:  # an effort Codex does not know
-            raise AssessError(f"Codex: {e}") from e
-        except Exception as e:  # the SDK's errors: no login, no binary, a refusal
-            raise AssessError(f"Codex: {e} (log in to ChatGPT with prosediff --login-codex)") from e
+        return _within_as("Codex", run(cwd), timeout, login)
 
 
 def _any_llm(
@@ -624,14 +623,15 @@ def _any_llm(
     return response.choices[0].message.content or "", response.model or model
 
 
-def _within_as(label: str, coroutine, timeout: float):
-    """_within, any other error of an SDK an AssessError saying label."""
+def _within_as(label: str, coroutine, timeout: float, hint: str = ""):
+    """_within, any other error of an SDK an AssessError saying label (and
+    hint, after the error)."""
     try:
         return _within(coroutine, timeout)
     except AssessError:
         raise
     except Exception as e:
-        raise AssessError(f"{label}: {e}") from e
+        raise AssessError(f"{label}: {e}{hint}") from e
 
 
 def _within(coroutine, timeout: float):
