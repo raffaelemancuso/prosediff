@@ -16,7 +16,15 @@ from tkinter import ttk as tk_ttk
 from helpers import two_files
 
 from prosediff import gui, pipeline
-from prosediff.assess import AssessError, Assessment, ModelInfo
+from prosediff.assess import (
+    SYSTEM,
+    SYSTEM_REVIEW,
+    SYSTEM_WRITING,
+    SYSTEM_WRITING_REVIEW,
+    AssessError,
+    Assessment,
+    ModelInfo,
+)
 from prosediff.diff import MOVED_PASSAGE_DEFAULTS, MovedPassageSettings
 from prosediff.gui import (
     INDEX,
@@ -1047,7 +1055,7 @@ def test_a_review_has_no_preview(tmp_path, monkeypatch):
 def test_the_instructions_written_in_a_window_of_their_own(root):
     """The large box opens with the instructions, and OK puts what was
     written back in their field; Cancel leaves it as it was."""
-    app = App(root, Settings(assess_instructions="Be brief."))
+    app = App(root, Settings(assess_instructions="Be brief.", mode="files"))
 
     def within(w):
         for child in w.winfo_children():
@@ -1061,10 +1069,106 @@ def test_the_instructions_written_in_a_window_of_their_own(root):
             for w in root.winfo_children()
             if isinstance(w, tk.Toplevel) and w is not app.advanced_window
         ]
-        (text,) = [w for w in within(top) if isinstance(w, tk.Text)]
+        # prosediff's two prompts, then the instructions
+        *_, text = [w for w in within(top) if isinstance(w, tk.Text)]
         assert text.get("1.0", "end-1c") == "Be brief."
         text.insert("end", "\nCite the journal.")
         (b,) = [w for w in within(top) if isinstance(w, tk_ttk.Button) and w.cget("text") == button]
         b.invoke()
         assert app.assess_instructions.get() == expected
         app.assess_instructions.set("Be brief.")
+
+
+def test_prosediffs_prompts_edited_in_the_window(root):
+    """The window shows prosediff's prompts for the tab: two for two
+    versions (the assessment, and AI writing), one for a file reviewed. An
+    edited prompt is kept; one left as prosediff's, or restored, is kept
+    as "", to follow prosediff's."""
+
+    def within(w):
+        for child in w.winfo_children():
+            yield child
+            yield from within(child)
+
+    def window():
+        app.edit_instructions()
+        (top,) = [
+            w
+            for w in root.winfo_children()
+            if isinstance(w, tk.Toplevel) and w is not app.advanced_window
+        ]
+        texts = [w for w in within(top) if isinstance(w, tk.Text)]
+        buttons = {
+            b: [w for w in within(top) if isinstance(w, tk_ttk.Button) and w.cget("text") == b]
+            for b in ("OK", "Restore default")
+        }
+        return texts, buttons
+
+    app = App(root, Settings(mode="files", assess_writing_prompt="Spot the AI."))
+    (value, writing, _), buttons = window()
+    assert value.get("1.0", "end-1c") == SYSTEM
+    assert writing.get("1.0", "end-1c") == "Spot the AI."
+    value.insert("1.0", "Be harsh. ")
+    buttons["Restore default"][1].invoke()
+    assert writing.get("1.0", "end-1c") == SYSTEM_WRITING
+    buttons["OK"][0].invoke()
+    assert app.assess_prompt.get() == "Be harsh. " + SYSTEM
+    assert app.assess_writing_prompt.get() == ""
+    s = app.collect()
+    assert (s.assess_prompt, s.assess_writing_prompt) == ("Be harsh. " + SYSTEM, "")
+
+    app.mode.set("review")
+    (review, writing, _), buttons = window()
+    assert review.get("1.0", "end-1c") == SYSTEM_REVIEW
+    assert writing.get("1.0", "end-1c") == SYSTEM_WRITING_REVIEW
+    review.delete("1.0", "end")
+    review.insert("1.0", "Review it.")
+    buttons["OK"][0].invoke()
+    assert app.assess_review_prompt.get() == "Review it."
+    assert app.assess_prompt.get() == "Be harsh. " + SYSTEM
+
+
+def test_comments_reviewing_one_file(root):
+    """Reviewing one file, Comments offers markers or none, its tooltip
+    saying what the AI is sent; text, chosen for two versions, is given up
+    for markers, and comes back with them."""
+    app = App(root, Settings(mode="files", comments="text"))
+    assert "text" in app.comments_box.cget("values")
+    app.mode.set("review")
+    app.show_mode()
+    assert app.comments.get() == "markers"
+    assert "text" not in app.comments_box.cget("values")
+    assert all(t.text == gui.REVIEW_COMMENTS_TIP for t in app.comments_tips)
+    app.mode.set("files")
+    app.show_mode()
+    assert app.comments.get() == "text"
+    assert all(t.text == gui.COMMENTS_TIP for t in app.comments_tips)
+
+
+def test_instructions_from_a_file_shown_read_only(root, tmp_path):
+    """Instructions a file holds are shown read-only in the window, and OK
+    keeps the file, to be read again at every run, not its text."""
+    notes = tmp_path / "notes.txt"
+    notes.write_text("The journal is Research Policy.\n", encoding="utf-8")
+    app = App(root, Settings(mode="files", assess_instructions=str(notes)))
+
+    def within(w):
+        for child in w.winfo_children():
+            yield child
+            yield from within(child)
+
+    app.edit_instructions()
+    (top,) = [
+        w
+        for w in root.winfo_children()
+        if isinstance(w, tk.Toplevel) and w is not app.advanced_window
+    ]
+    *_, text = [w for w in within(top) if isinstance(w, tk.Text)]
+    assert text.get("1.0", "end-1c") == "The journal is Research Policy."
+    assert str(text.cget("state")) == "disabled"
+    assert any(
+        isinstance(w, tk_ttk.Label) and "from notes.txt" in str(w.cget("text")) for w in within(top)
+    )
+    (ok,) = [w for w in within(top) if isinstance(w, tk_ttk.Button) and w.cget("text") == "OK"]
+    ok.invoke()
+    assert app.assess_instructions.get() == str(notes)

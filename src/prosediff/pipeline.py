@@ -77,6 +77,8 @@ def request_of(src: object) -> AssessRequest | None:
         save_prompt=src.assess_save_prompt,
         annotate=src.assess_annotate,
         author=src.assess_author or "",
+        system=src.assess_prompt or "",
+        writing_system=src.assess_writing_prompt or "",
     )
 
 
@@ -156,8 +158,9 @@ def execute(
         ai = run.request.spec
         progress(f"Asking {ai} to {'review the file' if reviewing else 'assess the changes'}…")
         assessment = assess_comparison(comparison, run.request)
-        if run.ai_writing and not reviewing:
-            progress(f"Asking {ai} whether the new text reads as written by an AI…")
+        if run.ai_writing:
+            what = "the file" if reviewing else "the new text"
+            progress(f"Asking {ai} whether {what} reads as written by an AI…")
             writing = assess_comparison(comparison, run.request, kind="writing")
     progress(
         "Writing the report…"

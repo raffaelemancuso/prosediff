@@ -73,6 +73,13 @@ effort starred, as the window does. Three more settings:
   version, to check them against the rest; or the changes only.
 - **Your instructions** (`--assess-instructions`): the journal, what to
   look at, as a sentence or a text file, added to the prompt.
+- **prosediff's prompt** (`--assess-prompt`, `--assess-writing-prompt`; in
+  the window, the pencil button beside **Instructions**): replaced by one
+  of your own, as text or a text file. Keep its `## Verdict` section, with
+  the first word in bold one of the verdicts it names: the report reads
+  it. prosediff still adds after it the rules for Word and OpenDocument
+  files and for marking problems in the text. `--assess-save-prompt` shows
+  the prompt sent.
 - **Who the comments are by** (`--assess-author`; in the window,
   **Comments by**): the name on the AI's comments and fixes in the Word
   and OpenDocument documents; by default the AI and its model.
@@ -103,4 +110,8 @@ problems, marked in the text with `--assess-annotate`. A Word or
 OpenDocument file also comes back as **the document with the AI's fixes,
 tracked**, as above; Markdown and text files have no document to
 download. `--split` is paragraph, the output is HTML, `--assess-context`
-does not apply, and `--assess-ai-writing` is refused.
+does not apply, and `--comments` is `markers` (the AI is sent the file's
+comments) or `none` (it is not). `--assess-ai-writing` asks whether the
+file reads as AI-written; with no earlier version to weigh it against, the
+AI can only compare its parts with each other, so this verdict is weaker
+still than for changes.

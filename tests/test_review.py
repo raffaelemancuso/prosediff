@@ -19,6 +19,7 @@ from prosediff.assess import (
     ANNOTATE_REVIEW,
     DOCUMENTS,
     SYSTEM_REVIEW,
+    SYSTEM_WRITING_REVIEW,
     Assessment,
     AssessRequest,
 )
@@ -85,8 +86,10 @@ def test_the_ai_is_sent_the_file_to_review(tmp_path, monkeypatch):
     assert "[-" not in prompt and "The journal is Nature." in prompt
     assert a.kind == "review" and a.verdict == "fair" and a.how == ""
     assert [n.replacement for n in a.annotations] == ["a small and significant effect."]
-    with pytest.raises(ValueError, match="no changes whose writing"):
-        assess_comparison(c, AssessRequest("claude"), kind="writing")
+    # whether it reads as written by an AI: the file whole, nothing marked
+    w = assess_comparison(c, AssessRequest("claude"), kind="writing")
+    assert runner.asked[-1][1] == SYSTEM_WRITING_REVIEW + DOCUMENTS
+    assert w.kind == "writing" and w.annotations == []
 
 
 def test_an_empty_file_is_not_sent(tmp_path, monkeypatch):
@@ -180,7 +183,7 @@ def test_cli_review(tmp_path, monkeypatch, capsys):
         (["--assess", "claude", "other.docx"], "--review takes one FILE"),
         (["--assess", "claude", "-o", "r.diff"], "its output is a .html"),
         (["--assess", "claude", "--split", "sentence"], "paragraph by paragraph"),
-        (["--assess", "claude", "--assess-ai-writing"], "--review compares none"),
+        (["--assess", "claude", "--comments", "text"], "--comments markers"),
         (["--assess", "claude", "-p", "x"], "--path picks what to compare"),
     ):
         with pytest.raises(SystemExit):

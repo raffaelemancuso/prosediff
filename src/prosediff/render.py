@@ -260,19 +260,18 @@ def assess_comparison(
     included, and the whole new version (new_version) when the request's
     context says so, sent to the model; kind "writing" asks instead whether
     their new text reads as written by an AI. A file reviewed alone
-    (Comparison.single) is sent whole, for a review (kind "review"); it has
-    no new text to ask the other question of (ValueError)."""
+    (Comparison.single) is sent whole, for a review (kind "review"), or,
+    with kind "writing", to ask the other question of it whole."""
     documents = any(f.old_data or f.new_data for f in comparison.files)
     if comparison.single:
-        if kind != "value":
-            raise ValueError("a file reviewed alone has no changes whose writing to assess")
         return assess(
             "",
             comparison.repo_name,
             request,
             document=new_version(comparison),
             documents=documents,
-            kind="review",
+            kind="writing" if kind == "writing" else "review",
+            single=True,
         )
     return assess(
         unified(comparison, 0, "wdiff"),

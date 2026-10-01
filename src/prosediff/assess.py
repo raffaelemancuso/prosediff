@@ -171,6 +171,44 @@ are none.
 Be specific and brief. Write in the language the document is written in, \
 unless the instructions of the person asking say otherwise."""
 
+# The same question of one document alone (kind "writing", reviewing one
+# file): with no unchanged text to weigh it against, a weaker judgement, and
+# the model is told so.
+SYSTEM_WRITING_REVIEW = """\
+You are an experienced editor. You are given a document, whole; {>>Author \
+(date): text<<} is a comment its authors or reviewers left in it.
+
+Assess whether the document, or parts of it, reads as written by a \
+generative AI, a large language model, rather than by its authors. Look for \
+the signs of such text: generic or inflated wording ("delve", "pivotal", \
+"underscore", "intricate", "landscape", "tapestry"), stock transitions and \
+summaries, a uniform rhythm of sentences, lists of three, balanced hedging \
+without specifics, claims or citations that look invented or do not fit what \
+they support, and passages whose register or vocabulary differs from the \
+rest. There is no earlier version to compare with, so weigh the parts of the \
+document against each other. These signs are circumstantial: careful human \
+writers show them too, and writers in a second language are often taken for \
+an AI wrongly. Say how sure you can be, never claim certainty, and judge the \
+text, not the people.
+
+Answer in Markdown with exactly these sections:
+
+## Verdict
+The first word, in bold, is one of **Likely**, **Possibly** or **Unlikely** \
+(that the document, or parts of it, was written by an AI); then two or three \
+sentences on why, and how sure you can be.
+
+## Signs of AI writing
+A short list, each quoting the words concerned and naming the sign. Write \
+"None found." if there are none.
+
+## Signs against
+A short list of what reads as the authors' own. Write "None found." if there \
+are none.
+
+Be specific and brief. Write in the language the document is written in, \
+unless the instructions of the person asking say otherwise."""
+
 # Added to SYSTEM when the files are Word documents or OpenDocument texts:
 # their styles reach the model in prosediff's notation (diff.line_markdown),
 # which it must not take for the text, nor report as changed.
@@ -326,7 +364,10 @@ class AssessRequest:
     (save_prompt: Assessment.prompt_text), whether the model marks the
     problems in the text (annotate: Assessment.annotations), who its
     comments in the Word and OpenDocument documents are by (author; "":
-    Assessment.title). Whether the
+    Assessment.title), the prompts in place of prosediff's (text, or a
+    file; "": prosediff's, default_system): system for the assessment or
+    the review, writing_system for whether the new text reads as written
+    by an AI. Whether the
     new text reads as written by an AI is asked apart, a second time
     (assess_comparison with kind "writing")."""
 
@@ -338,6 +379,24 @@ class AssessRequest:
     save_prompt: bool = False
     annotate: bool = True
     author: str = ""
+    system: str = ""
+    writing_system: str = ""
+
+
+def default_system(kind: str, single: bool = False) -> str:
+    """prosediff's own prompt for an assessment of kind ("value",
+    "review" or "writing"; single: "writing" of one file reviewed alone),
+    the one AssessRequest.system (writing_system, for "writing") replaces."""
+    if kind == "writing":
+        return SYSTEM_WRITING_REVIEW if single else SYSTEM_WRITING
+    return SYSTEM_REVIEW if kind == "review" else SYSTEM
+
+
+def system_of(request: AssessRequest, kind: str, single: bool = False) -> str:
+    """The prompt an assessment of kind is sent first: the request's own,
+    or prosediff's."""
+    own = request.writing_system if kind == "writing" else request.system
+    return instructions_from(own) or default_system(kind, single)
 
 
 @dataclass
@@ -463,15 +522,22 @@ def parse_backend(spec: str) -> tuple[str, str]:
     return backend, model
 
 
-def instructions_from(value: str) -> str:
-    """The instructions given: the text itself, or the contents of the file
-    it names (UTF-8)."""
+def instructions_file(value: str) -> Path | None:
+    """The file value names, when it names one: a short one-line value that
+    is a file's path; None for text."""
     value = value.strip()
     if value and len(value) < 1_000 and "\n" not in value:
         path = Path(value).expanduser()
         if path.is_file():
-            return path.read_text(encoding="utf-8").strip()
-    return value
+            return path
+    return None
+
+
+def instructions_from(value: str) -> str:
+    """The instructions given: the text itself, or the contents of the file
+    it names (UTF-8)."""
+    path = instructions_file(value)
+    return path.read_text(encoding="utf-8").strip() if path else value.strip()
 
 
 def cut(text: str, limit: int, what: str) -> str:
@@ -672,6 +738,7 @@ def assess(
     runner: Runner | None = None,
     documents: bool = False,
     kind: str = "value",
+    single: bool = False,
 ) -> Assessment:
     """An assessment of the changes of a word diff by the AI request names;
     subject names what changed ("paper.docx"), document is the whole new
@@ -682,10 +749,13 @@ def assess(
     new text reads as written by an AI (SYSTEM_WRITING), no problem marked
     in the text. kind "review" reviews document alone, diff unused
     (SYSTEM_REVIEW): what a file reviewed alone is worth, its problems
-    marked when asked. It never raises: a failure is its error."""
+    marked when asked; kind "writing" with single asks of document alone
+    whether it reads as written by an AI (SYSTEM_WRITING_REVIEW). It never
+    raises: a failure is its error."""
     runner = runner or run_backend
     started = time.monotonic()
-    review = kind == "review"
+    # the document read alone, whole, diff unused
+    review = kind == "review" or single
     context = request.context if request.context in CONTEXTS else "document"
     if context == "changes" and not review:
         document = ""
@@ -700,6 +770,7 @@ def assess(
         author=request.author,
     )
     annotate = request.annotate and kind in ("value", "review")
+    marks = (ANNOTATE_REVIEW if review else ANNOTATE) if annotate else ""
     try:
         backend, model = parse_backend(request.spec)
         instructions = instructions_from(request.instructions)
@@ -707,14 +778,11 @@ def assess(
             if not document.strip():
                 raise AssessError("the document has no text to review")
             prompt = review_prompt_for(document, subject, instructions)
-            first = SYSTEM_REVIEW
         else:
             if not diff.strip():
                 raise AssessError("there are no changes to assess")
             prompt = prompt_for(diff, subject, document, instructions)
-            first = SYSTEM_WRITING if kind == "writing" else SYSTEM
-        marks = (ANNOTATE_REVIEW if review else ANNOTATE) if annotate else ""
-        system = first + (DOCUMENTS if documents else "") + marks
+        system = system_of(request, kind, single) + (DOCUMENTS if documents else "") + marks
         made.system, made.prompt = system, prompt  # kept even if the model then fails
         text, answered = runner(backend, system, prompt, model, request.effort, request.timeout)
         if not text.strip():

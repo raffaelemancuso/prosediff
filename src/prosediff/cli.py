@@ -369,6 +369,20 @@ def build_parser() -> argparse.ArgumentParser:
         "Policy; Laura asked to cut the introduction by a fifth'), or a file holding them",
     )
     ai_group.add_argument(
+        "--assess-prompt",
+        metavar="TEXT",
+        help="a prompt in place of prosediff's own, or a file holding it; prosediff still "
+        "adds the rules for Word documents and for marking problems in the text. Keep its "
+        "## Verdict section, which the report reads (--assess-save-prompt shows the default)",
+    )
+    ai_group.add_argument(
+        "--assess-writing-prompt",
+        metavar="TEXT",
+        help="the same for --assess-ai-writing: a prompt in place of prosediff's own for "
+        "whether the new text (with --review, the file) reads as written by an AI, or a "
+        "file holding it",
+    )
+    ai_group.add_argument(
         "--assess-author",
         metavar="NAME",
         help="who the AI's comments and fixes in the Word and OpenDocument documents are "
@@ -491,12 +505,15 @@ def main(argv: list[str] | None = None) -> int:
     elif (
         args.assess_effort
         or args.assess_instructions
+        or args.assess_prompt
+        or args.assess_writing_prompt
         or args.assess_author
         or args.assess_save_prompt
         or args.assess_ai_writing
     ):
         ap.error(
-            "--assess-effort, --assess-instructions, --assess-author, --assess-save-prompt and "
+            "--assess-effort, --assess-instructions, --assess-prompt, "
+            "--assess-writing-prompt, --assess-author, --assess-save-prompt and "
             "--assess-ai-writing go with --assess"
         )
 
@@ -622,12 +639,12 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if args.assess is None:
         ap.error("--review has an AI review the file: say which with --assess")
     _check_assess(ap, args)
-    if args.assess_ai_writing:
-        ap.error("--assess-ai-writing asks about the text changes added: --review compares none")
     if (args.format or format_of(args.output)) != "html":
         ap.error("--review writes an HTML report: its output is a .html")
     if args.split not in (None, "paragraph"):
         ap.error("--review shows the file paragraph by paragraph: --split takes two versions")
+    if args.comments == "text":
+        ap.error("--review takes --comments markers (the AI is sent them) or none (it is not)")
     for option, given in (
         ("--path", args.paths),
         ("--include", args.include is not None),
@@ -648,6 +665,7 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         align=args.align,
         request=request_of(args),
         documents=args.assess_documents,
+        ai_writing=args.assess_ai_writing,
     )
     try:
         done = execute(run, _say)

@@ -54,11 +54,13 @@ or named by `GIT_PYTHON_GIT_EXECUTABLE`.
 | `--assess-effort LEVEL`    | how hard the model thinks: a level it supports (see `--list-models`; e.g. `low`, `high`, `max`). Default: the model's own |
 | `--assess-context document\|changes` | what the model reads: the changes and the whole new version (`document`, default), or the changes only |
 | `--assess-instructions TEXT` | your own instructions added to the prompt, or a text file holding them |
+| `--assess-prompt TEXT` | a prompt in place of prosediff's own for the assessment (or the review of one file), or a text file holding it; keep its `## Verdict` section |
+| `--assess-writing-prompt TEXT` | the same for `--assess-ai-writing` |
 | `--assess-author NAME` | who the AI's comments and fixes in the Word and OpenDocument documents are by (default: the AI and its model) |
 | `--assess-annotate`, `--no-assess-annotate` | have the AI mark each problem in the text, with what is wrong and a proposed change (default: on) |
 | `--assess-documents`, `--no-assess-documents` | offer Word or OpenDocument files with the AI's comments and fixes for download (default: on; see [details](ai_assessment.md#the-ais-problems-in-word-and-libreoffice-documents)) |
 | `--assess-save-prompt`     | also include the exact prompt sent to the model in the report (off by default) |
-| `--assess-ai-writing`      | also ask whether the added text reads as AI-written (off by default); an indication, not proof |
+| `--assess-ai-writing`      | also ask whether the added text (with `--review`, the file) reads as AI-written (off by default); an indication, not proof |
 | `--assess-timeout SECONDS` | give up on the assessment after this long (default 900); the report is still written |
 | `--list-models AI`         | list the models an AI offers (`claude`, `codex`, `ollama`, or any provider any-llm reaches), default first, with the efforts each supports |
 | `--login-codex`            | log in to ChatGPT in the browser for `--assess codex` (once) |

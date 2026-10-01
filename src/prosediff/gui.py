@@ -48,7 +48,9 @@ from prosediff.assess import (
     AssessError,
     Assessment,
     ModelInfo,
+    default_system,
     duration,
+    instructions_file,
     models_of,
     parse_backend,
     providers,
@@ -200,6 +202,13 @@ class Settings:
     assess_effort: str = ""
     assess_context: str = "document"
     assess_instructions: str = ""
+    # the prompts in place of prosediff's own (text, or a file; "":
+    # prosediff's): for two versions compared, for one file reviewed, and for
+    # whether the new text reads as written by an AI
+    assess_prompt: str = ""
+    assess_review_prompt: str = ""
+    assess_writing_prompt: str = ""
+    assess_review_writing_prompt: str = ""
     # who the AI's comments in the documents are by; "": the AI and its model
     assess_author: str = ""
     assess_save_prompt: bool = False
@@ -379,10 +388,15 @@ def run_of(s: Settings) -> Run:
         language=s.language or DEFAULT,
         encoding=s.encoding or AUTO_ENCODING,
     )
+    request = request_of(s)
+    if request and s.mode == "review":
+        request = replace(
+            request, system=s.assess_review_prompt, writing_system=s.assess_review_writing_prompt
+        )
     common = {
         "options": options,
         "align": s.align,
-        "request": request_of(s),
+        "request": request,
         "documents": s.assess_documents,
     }
     if s.mode == "review":
@@ -391,7 +405,7 @@ def run_of(s: Settings) -> Run:
         if not s.assess:
             raise ValueError("choose an AI to review the file")
         out = Path(with_format(s.output, "html")) if s.output else page_of("review", s.single, "")
-        return Run("review", s.single, out, **common)
+        return Run("review", s.single, out, ai_writing=s.assess_ai_writing, **common)
     old, new = sides(s)
     fmt = s.output_format if s.output_format in FORMATS else "html"
     split = s.split if s.split in SPLITS else default_split(fmt)
@@ -733,15 +747,10 @@ class App:
             "guessed from each file's text; or a code such as it.",
         )
         self.comments = self.setting("comments")
-        field_row(
-            right,
-            0,
-            "Comments",
-            choice_box(right, self.comments, COMMENT_MODES),
-            "markers: only the comments added or removed, set apart (a marker and a panel in "
-            "the HTML report, CriticMarkup in the diffs); text: compared as text; none: left "
-            "out.",
-        )
+        self.comments_box = choice_box(right, self.comments, COMMENT_MODES)
+        self.comments_tips = field_row(right, 0, "Comments", self.comments_box, COMMENTS_TIP)
+        # "text", given up for "markers" reviewing one file, to come back after
+        self.comments_given_up = False
         self.comments.trace_add("write", lambda *_: self.update_empty_comments())
         self.split = self.setting("split")
         splits = ttk.Frame(compared)
@@ -1107,6 +1116,10 @@ class App:
         reads.grid(row=1, column=1, columnspan=2, sticky="w", **PAD)
         hint(reads_label, "What the model is sent, besides the instructions.")
         self.assess_instructions = self.setting("assess_instructions")
+        self.assess_prompt = self.setting("assess_prompt")
+        self.assess_review_prompt = self.setting("assess_review_prompt")
+        self.assess_writing_prompt = self.setting("assess_writing_prompt")
+        self.assess_review_writing_prompt = self.setting("assess_review_writing_prompt")
         ttk.Label(card, text="Instructions").grid(row=2, column=0, sticky="w", **PAD)
         entry = ttk.Entry(card, textvariable=self.assess_instructions)
         entry.grid(row=2, column=1, sticky="ew", **PAD)
@@ -1125,7 +1138,11 @@ class App:
             bootstyle="secondary-outline",
         )
         write.pack(side="left", padx=(0, 6))
-        hint(write, "Write the instructions in a large box, in a window of its own")
+        hint(
+            write,
+            "Write the instructions in a large box, in a window of its own, and see or "
+            "edit prosediff's own prompt",
+        )
         pick = browse(
             buttons,
             lambda: self.pick_into(self.assess_instructions, "Instructions for the AI"),
@@ -1170,11 +1187,12 @@ class App:
                 (
                     "Check for AI writing",
                     self.assess_ai_writing,
-                    "Also ask the AI, apart, whether the text the changes added reads as "
-                    "written by an AI: a second assessment, its verdict (likely, possibly or "
-                    "unlikely) in the report's top bar. An indication, not a proof: careful "
-                    "writers show the same signs, and writers in a second language are often "
-                    "taken for an AI wrongly.",
+                    "Also ask the AI, apart, whether the text the changes added (one file: "
+                    "the file) reads as written by an AI: a second assessment, its verdict "
+                    "(likely, possibly or unlikely) in the report's top bar. An indication, "
+                    "not a proof: careful writers show the same signs, and writers in a "
+                    "second language are often taken for an AI wrongly. One file has no "
+                    "earlier version to weigh the text against: a weaker judgement still.",
                 ),
                 (
                     "Save AI prompt",
@@ -1205,7 +1223,7 @@ class App:
             if var is self.assess_documents:
                 self.documents_switch = switch
             # a review sends the file as it is, and writes the report once
-            if var in (self.assess_ai_writing, self.assess_preview):
+            if var is self.assess_preview:
                 self.changes_only.append(switch)
         self.assess_annotate.trace_add("write", lambda *_: self.update_ai_switches())
         self.assess_ai.trace_add("write", lambda *_: self.update_ai_switches())
@@ -1508,6 +1526,7 @@ class App:
             self.output_format.set("html")
             self.rename_output()
         self.update_splits()
+        self.update_comments()
         self.update_tracked_formats()
         self.update_ai_switches()
         if self.job is None:
@@ -1603,6 +1622,24 @@ class App:
         if self.reviewing():  # a review is an HTML report: no diff, no changes
             for fmt, button in self.format_buttons.items():
                 enable(button, fmt == "html")
+
+    def update_comments(self) -> None:
+        """Comments offers, reviewing one file, markers or none (the AI is
+        sent the file's comments, or not), and says so; text, chosen, is
+        given up for markers, to come back with two versions compared."""
+        review = self.reviewing()
+        self.comments_box.configure(
+            values=[m for m in COMMENT_MODES if not (review and m == "text")]
+        )
+        for tip in self.comments_tips:
+            tip.configure(text=REVIEW_COMMENTS_TIP if review else COMMENTS_TIP)
+        if review and self.comments.get() == "text":
+            self.comments.set("markers")
+            self.comments_given_up = True
+        elif not review and self.comments_given_up:
+            if self.comments.get() == "markers":  # not chosen since
+                self.comments.set("text")
+            self.comments_given_up = False
 
     def update_empty_comments(self) -> None:
         """Comments without text are a choice of markers only."""
@@ -1738,21 +1775,82 @@ class App:
         )
 
     def edit_instructions(self) -> None:
-        """The instructions in a large box, in a window of its own: OK puts
-        them back in their field, Cancel or Escape leaves it as it was."""
+        """prosediff's prompts and the instructions in large boxes, in a
+        window of their own: OK keeps them (a prompt left as prosediff's is
+        kept as "", to follow prosediff's), Cancel or Escape leaves them as
+        they were. The prompts are those of the tab shown: the review of one
+        file; or the assessment of two versions, and whether their new text
+        reads as written by an AI. One a file holds is shown read-only, the
+        file kept: it is read again at every run."""
+        review = self.reviewing()
+        if review:
+            prompts = [
+                ("prosediff's prompt, for reviewing one file", self.assess_review_prompt, "review"),
+                (
+                    "prosediff's prompt, for whether the file reads as AI-written",
+                    self.assess_review_writing_prompt,
+                    "writing",
+                ),
+            ]
+        else:
+            prompts = [
+                ("prosediff's prompt, for assessing the changes", self.assess_prompt, "value"),
+                (
+                    "prosediff's prompt, for whether the new text reads as AI-written",
+                    self.assess_writing_prompt,
+                    "writing",
+                ),
+            ]
+        # the instructions last, with no default to restore
+        boxes = [(label, var, default_system(kind, review)) for label, var, kind in prompts]
+        boxes.append(("Your instructions, added to the prompt", self.assess_instructions, ""))
         top = tk.Toplevel(self.root)
         top.title("prosediff: instructions for the AI")
         top.transient(self.root)
         frame = ttk.Frame(top, padding=(14, 12, 14, 12))
         frame.pack(fill="both", expand=True)
-        box = ttk.ScrolledText(frame, width=80, height=20, wrap="word", auto_hide=True)
-        box.pack(fill="both", expand=True)
-        box.text.insert("1.0", self.assess_instructions.get())
-        box.text.focus_set()
+        editable = []
+        for n, (label, var, default) in enumerate(boxes):
+            path = instructions_file(var.get())
+            head = ttk.Frame(frame)
+            head.pack(fill="x", pady=(10 if n else 0, 4))
+            if path:
+                label += f": from {path.name} (edit that file, or clear the field to write here)"
+            ttk.Label(head, text=label).pack(side="left")
+            box = ttk.ScrolledText(
+                frame, width=80, height=10 if default else 5, wrap="word", auto_hide=True
+            )
+            box.pack(fill="both", expand=True)
+            if path:
+                box.text.insert("1.0", path.read_text(encoding="utf-8").strip())
+                box.text.configure(state="disabled")
+                continue
+            box.text.insert("1.0", var.get().strip() or default)
+            editable.append((box.text, var, default))
+            if not default:
+                continue
+
+            def restore(text=box.text, default=default) -> None:
+                text.delete("1.0", "end")
+                text.insert("1.0", default)
+
+            reset = ttk.Button(
+                head, text="Restore default", command=restore, bootstyle="secondary-link"
+            )
+            reset.pack(side="right")
+            hint(
+                reset,
+                "Keep its ## Verdict section: the report reads it. prosediff still adds, "
+                "after it, the rules for Word documents and for marking problems in the text.",
+            )
+        if editable:
+            editable[-1][0].focus_set()
 
         def done(keep: bool) -> None:
             if keep:
-                self.assess_instructions.set(box.text.get("1.0", "end-1c").strip())
+                for text, var, default in editable:
+                    written = text.get("1.0", "end-1c").strip()
+                    var.set("" if written == default.strip() else written)
             top.destroy()
 
         row = ttk.Frame(frame)
@@ -1821,6 +1919,7 @@ class App:
         for f in fields(MovedPassageSettings):
             self.passage_vars[f.name].set(f.default)
         self.split_given_up = None
+        self.comments_given_up = False
         self.on_format()
         self.update_untracked()
         self.update_empty_comments()
@@ -2006,9 +2105,19 @@ class App:
         self.root.after(100, self.poll, self.job)
 
 
-def hint(widget: tk.Misc, text: str) -> None:
+COMMENTS_TIP = (
+    "markers: only the comments added or removed, set apart (a marker and a panel in the "
+    "HTML report, CriticMarkup in the diffs); text: compared as text; none: left out."
+)
+REVIEW_COMMENTS_TIP = (
+    "markers: the file's comments shown as markers and in a panel, and sent to the AI, "
+    "which checks whether the text answers them; none: left out, and not sent to the AI."
+)
+
+
+def hint(widget: tk.Misc, text: str) -> ttk.ToolTip:
     """What a widget does, shown when the pointer rests on it."""
-    ttk.ToolTip(widget, text=text, wraplength=HINT_WIDTH, delay=HINT_DELAY_MS)
+    return ttk.ToolTip(widget, text=text, wraplength=HINT_WIDTH, delay=HINT_DELAY_MS)
 
 
 def segment(
@@ -2065,16 +2174,17 @@ def toggle(parent: tk.Misc, text: str, variable: tk.BooleanVar) -> ttk.Checkbutt
     return ttk.Checkbutton(parent, text=text, variable=variable, bootstyle="round-toggle")
 
 
-def field_row(parent: tk.Misc, row: int, label: str, widget: tk.Misc, tip: str) -> None:
+def field_row(
+    parent: tk.Misc, row: int, label: str, widget: tk.Misc, tip: str
+) -> list[ttk.ToolTip]:
     """A labelled field of an options card, explained by a tooltip on both
-    the label and the field, and an info icon."""
+    the label and the field, and an info icon; the tooltips, to change."""
     text = ttk.Label(parent, text=label)
     text.grid(row=row, column=0, sticky="w", padx=(0, 10), pady=4)
     widget.grid(row=row, column=1, sticky="w", pady=4)
     info = ttk.Label(parent, image=ttk.Icon("info-circle", size=14), bootstyle="secondary")
     info.grid(row=row, column=2, sticky="w", padx=(6, 0), pady=4)
-    for w in (text, widget, info):
-        hint(w, tip)
+    return [hint(w, tip) for w in (text, widget, info)]
 
 
 def switch_row(

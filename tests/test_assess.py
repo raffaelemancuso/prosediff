@@ -11,6 +11,9 @@ from prosediff.assess import (
     ANNOTATE,
     MAX_DIFF_CHARS,
     SYSTEM,
+    SYSTEM_REVIEW,
+    SYSTEM_WRITING,
+    SYSTEM_WRITING_REVIEW,
     Annotation,
     AssessError,
     Assessment,
@@ -23,6 +26,7 @@ from prosediff.assess import (
     split_annotations,
 )
 from prosediff.cli import main
+from prosediff.diff import review_file
 from prosediff.render import assess_comparison, new_version
 
 ANSWER = """## Verdict
@@ -151,6 +155,53 @@ def test_instructions_given_or_read_from_a_file(tmp_path):
     prompt = runner.asked[0][2]
     assert "<instructions>\nThe journal is Research Policy.\n</instructions>" in prompt
     assert prompt.index("<diff>") < prompt.index("<instructions>")
+
+
+def test_prompts_in_place_of_prosediffs(tmp_path):
+    """A prompt of one's own, as text or from a file, replaces prosediff's
+    for the kind it is given for, and only that one; prosediff's rules for
+    marking the problems still follow it."""
+    own = tmp_path / "prompt.txt"
+    own.write_text("Judge the changes harshly.\n", encoding="utf-8")
+    request = AssessRequest("claude", system=str(own), writing_system="Spot the AI.")
+    sent = {}
+    for kind in ("value", "review", "writing"):
+        runner = fake()
+        assess("[-a-]{+b+}", "x", request, document="b", runner=runner, kind=kind)
+        sent[kind] = runner.asked[0][1]
+    assert sent["value"].startswith("Judge the changes harshly.")
+    assert sent["value"].endswith(ANNOTATE)
+    assert sent["review"].startswith("Judge the changes harshly.")
+    assert sent["writing"] == "Spot the AI."
+    for kind, default in (
+        ("value", SYSTEM),
+        ("review", SYSTEM_REVIEW),
+        ("writing", SYSTEM_WRITING),
+    ):
+        runner = fake()
+        assess("[-a-]{+b+}", "x", AssessRequest("claude"), document="b", runner=runner, kind=kind)
+        assert runner.asked[0][1].startswith(default)
+
+
+def test_ai_writing_of_one_file_alone(tmp_path, monkeypatch):
+    """One file reviewed alone can be asked whether it reads as written by
+    an AI: the file sent whole, prosediff's prompt for it (or one's own),
+    no problem marked; its verdict read as the comparison's."""
+    path = tmp_path / "paper.md"
+    path.write_text("We delve into the pivotal landscape.\n", encoding="utf-8")
+    comparison = review_file(path)
+    answer = "## Verdict\n**Possibly**: stock wording.\n"
+    runner = fake(answer)
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    made = assess_comparison(comparison, AssessRequest("claude"), kind="writing")
+    (_, system, prompt, *_) = runner.asked[0]
+    assert system == SYSTEM_WRITING_REVIEW
+    assert "<document>\nWe delve into the pivotal landscape.\n</document>" in prompt
+    assert (made.kind, made.verdict, made.annotations) == ("writing", "possibly", [])
+    runner = fake(answer)
+    own = AssessRequest("claude", writing_system="Spot the AI.")
+    assess("", "x", own, document="text", runner=runner, kind="writing", single=True)
+    assert runner.asked[0][1] == "Spot the AI."
 
 
 def test_the_new_version_of_every_file(tmp_path):
