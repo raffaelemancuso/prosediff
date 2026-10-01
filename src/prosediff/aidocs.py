@@ -743,7 +743,7 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
         return []
     f, fmt = found
     notes = assessment.annotations
-    ai = assessment.title
+    author = assessment.author.strip() or assessment.title
     stem = PurePosixPath((f.new_path or "document").replace("\\", "/")).stem
     red_of = WordRedline if fmt == "docx" else OdtRedline
     out = []
@@ -756,7 +756,7 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
             red = red_of_it()
             if red is None:
                 return
-            ids = notes_in(red, notes, ai, assessment, fixes)
+            ids = notes_in(red, notes, author, assessment, fixes)
             data = BytesIO()
             red.save(data)
             out.append(Download(name, label, data.getvalue(), fmt, ids, short))
@@ -787,7 +787,7 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
         f"the {which} with the AI's fixes",
         # the file itself, its own tracked changes (the co-authors') kept as
         # they are, unless the text was read with them rejected or shown
-        lambda: red_of(f, ai, own=f.document_changes == "accept-all"),
+        lambda: red_of(f, author, own=f.document_changes == "accept-all"),
         True,
         f"{stem}_with_AI_fixes.{fmt}",
         f"The {which} with the AI's fixes, tracked",

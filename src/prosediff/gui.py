@@ -200,6 +200,8 @@ class Settings:
     assess_effort: str = ""
     assess_context: str = "document"
     assess_instructions: str = ""
+    # who the AI's comments in the documents are by; "": the AI and its model
+    assess_author: str = ""
     assess_save_prompt: bool = False
     # how long the AI may take, in seconds
     assess_timeout: float = ASSESS_TIMEOUT
@@ -240,43 +242,22 @@ def prefillable(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in PREFILLED_FILES
 
 
-def single_file(args: list[str]) -> Path | None:
-    """The one Markdown, Word or OpenDocument file given, whose partner the
-    window asks for."""
-    if len(args) == 1:
-        path = Path(args[0])
-        if prefillable(path):
-            return path.resolve()
-    return None
-
-
-def with_second_file(s: Settings, first: Path, second: Path) -> Settings:
-    """The settings comparing two files, the older (by modification time)
-    on the left: the draft sent before the one returned. The HTML report goes next
-    to the newer."""
-    older, newer = sorted((first, second), key=lambda p: (p.stat().st_mtime, str(p)))
-    return replace(s, mode="files", old=str(older.resolve()), new=str(newer.resolve()), output="")
-
-
 def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
     """The settings to open the window with, given its command-line arguments.
 
     One argument that is a git repository (or a folder inside one) fills in
     the repository, the sides starting from their defaults; one Markdown,
-    Word or OpenDocument file fills in the files tab, its partner to be
-    chosen when the window opens, and the One file tab, to review it alone
-    instead; two such files fill in the files tab, two
+    Word or OpenDocument file fills in the One file tab, to review it alone;
+    two such files fill in the files tab, two
     folders the folders tab. Anything else is ignored, and the second value says why.
     """
     s = replace(base)
     if len(args) == 1:
         path = Path(args[0])
-        if first := single_file(args):
-            # the other file is asked for when the window opens (main)
-            s.mode = "files"
-            s.old, s.new = str(first), ""
-            s.single = str(first)
-            s.output = ""
+        if prefillable(path):
+            s.mode = "review"
+            s.single = str(path.resolve())
+            s.output = ""  # next to the file (App.follow_sides)
             return s, ""
         if path.is_dir():
             try:
@@ -1120,7 +1101,11 @@ class App:
             button = segment(reads, self.assess_context, value, text, tip)
             self.ai_switches.append(button)
             self.changes_only.append(button)
-        field_row(card, 1, "Reads", reads, "What the model is sent, besides the instructions.")
+        # PAD, as the rows around it, not field_row: aligned with them
+        reads_label = ttk.Label(card, text="Reads")
+        reads_label.grid(row=1, column=0, sticky="w", **PAD)
+        reads.grid(row=1, column=1, columnspan=2, sticky="w", **PAD)
+        hint(reads_label, "What the model is sent, besides the instructions.")
         self.assess_instructions = self.setting("assess_instructions")
         ttk.Label(card, text="Instructions").grid(row=2, column=0, sticky="w", **PAD)
         entry = ttk.Entry(card, textvariable=self.assess_instructions)
@@ -1131,20 +1116,40 @@ class App:
             'asked for, what to look at (e.g. "the journal is Research Policy; check that '
             'the introduction was cut by a fifth"); or a text file holding them.',
         )
+        buttons = ttk.Frame(card)
+        buttons.grid(row=2, column=2, **PAD)
+        write = ttk.Button(
+            buttons,
+            image=ttk.Icon("pencil-square", size=16),
+            command=self.edit_instructions,
+            bootstyle="secondary-outline",
+        )
+        write.pack(side="left", padx=(0, 6))
+        hint(write, "Write the instructions in a large box, in a window of its own")
         pick = browse(
-            card,
+            buttons,
             lambda: self.pick_into(self.assess_instructions, "Instructions for the AI"),
             "Choose a text file holding the instructions",
         )
-        pick.grid(row=2, column=2, **PAD)
-        self.ai_switches += [entry, pick]
+        pick.pack(side="left")
+        self.assess_author = self.setting("assess_author")
+        ttk.Label(card, text="Comments by").grid(row=3, column=0, sticky="w", **PAD)
+        author = ttk.Entry(card, textvariable=self.assess_author, width=30)
+        author.grid(row=3, column=1, sticky="w", **PAD)
+        hint(
+            author,
+            "Who the AI's comments and fixes in the Word and OpenDocument documents "
+            "are by, as Word and LibreOffice show them. Empty: the AI and its model, "
+            'e.g. "Claude Code (claude-opus-5-5)".',
+        )
+        self.ai_switches += [entry, write, pick, author]
         self.assess_annotate = self.setting("assess_annotate")
         self.assess_save_prompt = self.setting("assess_save_prompt")
         self.assess_preview = self.setting("assess_preview")
         self.assess_ai_writing = self.setting("assess_ai_writing")
         self.assess_documents = self.setting("assess_documents")
         switches = ttk.Frame(card)
-        switches.grid(row=3, column=1, columnspan=2, sticky="w", **PAD)
+        switches.grid(row=4, column=1, columnspan=2, sticky="w", **PAD)
         for k, (text, var, tip) in enumerate(
             (
                 (
@@ -1199,7 +1204,8 @@ class App:
             self.ai_switches.append(switch)
             if var is self.assess_documents:
                 self.documents_switch = switch
-            if var is self.assess_ai_writing:
+            # a review sends the file as it is, and writes the report once
+            if var in (self.assess_ai_writing, self.assess_preview):
                 self.changes_only.append(switch)
         self.assess_annotate.trace_add("write", lambda *_: self.update_ai_switches())
         self.assess_ai.trace_add("write", lambda *_: self.update_ai_switches())
@@ -1731,6 +1737,34 @@ class App:
             }
         )
 
+    def edit_instructions(self) -> None:
+        """The instructions in a large box, in a window of its own: OK puts
+        them back in their field, Cancel or Escape leaves it as it was."""
+        top = tk.Toplevel(self.root)
+        top.title("prosediff: instructions for the AI")
+        top.transient(self.root)
+        frame = ttk.Frame(top, padding=(14, 12, 14, 12))
+        frame.pack(fill="both", expand=True)
+        box = ttk.ScrolledText(frame, width=80, height=20, wrap="word", auto_hide=True)
+        box.pack(fill="both", expand=True)
+        box.text.insert("1.0", self.assess_instructions.get())
+        box.text.focus_set()
+
+        def done(keep: bool) -> None:
+            if keep:
+                self.assess_instructions.set(box.text.get("1.0", "end-1c").strip())
+            top.destroy()
+
+        row = ttk.Frame(frame)
+        row.pack(fill="x", pady=(10, 0))
+        ttk.Button(row, text="OK", command=lambda: done(True)).pack(side="right")
+        ttk.Button(
+            row, text="Cancel", command=lambda: done(False), bootstyle="secondary-outline"
+        ).pack(side="right", padx=(0, 8))
+        top.protocol("WM_DELETE_WINDOW", lambda: done(False))
+        top.bind("<Escape>", lambda e: done(False))
+        dark_title_bar(top)
+
     def toggle_advanced(self) -> None:
         """Open the advanced settings' window, or close it."""
         top = self.advanced_window
@@ -2076,17 +2110,6 @@ def swap(a: tk.StringVar, b: tk.StringVar) -> None:
     b.set(first)
 
 
-def ask_second_file(root: tk.Tk, first: Path) -> Path | None:
-    """The file to compare first with, chosen in a dialog opened in its folder."""
-    chosen = filedialog.askopenfilename(
-        parent=root,
-        title=f"Compare {first.name} with…",
-        initialdir=str(first.parent),
-        filetypes=[("Word, OpenDocument and Markdown", "*.docx *.odt *.md"), ("All files", "*.*")],
-    )
-    return Path(chosen) if chosen else None
-
-
 def received(args: list[str]) -> str:
     """The arguments as the program got them, one per line and quoted, so a
     path split at a space or quoted twice shows as such; a path that does
@@ -2259,7 +2282,7 @@ def set_icon(root: tk.Tk) -> None:
 def main(argv: list[str] | None = None) -> None:
     """prosediff-gui [REPOSITORY | FILE | OLD NEW]: the window, prefilled from
     the arguments when they are a git repository, Markdown, Word or OpenDocument files, or
-    two folders; for one file, a dialog asks for the file to compare it with.
+    two folders; one file fills in the One file tab, to review it alone.
     Arguments that are none of these are reported in an error box, with the
     arguments received, and the program exits once it is dismissed."""
     args = sys.argv[1:] if argv is None else argv
@@ -2277,18 +2300,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         root.destroy()
         sys.exit(2)
-    first = single_file(args)
-    if first is not None:
-        root.withdraw()  # the dialog alone, then the window
-        second = ask_second_file(root, first)
-        if second is not None and second.resolve() != first:
-            settings = with_second_file(settings, first, second)
-        else:
-            note = f"Choose the file to compare {first.name} with."
-        root.deiconify()
-    app = App(root, settings)
-    if note:
-        app.status.set(note)
+    App(root, settings)
     root.mainloop()
 
 

@@ -7,9 +7,8 @@ system's light or dark mode on Windows and macOS, and is light elsewhere.
 
 - `prosediff-gui REPOSITORY` opens it with a git repository filled in (or
   the repository a folder belongs to).
-- `prosediff-gui FILE.docx` (or `.odt`, `.md`) first asks for the file to
-  compare it with; the older goes on the left. The file also fills in the
-  **One file** tab, to review it alone instead.
+- `prosediff-gui FILE.docx` (or `.odt`, `.md`) opens it on the **One file**
+  tab, the file filled in, to review it alone.
 - `prosediff-gui OLD NEW` opens it with two Markdown, Word or OpenDocument
   files, or two folders.
 
@@ -67,8 +66,10 @@ versions, into the temporary folder. A file you choose stays.
 
 Under **AI assessment** (see [AI assessment](ai_assessment.md)): the
 **AI**, its **Model** and **Effort**, listed as the AI reports them (any
-name can be typed); what it **Reads**; your **Instructions**, typed or from
-a text file; whether it marks problems in the text (on by default); and
+name can be typed); what it **Reads**; your **Instructions**, typed, written
+in a large box in a window of their own (the pencil button), or from a text
+file; who its comments in the Word and OpenDocument documents are by
+(**Comments by**; empty: the AI and its model); whether it marks problems in the text (on by default); and
 whether the prompt is saved in the report. The switches are greyed out
 while no AI is chosen, and the whole card unless the output is the HTML
 report.

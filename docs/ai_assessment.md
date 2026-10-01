@@ -73,6 +73,9 @@ effort starred, as the window does. Three more settings:
   version, to check them against the rest; or the changes only.
 - **Your instructions** (`--assess-instructions`): the journal, what to
   look at, as a sentence or a text file, added to the prompt.
+- **Who the comments are by** (`--assess-author`; in the window,
+  **Comments by**): the name on the AI's comments and fixes in the Word
+  and OpenDocument documents; by default the AI and its model.
 
 **Privacy.** The AI is sent the word diff of the changed paragraphs
 (comments included), the whole new version (unless `--assess-context
@@ -84,7 +87,8 @@ computer. The HTML report needs no network to read. `--assess-save-prompt`
 end of the report. A long revision is cut at about 100,000 tokens.
 
 In the window, "Preview before sending" (on by default) first opens the
-report without the assessment, then asks whether to send the changes.
+report without the assessment, then asks whether to send the changes. A
+file reviewed alone has no preview.
 
 Check the assessment against the text. A local model needs a few billion
 parameters to assess a long diff, and is fast only if it fits the graphics

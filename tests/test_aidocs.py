@@ -465,3 +465,28 @@ def test_the_co_authors_changes_and_comments_are_kept(tmp_path, fmt, alone):
         assert not [
             x for x in body.iter(W + "ins") if next(x.iterancestors(W + "ins"), None) is not None
         ]
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+def test_the_ais_changes_and_comments_by_the_author_chosen(tmp_path, fmt):
+    """With an author chosen, the AI's fixes and comments are by that name,
+    not by the AI's."""
+    old, new = pair(tmp_path, fmt)
+    c = compare_paths(str(old), str(new), Options())
+    chosen = assessment([FIXED, ADVICE])
+    chosen.author = "Referee 2"
+    out = tmp_path / f"fixed.{fmt}"
+    out.write_bytes(downloads(c, chosen)[1].data)
+    assert authors_of(out, fmt) == {"Referee 2"}
+    if fmt == "docx":
+        assert {x.author for x in docx.Document(str(out)).comments} == {"Referee 2"}
+    else:
+        from lxml import etree
+
+        root = etree.parse(BytesIO(zipfile.ZipFile(out).read("content.xml")))
+        notes = {
+            x.text
+            for x in root.iter(f"{{{DC}}}creator")
+            if x.getparent().tag.endswith("annotation")
+        }
+        assert notes == {"Referee 2"}

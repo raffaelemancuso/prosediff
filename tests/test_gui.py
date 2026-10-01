@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("tkinter", reason="the GUI tests need a Python built with Tk")
 
 import tkinter as tk
+from tkinter import ttk as tk_ttk
 
 from helpers import two_files
 
@@ -87,34 +88,11 @@ def test_unusable_arguments_are_ignored(tmp_path, args, message):
     assert message in note and s.repo == "kept"
 
 
-def test_one_file_waits_for_its_partner(tmp_path):
-    from prosediff.gui import single_file, with_second_file
-
+def test_one_file_fills_in_the_one_file_tab(tmp_path):
     sent = tmp_path / "draft.docx"
     sent.write_bytes(b"x")
-    s, note = settings_from_args([str(sent)], Settings(mode="git"))
-    assert note == "" and s.mode == "files" and (s.old, s.new) == (str(sent), "")
-    assert s.single == str(sent)  # the One file tab too, to review it alone
-    assert with_second_file(s, sent, sent).single == str(sent)
-    assert single_file([str(sent)]) == sent
-    assert single_file([str(tmp_path / "notes.txt")]) is None
-    assert single_file([str(sent), str(sent)]) is None
-
-
-def test_the_older_file_goes_on_the_left(tmp_path):
-    import os
-
-    from prosediff.gui import with_second_file
-
-    sent, returned = tmp_path / "sent.docx", tmp_path / "returned.docx"
-    sent.write_bytes(b"x")
-    returned.write_bytes(b"y")
-    os.utime(sent, (1_000_000, 1_000_000))
-    os.utime(returned, (2_000_000, 2_000_000))
-    for first, second in ((sent, returned), (returned, sent)):
-        s = with_second_file(Settings(), first, second)
-        assert (s.mode, s.old, s.new) == ("files", str(sent), str(returned))
-        assert s.output == ""  # next to the newer, as the window fills it
+    s, note = settings_from_args([str(sent)], Settings(mode="git", output="elsewhere.html"))
+    assert note == "" and s.mode == "review" and s.single == str(sent) and s.output == ""
 
 
 def test_context_lines_box():
@@ -1052,3 +1030,41 @@ def test_compare_by_offers_the_splits_the_output_can_hold(root, tmp_path):
     # settings saved with a split the output cannot hold
     other = App(root, Settings(mode="files", split="both", output_format="diff"))
     assert other.split.get() == "paragraph" and other.split_buttons["both"].instate(["disabled"])
+
+
+def test_a_review_has_no_preview(tmp_path, monkeypatch):
+    """A file reviewed alone goes to the AI without a preview asked first."""
+    old, _ = two_files(tmp_path, "One.\n", "Two.\n")
+    asked = []
+    monkeypatch.setattr(
+        pipeline, "assess_comparison", lambda c, request, **kw: asked.append(request)
+    )
+    s = Settings(mode="review", single=str(old), assess="claude", open_page=False)
+    execute(run_of(s), approve=lambda path: pytest.fail("a preview was asked"))
+    assert len(asked) == 1
+
+
+def test_the_instructions_written_in_a_window_of_their_own(root):
+    """The large box opens with the instructions, and OK puts what was
+    written back in their field; Cancel leaves it as it was."""
+    app = App(root, Settings(assess_instructions="Be brief."))
+
+    def within(w):
+        for child in w.winfo_children():
+            yield child
+            yield from within(child)
+
+    for button, expected in (("Cancel", "Be brief."), ("OK", "Be brief.\nCite the journal.")):
+        app.edit_instructions()
+        (top,) = [
+            w
+            for w in root.winfo_children()
+            if isinstance(w, tk.Toplevel) and w is not app.advanced_window
+        ]
+        (text,) = [w for w in within(top) if isinstance(w, tk.Text)]
+        assert text.get("1.0", "end-1c") == "Be brief."
+        text.insert("end", "\nCite the journal.")
+        (b,) = [w for w in within(top) if isinstance(w, tk_ttk.Button) and w.cget("text") == button]
+        b.invoke()
+        assert app.assess_instructions.get() == expected
+        app.assess_instructions.set("Be brief.")

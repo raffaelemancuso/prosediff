@@ -76,6 +76,7 @@ def request_of(src: object) -> AssessRequest | None:
         timeout=src.assess_timeout,
         save_prompt=src.assess_save_prompt,
         annotate=src.assess_annotate,
+        author=src.assess_author or "",
     )
 
 
@@ -98,9 +99,9 @@ def execute(
     approve: Callable[[Path], bool] | None = None,
 ) -> Result:
     """Do run, telling progress each stage as it starts ("Comparing…").
-    With approve, an HTML report with an AI to assess is first written
-    without the assessment, and approve, given its path, says whether the
-    text goes to the AI."""
+    With approve, an HTML report with an AI to assess the changes is first
+    written without the assessment, and approve, given its path, says whether
+    the text goes to the AI; a file reviewed alone has no preview."""
     reviewing = run.mode == "review"
     if reviewing:
         progress("Reading the file…")
@@ -145,7 +146,7 @@ def execute(
     )
     # no other format has a place for the assessment
     ask = run.request is not None and run.fmt == "html"
-    if ask and approve is not None:
+    if ask and approve is not None and not reviewing:
         progress("Writing the preview…")
         write()
         if not approve(run.output):

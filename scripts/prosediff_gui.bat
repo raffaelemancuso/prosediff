@@ -3,7 +3,7 @@ rem Open the prosediff window.
 rem
 rem   prosediff_gui.bat                     the window, with the last choices
 rem   prosediff_gui.bat REPOSITORY          the repository prefilled
-rem   prosediff_gui.bat FILE.docx           a dialog asks for the file to compare it with
+rem   prosediff_gui.bat FILE.docx           the file prefilled in the One file tab
 rem   prosediff_gui.bat OLD.docx NEW.docx   two Markdown or Word files prefilled
 rem
 rem A batch file always runs in a console, however briefly. For no console at

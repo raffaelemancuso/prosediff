@@ -324,7 +324,9 @@ class AssessRequest:
     instructions of the person asking (added to the prompt), how long it
     may take, whether the text sent is put in the HTML report
     (save_prompt: Assessment.prompt_text), whether the model marks the
-    problems in the text (annotate: Assessment.annotations). Whether the
+    problems in the text (annotate: Assessment.annotations), who its
+    comments in the Word and OpenDocument documents are by (author; "":
+    Assessment.title). Whether the
     new text reads as written by an AI is asked apart, a second time
     (assess_comparison with kind "writing")."""
 
@@ -335,6 +337,7 @@ class AssessRequest:
     timeout: float = ASSESS_TIMEOUT
     save_prompt: bool = False
     annotate: bool = True
+    author: str = ""
 
 
 @dataclass
@@ -358,6 +361,8 @@ class Assessment:
     # the problems the model marked in the text, when asked (annotate)
     annotations: list[Annotation] = field(default_factory=list)
     kind: str = "value"
+    # who its comments in the documents are by; "": the title
+    author: str = ""
 
     @property
     def notes_json(self) -> list[dict]:
@@ -692,6 +697,7 @@ def assess(
         context=context,
         save_prompt=request.save_prompt,
         kind=kind,
+        author=request.author,
     )
     annotate = request.annotate and kind in ("value", "review")
     try:

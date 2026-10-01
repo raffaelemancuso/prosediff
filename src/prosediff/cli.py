@@ -369,6 +369,12 @@ def build_parser() -> argparse.ArgumentParser:
         "Policy; Laura asked to cut the introduction by a fifth'), or a file holding them",
     )
     ai_group.add_argument(
+        "--assess-author",
+        metavar="NAME",
+        help="who the AI's comments and fixes in the Word and OpenDocument documents are "
+        "by (default: the AI and its model, e.g. 'Claude Code (claude-opus-5-5)')",
+    )
+    ai_group.add_argument(
         "--assess-annotate",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -485,11 +491,12 @@ def main(argv: list[str] | None = None) -> int:
     elif (
         args.assess_effort
         or args.assess_instructions
+        or args.assess_author
         or args.assess_save_prompt
         or args.assess_ai_writing
     ):
         ap.error(
-            "--assess-effort, --assess-instructions, --assess-save-prompt and "
+            "--assess-effort, --assess-instructions, --assess-author, --assess-save-prompt and "
             "--assess-ai-writing go with --assess"
         )
 
