@@ -18,8 +18,11 @@ from collections import Counter
 from collections.abc import Callable
 from functools import cache
 from io import BytesIO
+from itertools import takewhile
 
 from lxml import etree
+
+from prosediff.document import lineage
 
 GUESS = "guess"
 DOCUMENT = "document"
@@ -155,12 +158,8 @@ def _inherited(styles: dict, key, parent) -> Marks:
     """The marks of a style merged over those of the styles it derives
     from; styles maps a key to (parent's name, own marks), parent turns a
     parent's name into its key."""
-    chain, seen = [], set()
-    while key in styles and key not in seen:
-        seen.add(key)
-        name, own = styles[key]
-        chain.append(own)
-        key = parent(name)
+    found = takewhile(lambda k: k in styles, lineage(key, lambda k: parent(styles[k][0])))
+    chain = [styles[k][1] for k in found]
     out: Marks = {}
     for own in reversed(chain):
         out.update(own)

@@ -58,6 +58,7 @@ or named by `GIT_PYTHON_GIT_EXECUTABLE`.
 | `--assess-prompt TEXT` | a prompt in place of prosediff's own for the assessment (or the review of one file), or a text file holding it; keep its `## Verdict` section |
 | `--assess-writing-prompt TEXT` | the same for `--assess-ai-writing` |
 | `--assess-author NAME` | who the AI's comments and fixes in the Word and OpenDocument documents are by (default: the AI and its model) |
+| `--assess-edits`, `--no-assess-edits` | let the AI edit the text: each fix a rewording of the passage, a tracked change in the documents and, reviewing one file, shown as a diff (default: on); off, it only marks the problems and says what to do |
 | `--assess-annotate`, `--no-assess-annotate` | have the AI mark each problem in the text, with what is wrong and a proposed change (default: on) |
 | `--assess-documents`, `--no-assess-documents` | offer Word or OpenDocument files with the AI's comments and fixes for download (default: on; see [details](ai_assessment.md#the-ais-problems-in-word-and-libreoffice-documents)) |
 | `--assess-save-prompt`     | also include the exact prompt sent to the model in the report (off by default) |

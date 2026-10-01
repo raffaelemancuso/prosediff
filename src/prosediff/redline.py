@@ -175,6 +175,15 @@ WORD_REVISIONS = {
 }
 
 
+def stamp() -> dt.datetime:
+    """The date and time of a tracked change or comment, as Word and
+    LibreOffice write theirs: the local time, to the second, with no zone.
+    Word's w:date ends with a "Z" all the same (its true UTC time is in
+    w16cex:dateUtc), and LibreOffice reads a .docx's w:date as local time;
+    an ODF dc:date has no zone."""
+    return dt.datetime.now().replace(microsecond=0)
+
+
 class WordFile:
     """A Word document opened for the redline: its parts' XML by name, those
     python-docx keeps as bytes parsed, to be written back."""
@@ -295,7 +304,7 @@ class WordRedline:
         self.new = WordFile(f.new_data, f.document_changes)
         self.old = WordFile(f.old_data, f.document_changes) if f.old_data else None
         self.author = author
-        self.date = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.date = stamp().isoformat() + "Z"
         # each line's paragraphs, found before the files' own changes are
         # settled (which may merge paragraphs away)
         self.new_paragraphs = [self.found(self.new, line) for line in f.new_text]
@@ -838,7 +847,7 @@ class OdtRedline:
         self.taken = set(self.changed_regions())
         self.styles = OdtStyles(self.doc, prefix="PD_T")
         self.author = author
-        self.date = dt.datetime.now(dt.UTC).replace(microsecond=0, tzinfo=None)
+        self.date = stamp()
         self.regions = 0
         self.row_styles: dict[str | None, str] = {}
         body = self.root.find(f".//{odf('office:text')}")

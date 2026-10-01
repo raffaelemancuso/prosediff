@@ -2,6 +2,8 @@
 and the report and file it goes to. A fake backend stands in for the
 models, so no test needs one, but for one with a real local model."""
 
+import socket
+
 import pytest
 from helpers import two_files
 
@@ -399,6 +401,10 @@ TEST_MODEL = "gemma3:270m"
 def test_a_real_local_model_assesses(tmp_path):
     """A real Ollama model, reached through any-llm, reports itself and
     answers; skipped when any-llm, Ollama or the model is missing."""
+    try:  # nothing on Ollama's port: skipped at once, not after the client's retries
+        socket.create_connection(("127.0.0.1", 11434), timeout=0.5).close()
+    except OSError:
+        pytest.skip("Ollama is needed: nothing listens on 127.0.0.1:11434")
     pytest.importorskip("any_llm")
     try:
         names = [m.name for m in assess_module.models_of("ollama", timeout=10)]

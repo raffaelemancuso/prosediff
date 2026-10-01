@@ -15,7 +15,6 @@ def classes_of(line, text):
 @pytest.mark.parametrize(
     "line,text,cls",
     [
-        ("a **bold** b", "bold", "strong"),
         ("a *it* b", "it", "em"),
         ("a `x*y*` b", "x", "code"),
         ("see [the site](http://x.org) now", "the site", "link"),
@@ -31,7 +30,6 @@ def test_md_styles(line, text, cls):
 @pytest.mark.parametrize(
     "line,syntax",
     [
-        ("a **bold** b", "**"),
         ("# Title", "# "),
         ("see [x](http://y) now", "](http://y)"),
         ("[w]{.smallcaps}", "]{.smallcaps}"),

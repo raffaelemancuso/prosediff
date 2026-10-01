@@ -26,7 +26,6 @@ left out before saving it.
 
 import base64
 import copy
-import datetime as dt
 import difflib
 import re
 import warnings
@@ -42,6 +41,7 @@ from lxml import etree
 from prosediff.assess import Annotation, Assessment
 from prosediff.comments import ANY_PLACEHOLDER
 from prosediff.diff import Comparison, FileDiff, word_ops
+from prosediff.document import spaced
 from prosediff.hyphenate import SOFT_HYPHEN
 from prosediff.redline import (
     XML_ID,
@@ -148,7 +148,7 @@ def locate(lines: list[str], note: Annotation, hay=None) -> Place | None:
 def verdict_text(assessment: Assessment) -> str:
     """The Verdict section of an assessment, as plain text."""
     text = assessment.verdict_section or ""
-    return re.sub(r"\s+", " ", re.sub(r"[*_`]", "", text)).strip()
+    return spaced(re.sub(r"[*_`]", "", text))
 
 
 def fix_of(line: str, place: Place, note: Annotation) -> list | None:
@@ -173,6 +173,46 @@ def fix_of(line: str, place: Place, note: Annotation) -> list | None:
         end = after(a2) if a2 > a1 else start
         edits.append((start, end, note.replacement[b1:b2]))
     return edits[::-1] or None
+
+
+def with_fixes(lines: list[str], notes: list) -> tuple[list[str], set[int]]:
+    """lines as the notes' fixes leave them, and the indexes of the notes
+    fixed: each note of the new side whose passage is found within one line
+    and has a replacement (fix_of); a fix overlapping another, already made,
+    left out. A document's line keeps its styles, the words put in taking
+    those of the character they replace (or follow)."""
+    hay = haystack(lines)
+    edits: dict[int, list] = {}
+    fixed = set()
+    for k, note in enumerate(notes):
+        if note.side != "new":
+            continue
+        place = locate(lines, note, hay)
+        if place is None:
+            continue
+        found = fix_of(lines[place.j1], place, note)
+        if not found:
+            continue
+        taken = edits.setdefault(place.j1, [])
+        if any((s < e2 and s2 < e) or s == s2 for s, e, _ in found for s2, e2, _ in taken):
+            continue
+        taken += found
+        fixed.add(k)
+    out = list(lines)
+    for j, line_edits in edits.items():
+        line = out[j]
+        styles = getattr(line, "styles", None)
+        for start, end, text in sorted(line_edits, key=lambda x: (x[0], x[1]), reverse=True):
+            if styles is not None:
+                at = (
+                    styles[start]
+                    if start < len(styles)
+                    else (styles[-1] if styles else frozenset())
+                )
+                styles = styles[:start] + [at] * len(text) + styles[end:]
+            line = line[:start] + text + line[end:]
+        out[j] = out[j].replaced(line, styles) if styles is not None else line
+    return out, fixed
 
 
 def whole_words(a: str, b: str) -> list[tuple[int, int, int, int]]:
@@ -332,6 +372,8 @@ class WordNotes:
         else:  # no ordinary text to anchor it to (an equation): its paragraphs
             c = red.new.doc.comments.add_comment(author=self.author, initials="AI")
             mark_paragraphs(starts[0], ends[-1], c.comment_id)
+        # python-docx stamps it with the UTC time: the tracked changes' local one
+        c._comment_elm.set(qn("w:date"), red.date)
         for k, text in enumerate(paragraphs):
             p = c.paragraphs[0] if k == 0 else c.add_paragraph()
             if k and bold_first and text.startswith(bold_first):
@@ -464,9 +506,7 @@ class OdtNotes:
         note = etree.Element(odf("office:annotation"), nsmap={"dc": DC})
         note.set(odf("office:name"), name)
         etree.SubElement(note, f"{{{DC}}}creator").text = self.author
-        etree.SubElement(note, f"{{{DC}}}date").text = (
-            dt.datetime.now().replace(microsecond=0).isoformat()
-        )
+        etree.SubElement(note, f"{{{DC}}}date").text = red.date.isoformat()
         for text in paragraphs:
             p = etree.SubElement(note, odf("text:p"))
             p.text = text

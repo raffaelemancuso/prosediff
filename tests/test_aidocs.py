@@ -2,6 +2,7 @@
 Word document or an OpenDocument text (prosediff.aidocs): the tracked
 changes with the AI's comments, and the new version with its fixes."""
 
+import datetime as dt
 import re
 import zipfile
 from io import BytesIO
@@ -74,10 +75,13 @@ def test_a_fix_is_its_words_changed():
 
 
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
-def test_the_tracked_changes_with_the_ais_comments(tmp_path, fmt):
+def test_the_two_documents_with_the_ais_comments_and_fixes(tmp_path, fmt):
     """The document of tracked changes still reads as the new version
     accepted and as the old one rejected; it has the verdict and a comment
-    for each problem found in the new version, with the change proposed."""
+    for each problem found in the new version, with the change proposed.
+    The new version with each fix a tracked change of the AI's: accepted,
+    the fixed text; rejected, the new version as it was. A problem without a
+    fix is a comment with the change proposed."""
     old, new, got = made(tmp_path, fmt)
     assert [d.name for d in got] == [
         f"new_tracked_with_AI_comments.{fmt}",
@@ -95,13 +99,6 @@ def test_the_tracked_changes_with_the_ais_comments(tmp_path, fmt):
     assert "Nothing supports a large effect.\nProposed: Say a small effect." in texts
     assert "Which checks?\nProposed: Name them." in texts
 
-
-@pytest.mark.parametrize("fmt", ["docx", "odt"])
-def test_the_new_version_with_the_ais_fixes(tmp_path, fmt):
-    """The new version with each fix a tracked change of the AI's: accepted,
-    the fixed text; rejected, the new version as it was. A problem without a
-    fix is a comment with the change proposed."""
-    _, new, got = made(tmp_path, fmt)
     out = tmp_path / got[1].name
     accepted = lines(out, "accept-all")
     assert "We find a small and significant effect." in accepted
@@ -182,16 +179,16 @@ def comments_of(path, fmt):
 
 
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
-@pytest.mark.parametrize("which", [0, 1])
-def test_each_comment_covers_its_passage(tmp_path, fmt, which):
+def test_each_comment_covers_its_passage(tmp_path, fmt):
     """A comment covers its passage's words, no more and no less: in the
     fixed version, as the fix left them."""
     _, _, got = made(tmp_path, fmt, (FIXED,))
-    d = got[which]
-    ids = d.notes[0]["comments"]
-    assert len(ids) == 1
-    words = "a small and significant effect." if which else "a large and significant effect."
-    assert covered(d.data, fmt, ids[0]) == words
+    for d, words in zip(
+        got, ("a large and significant effect.", "a small and significant effect."), strict=True
+    ):
+        ids = d.notes[0]["comments"]
+        assert len(ids) == 1
+        assert covered(d.data, fmt, ids[0]) == words
 
 
 def covered(data, fmt, cid):
@@ -490,3 +487,20 @@ def test_the_ais_changes_and_comments_by_the_author_chosen(tmp_path, fmt):
             if x.getparent().tag.endswith("annotation")
         }
         assert notes == {"Referee 2"}
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+def test_the_ais_changes_and_comments_dated_alike_in_local_time(tmp_path, fmt):
+    """The AI's tracked changes and comments carry one date, the local time
+    as Word and LibreOffice write theirs (Word's w:date with a "Z" all the
+    same): not UTC, which they would show shifted by the time zone."""
+    _, _, got = made(tmp_path, fmt)
+    z = zipfile.ZipFile(BytesIO(got[1].data))
+    if fmt == "docx":
+        xml = z.read("word/document.xml").decode() + z.read("word/comments.xml").decode()
+        dates = set(re.findall(r'w:date="([^"]+)"', xml))
+    else:
+        dates = set(re.findall(r"<dc:date>([^<]+)</dc:date>", z.read("content.xml").decode()))
+    (date,) = dates
+    when = dt.datetime.fromisoformat(date.removesuffix("Z"))
+    assert abs(dt.datetime.now() - when) < dt.timedelta(minutes=5)

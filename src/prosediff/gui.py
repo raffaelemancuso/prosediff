@@ -18,7 +18,6 @@ system is set (Windows' app mode, macOS's appearance), the title bar too on
 Windows; switches for the yes-or-no options, Bootstrap icons on the buttons.
 """
 
-import contextlib
 import ctypes
 import functools
 import json
@@ -38,7 +37,6 @@ from tkinter import filedialog, messagebox
 from tkinter import ttk as tk_ttk
 
 import git
-import psutil
 import ttkbootstrap as ttk
 
 from prosediff.assess import (
@@ -66,6 +64,7 @@ from prosediff.diff import (
     Options,
     check_encoding,
     move_defaults,
+    stop_process_tree,
 )
 from prosediff.document import CHANGES as DOCX_CHANGES
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
@@ -217,6 +216,8 @@ class Settings:
     assess_timeout: float = ASSESS_TIMEOUT
     # whether the AI marks the problems in the text
     assess_annotate: bool = True
+    # whether the AI may edit the text (fixes as rewordings)
+    assess_edits: bool = True
     # whether the report is first shown without the assessment, and the AI
     # asked only once that preview is approved
     assess_preview: bool = True
@@ -519,20 +520,6 @@ def run_job(s: Settings, messages, replies) -> None:
     messages.put(("done", result))
 
 
-def stop_process_tree(pid: int) -> None:
-    """Stop a process and every program it started (Claude Code, Codex,
-    git), at once."""
-    try:
-        process = psutil.Process(pid)
-        family = [*process.children(recursive=True), process]
-    except psutil.NoSuchProcess:
-        return
-    for p in family:
-        with contextlib.suppress(psutil.NoSuchProcess):
-            p.kill()
-    psutil.wait_procs(family, timeout=5)
-
-
 def with_format(path: str, fmt: str) -> str:
     """The output file named for the format chosen: .html, .diff (a .patch
     stays one) or .wdiff; any other name, or none, stays."""
@@ -759,6 +746,9 @@ class App:
         split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
         # what only a comparison has, greyed out reviewing one file (show_mode)
         self.comparing_only: list[tk_ttk.Widget] = []
+        # the grid cells only a comparison has, left out of the One file tab
+        # (show_mode)
+        self.review_hidden: list[tk.Misc] = []
         # each split's button, greyed out for an output that cannot hold it
         # (update_splits); the split given up for the output's default, to
         # come back with an output that can
@@ -776,16 +766,17 @@ class App:
             "moved between paragraphs is recognised), or both, in one HTML report whose "
             "toolbar switches between the two.",
         )
+        self.review_hidden += compared.grid_slaves(row=2)
         self.ignore_ws = self.setting("ignore_whitespace")
-        self.comparing_only.append(
-            switch_row(
-                right,
-                1,
-                "Ignore whitespace",
-                self.ignore_ws,
-                "Lines that differ only in spacing are the same, as git diff -w.",
-            )
+        ignore = switch_row(
+            right,
+            1,
+            "Ignore whitespace",
+            self.ignore_ws,
+            "Lines that differ only in spacing are the same, as git diff -w.",
         )
+        self.comparing_only.append(ignore)
+        self.review_hidden.append(ignore)
         self.skip_resolved = self.setting("skip_resolved")
         switch_row(
             right,
@@ -978,6 +969,8 @@ class App:
         ttk.Label(out, text="Format").grid(row=0, column=0, sticky="w", **PAD)
         formats = ttk.Frame(out)
         formats.grid(row=0, column=1, columnspan=3, sticky="w", **PAD)
+        # a review is an HTML report: no format to choose
+        self.review_hidden += out.grid_slaves(row=0)
         self.format_buttons: dict[str, ttk.Radiobutton] = {}
         self.output_format = self.setting("output_format")
         for value, text, tip in (
@@ -1126,6 +1119,7 @@ class App:
         reads_label.grid(row=1, column=0, sticky="w", **PAD)
         reads.grid(row=1, column=1, columnspan=2, sticky="w", **PAD)
         hint(reads_label, "What the model is sent, besides the instructions.")
+        self.review_hidden += [reads_label, reads]
         self.assess_instructions = self.setting("assess_instructions")
         self.assess_prompt = self.setting("assess_prompt")
         self.assess_review_prompt = self.setting("assess_review_prompt")
@@ -1176,67 +1170,78 @@ class App:
         self.assess_save_prompt = self.setting("assess_save_prompt")
         self.assess_preview = self.setting("assess_preview")
         self.assess_ai_writing = self.setting("assess_ai_writing")
+        self.assess_edits = self.setting("assess_edits")
         self.assess_documents = self.setting("assess_documents")
         switches = ttk.Frame(card)
         switches.grid(row=4, column=1, columnspan=2, sticky="w", **PAD)
-        for k, (text, var, tip) in enumerate(
+        self.switch_cells: list[tk.Misc] = []
+        for text, var, tip in (
             (
-                (
-                    "Preview before sending",
-                    self.assess_preview,
-                    "First write the report without the assessment and open it, then ask "
-                    "whether to send the changes to the AI: to check what it will read "
-                    "before it reads it. No: the report stays as it is, unassessed.",
-                ),
-                (
-                    "Mark individual changes",
-                    self.assess_annotate,
-                    "Have the AI mark each problem in the text, from its first words to its "
-                    "last, with what is wrong and the change it proposes: a numbered badge "
-                    "before each in the HTML report, its passage highlighted when clicked, and "
-                    "a card in the margin beside it.",
-                ),
-                (
-                    "Check for AI writing",
-                    self.assess_ai_writing,
-                    "Also ask the AI, apart, whether the text the changes added (one file: "
-                    "the file) reads as written by an AI: a second assessment, its verdict "
-                    "(likely, possibly or unlikely) in the report's top bar. An indication, "
-                    "not a proof: careful writers show the same signs, and writers in a "
-                    "second language are often taken for an AI wrongly. One file has no "
-                    "earlier version to weigh the text against: a weaker judgement still.",
-                ),
-                (
-                    "Save AI prompt",
-                    self.assess_save_prompt,
-                    "Also put the exact text the AI was sent (its system prompt and its "
-                    "message) in the HTML report, in a closed panel at its end: to see what "
-                    "it read.",
-                ),
-                (
-                    "Documents to download",
-                    self.assess_documents,
-                    "Comparing a Word document with another (or an OpenDocument text with "
-                    "another), put in the HTML report the documents to download from the AI "
-                    "assessment: the new version with the AI's fixes as tracked changes, to "
-                    "accept or reject, its own (the co-authors') kept; and, when it has none, "
-                    "the tracked changes with the AI's comments. Review mode chooses which "
-                    "problems they hold. They make the "
-                    "report larger: about 2.7 times the document's size. Needs \"Mark "
-                    'individual changes".',
-                ),
-            )
+                "Preview before sending",
+                self.assess_preview,
+                "First write the report without the assessment and open it, then ask "
+                "whether to send the changes to the AI: to check what it will read "
+                "before it reads it. No: the report stays as it is, unassessed.",
+            ),
+            (
+                "Mark problems in the text",
+                self.assess_annotate,
+                "Have the AI mark each problem in the text, from its first words to its "
+                "last, with what is wrong and the change it proposes: a numbered badge "
+                "before each in the HTML report, its passage highlighted when clicked, and "
+                "a card in the margin beside it.",
+            ),
+            (
+                "Check for AI writing",
+                self.assess_ai_writing,
+                "Also ask the AI, apart, whether the text the changes added (one file: "
+                "the file) reads as written by an AI: a second assessment, its verdict "
+                "(likely, possibly or unlikely) in the report's top bar. An indication, "
+                "not a proof: careful writers show the same signs, and writers in a "
+                "second language are often taken for an AI wrongly. One file has no "
+                "earlier version to weigh the text against: a weaker judgement still.",
+            ),
+            (
+                "Allow text edits",
+                self.assess_edits,
+                "Let the AI edit the text: each fix it proposes is a rewording of the "
+                "passage, a tracked change in the documents to download and, reviewing "
+                "one file, the report a diff of the file and the file with the fixes. "
+                "Off: it only marks the problems and says what to do; the text is left "
+                'as it is. Needs "Mark problems in the text".',
+            ),
+            (
+                "Save AI prompt",
+                self.assess_save_prompt,
+                "Also put the exact text the AI was sent (its system prompt and its "
+                "message) in the HTML report, in a closed panel at its end: to see what "
+                "it read.",
+            ),
+            (
+                "Documents to download",
+                self.assess_documents,
+                "Comparing a Word document with another (or an OpenDocument text with "
+                "another), put in the HTML report the documents to download from the AI "
+                "assessment: the new version with the AI's fixes as tracked changes, to "
+                "accept or reject, its own (the co-authors') kept; and, when it has none, "
+                "the tracked changes with the AI's comments. Review mode chooses which "
+                "problems they hold. They make the "
+                "report larger: about 2.7 times the document's size. Needs \"Mark "
+                'problems in the text".',
+            ),
         ):
             switch = toggle(switches, text, var)
-            # rows of two
-            switch.grid(row=k // 2, column=k % 2, sticky="w", padx=(0, 24), pady=3)
             hint(switch, tip)
+            # rows of two, laid out by layout_switches
+            self.switch_cells.append(switch)
             self.ai_switches.append(switch)
             if var is self.assess_documents:
                 self.documents_switch = switch
             # a review sends the file as it is, and writes the report once
             if var is self.assess_preview:
                 self.changes_only.append(switch)
+                self.preview_switch = switch
+        self.layout_switches()
         self.assess_annotate.trace_add("write", lambda *_: self.update_ai_switches())
         self.assess_ai.trace_add("write", lambda *_: self.update_ai_switches())
         self.update_ai_switches()
@@ -1286,6 +1291,17 @@ class App:
         on = self.ai_active() and self.ai_chosen() in self.ai_models
         for box in (self.model_box, self.effort_box):
             enable(box, on)
+
+    def layout_switches(self) -> None:
+        """The AI card's switches in rows of two; reviewing one file, the
+        preview left out, the others closing up."""
+        shown = [
+            s for s in self.switch_cells if not (self.reviewing() and s is self.preview_switch)
+        ]
+        for s in self.switch_cells:
+            s.grid_remove()
+        for k, s in enumerate(shown):
+            s.grid(row=k // 2, column=k % 2, sticky="w", padx=(0, 24), pady=3)
 
     def update_ai_switches(self) -> None:
         """What the AI is sent and the AI assessment's switches, greyed out
@@ -1539,6 +1555,12 @@ class App:
                 side.pack_forget()
         for w in self.comparing_only:
             w.state(["disabled"] if self.reviewing() else ["!disabled"])
+        for w in self.review_hidden:
+            if self.reviewing():
+                w.grid_remove()
+            else:
+                w.grid()
+        self.layout_switches()
         if self.reviewing() and self.output_format.get() != "html":
             self.output_format.set("html")
             self.rename_output()

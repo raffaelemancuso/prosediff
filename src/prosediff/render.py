@@ -151,6 +151,7 @@ def render(
     assessment: Assessment | None = None,
     writing: Assessment | None = None,
     documents: bool = True,
+    documents_of: tuple[Comparison, Assessment] | None = None,
 ) -> str:
     """The HTML report; align ("left" or "justify") sets how wrapped lines are
     aligned. split says how the comparison compared prose, "paragraph" or
@@ -161,7 +162,9 @@ def render(
     their new text reads as written by an AI, beside it. documents: when the
     AI marked problems in a Word document or an OpenDocument text, compared
     paragraph by paragraph, the report holds the documents made of them to
-    download (prosediff.aidocs)."""
+    download (prosediff.aidocs); documents_of, the comparison and the
+    assessment they are made of when not these (a review's fixes shown as a
+    diff: the file and the assessment as the AI made it)."""
     if align not in ALIGNMENTS:
         raise ValueError(f"align must be one of {ALIGNMENTS}, not {align!r}")
     template = _env.get_template("report.html.j2")
@@ -171,7 +174,7 @@ def render(
     if documents and by_paragraph and assessment is not None and assessment.annotations:
         from prosediff.aidocs import downloads  # python-docx and odfdo: only then
 
-        ai_documents = downloads(comparison, assessment)
+        ai_documents = downloads(*(documents_of or (comparison, assessment)))
     if sentences is not None:
         set_apart(sentences, "s-")
     return template.render(
@@ -205,6 +208,7 @@ def write_output(
     assessment: Assessment | None = None,
     writing: Assessment | None = None,
     documents: bool = True,
+    documents_of: tuple[Comparison, Assessment] | None = None,
 ) -> Path:
     """Write the HTML report (fmt "html"), the unified diff ("diff"), the word
     diff ("wdiff"), LF line ends on every system, or the Word document
@@ -234,6 +238,7 @@ def write_output(
             assessment=assessment,
             writing=writing,
             documents=documents,
+            documents_of=documents_of,
         )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

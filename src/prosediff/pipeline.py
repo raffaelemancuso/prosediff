@@ -17,6 +17,7 @@ from prosediff.diff import (
     Options,
     compare,
     compare_paths,
+    review_diff,
     review_file,
 )
 from prosediff.render import assess_comparison, write_output
@@ -79,6 +80,7 @@ def request_of(src: object) -> AssessRequest | None:
         author=src.assess_author or "",
         system=src.assess_prompt or "",
         writing_system=src.assess_writing_prompt or "",
+        edits=src.assess_edits,
     )
 
 
@@ -93,6 +95,29 @@ class Result:
     comparison: Comparison
     assessment: Assessment | None = None
     writing: Assessment | None = None
+
+
+def fixes_shown(run: Run, assessment: Assessment) -> tuple[Comparison, Assessment] | None:
+    """A review's report as a diff of the file and the file as the AI's
+    fixes leave it (review_diff), and the assessment to show with it: the
+    problems fixed marked on the file's side, the others on the fixed one's.
+    None when no fix applies."""
+    from prosediff.aidocs import with_fixes
+
+    fixed: set[int] = set()
+
+    def edit(lines: list[str]) -> list[str]:
+        out, done = with_fixes(lines, assessment.annotations)
+        fixed.update(done)
+        return out
+
+    comparison = review_diff(run.old, edit, run.options)
+    if not fixed:
+        return None
+    marked = [
+        replace(n, side="old") if k in fixed else n for k, n in enumerate(assessment.annotations)
+    ]
+    return comparison, replace(assessment, annotations=marked)
 
 
 def execute(
@@ -134,18 +159,18 @@ def execute(
             compared(replace(run.options, by_sentence=True)) if run.split == "both" else None
         )
         split = run.split
-    write = partial(
+    writer = partial(
         write_output,
-        comparison,
-        run.output,
-        run.fmt,
-        run.paths,
+        path=run.output,
+        fmt=run.fmt,
+        paths=run.paths,
         align=run.align,
         context=CONTEXT if reviewing else run.options.context,
         sentences=sentences,
         split=split,
         documents=run.documents,
     )
+    write = partial(writer, comparison)
     # no other format has a place for the assessment
     ask = run.request is not None and run.fmt == "html"
     if ask and approve is not None and not reviewing:
@@ -162,6 +187,16 @@ def execute(
             what = "the file" if reviewing else "the new text"
             progress(f"Asking {ai} whether {what} reads as written by an AI…")
             writing = assess_comparison(comparison, run.request, kind="writing")
+    assessment_shown = assessment
+    if (
+        reviewing
+        and assessment is not None
+        and assessment.annotations
+        and (shown := fixes_shown(run, assessment))
+    ):
+        # the documents to download made of the file and the assessment as they are
+        write = partial(writer, shown[0], documents_of=(comparison, assessment))
+        assessment_shown = shown[1]
     progress(
         "Writing the report…"
         if run.fmt == "html"
@@ -170,7 +205,7 @@ def execute(
         else "Writing the diff…"
     )
     try:
-        path = write(assessment=assessment, writing=writing)
+        path = write(assessment=assessment_shown, writing=writing)
     except ValueError as e:  # a .docx or .odt of anything but two such documents
         raise OutputError(str(e)) from e
     return Result(path, comparison, assessment, writing)

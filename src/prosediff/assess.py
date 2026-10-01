@@ -28,7 +28,7 @@ import re
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import timedelta
 from functools import cache
 from pathlib import Path
@@ -62,13 +62,42 @@ WRITING_VERDICTS = ("likely", "possibly", "unlikely")
 # changes alone.
 CONTEXTS = ("document", "changes")
 
-SYSTEM = """\
+# What the prompts below share, word for word.
+DIFF_GIVEN = """\
+the changes between two versions of a document as a word diff: [-text-] was \
+removed, {+text+} was added, and {>>Author (date): text<<} is a reviewer's \
+comment; lines that begin with @@ say where a change sits."""
+PROBLEMS_SECTION = """\
+## Problems to fix
+A numbered list, most serious first, each quoting the words concerned. \
+Write "None found." if there are none."""
+CLOSING = """\
+Be specific and brief. Write in the language the document is written in, \
+unless the instructions of the person asking say otherwise."""
+AI_SIGNS = """\
+Look for the signs of such text: generic or inflated wording ("delve", \
+"pivotal", "underscore", "intricate", "landscape", "tapestry"), stock \
+transitions and summaries, a uniform rhythm of sentences, lists of three, \
+balanced hedging without specifics, claims or citations that look invented \
+or do not fit what they support, and"""
+AI_CAVEAT = """\
+These signs are circumstantial: careful human writers show them too, and \
+writers in a second language are often taken for an AI wrongly. Say how sure \
+you can be, never claim certainty, and judge the text, not the people."""
+AI_SECTIONS = """\
+## Signs of AI writing
+A short list, each quoting the words concerned and naming the sign. Write \
+"None found." if there are none.
+
+## Signs against
+A short list of what reads as the authors' own. Write "None found." if there \
+are none."""
+
+SYSTEM = f"""\
 You are an experienced editor and peer reviewer of academic and professional \
-writing. You are given the changes between two versions of a document as a \
-word diff: [-text-] was removed, {+text+} was added, and {>>Author (date): \
-text<<} is a reviewer's comment; lines that begin with @@ say where a change \
-sits. Unchanged paragraphs are mostly left out of the diff; when the whole \
-new version is given too, check the changes against the rest of it.
+writing. You are given {DIFF_GIVEN} Unchanged paragraphs are mostly left out \
+of the diff; when the whole new version is given too, check the changes \
+against the rest of it.
 
 Assess the value of the changes as a whole: is the new version better than \
 the old one, and why? Judge the argument, clarity, concision, accuracy and \
@@ -90,19 +119,16 @@ A short list of the main changes, grouped by section of the document.
 ## Improvements
 A short list of what the changes do well.
 
-## Problems to fix
-A numbered list, most serious first, each quoting the words concerned. \
-Write "None found." if there are none.
+{PROBLEMS_SECTION}
 
-Be specific and brief. Write in the language the document is written in, \
-unless the instructions of the person asking say otherwise."""
+{CLOSING}"""
 
 # The review of one document alone, not of changes (kind "review"; the
 # comparison's single file).
-SYSTEM_REVIEW = """\
+SYSTEM_REVIEW = f"""\
 You are an experienced editor and peer reviewer of academic and professional \
-writing. You are given a document to review, whole; {>>Author (date): \
-text<<} is a comment its authors or reviewers left in it.
+writing. You are given a document to review, whole; {{>>Author (date): \
+text<<}} is a comment its authors or reviewers left in it.
 
 Assess the document as a whole: its argument, structure, clarity, concision, \
 accuracy and consistency, not personal taste. Look for errors: claims not \
@@ -123,35 +149,22 @@ What the document sets out to do, and how, in a few sentences.
 ## Strengths
 A short list of what the document does well.
 
-## Problems to fix
-A numbered list, most serious first, each quoting the words concerned. \
-Write "None found." if there are none.
+{PROBLEMS_SECTION}
 
-Be specific and brief. Write in the language the document is written in, \
-unless the instructions of the person asking say otherwise."""
+{CLOSING}"""
 
 # The second assessment, of kind "writing", asked apart: whether
 # the text the changes added reads as written by an AI. Such a judgement is
 # circumstantial, and the model is told so.
-SYSTEM_WRITING = """\
-You are an experienced editor. You are given the changes between two \
-versions of a document as a word diff: [-text-] was removed, {+text+} was \
-added, and {>>Author (date): text<<} is a reviewer's comment; lines that \
-begin with @@ say where a change sits. When the whole new version is given \
-too, it shows how its authors write elsewhere.
+SYSTEM_WRITING = f"""\
+You are an experienced editor. You are given {DIFF_GIVEN} When the whole new \
+version is given too, it shows how its authors write elsewhere.
 
-Assess whether the text the changes added or rewrote (what {+ +} added, and \
+Assess whether the text the changes added or rewrote (what {{+ +}} added, and \
 new paragraphs) reads as written by a generative AI, a large language model, \
-rather than by the document's authors. Look for the signs of such text: \
-generic or inflated wording ("delve", "pivotal", "underscore", "intricate", \
-"landscape", "tapestry"), stock transitions and summaries, a uniform rhythm \
-of sentences, lists of three, balanced hedging without specifics, claims or \
-citations that look invented or do not fit what they support, and a \
-register or vocabulary unlike the rest of the document. Weigh them against \
-how the authors write in the unchanged text. These signs are \
-circumstantial: careful human writers show them too, and writers in a \
-second language are often taken for an AI wrongly. Say how sure you can be, \
-never claim certainty, and judge the text, not the people.
+rather than by the document's authors. {AI_SIGNS} a register or vocabulary \
+unlike the rest of the document. Weigh them against how the authors write in \
+the unchanged text. {AI_CAVEAT}
 
 Answer in Markdown with exactly these sections:
 
@@ -160,36 +173,22 @@ The first word, in bold, is one of **Likely**, **Possibly** or **Unlikely** \
 (that the new text was written by an AI); then two or three sentences on why, \
 and how sure you can be.
 
-## Signs of AI writing
-A short list, each quoting the words concerned and naming the sign. Write \
-"None found." if there are none.
+{AI_SECTIONS}
 
-## Signs against
-A short list of what reads as the authors' own. Write "None found." if there \
-are none.
-
-Be specific and brief. Write in the language the document is written in, \
-unless the instructions of the person asking say otherwise."""
+{CLOSING}"""
 
 # The same question of one document alone (kind "writing", reviewing one
 # file): with no unchanged text to weigh it against, a weaker judgement, and
 # the model is told so.
-SYSTEM_WRITING_REVIEW = """\
-You are an experienced editor. You are given a document, whole; {>>Author \
-(date): text<<} is a comment its authors or reviewers left in it.
+SYSTEM_WRITING_REVIEW = f"""\
+You are an experienced editor. You are given a document, whole; {{>>Author \
+(date): text<<}} is a comment its authors or reviewers left in it.
 
 Assess whether the document, or parts of it, reads as written by a \
-generative AI, a large language model, rather than by its authors. Look for \
-the signs of such text: generic or inflated wording ("delve", "pivotal", \
-"underscore", "intricate", "landscape", "tapestry"), stock transitions and \
-summaries, a uniform rhythm of sentences, lists of three, balanced hedging \
-without specifics, claims or citations that look invented or do not fit what \
-they support, and passages whose register or vocabulary differs from the \
-rest. There is no earlier version to compare with, so weigh the parts of the \
-document against each other. These signs are circumstantial: careful human \
-writers show them too, and writers in a second language are often taken for \
-an AI wrongly. Say how sure you can be, never claim certainty, and judge the \
-text, not the people.
+generative AI, a large language model, rather than by its authors. \
+{AI_SIGNS} passages whose register or vocabulary differs from the rest. \
+There is no earlier version to compare with, so weigh the parts of the \
+document against each other. {AI_CAVEAT}
 
 Answer in Markdown with exactly these sections:
 
@@ -198,16 +197,9 @@ The first word, in bold, is one of **Likely**, **Possibly** or **Unlikely** \
 (that the document, or parts of it, was written by an AI); then two or three \
 sentences on why, and how sure you can be.
 
-## Signs of AI writing
-A short list, each quoting the words concerned and naming the sign. Write \
-"None found." if there are none.
+{AI_SECTIONS}
 
-## Signs against
-A short list of what reads as the authors' own. Write "None found." if there \
-are none.
-
-Be specific and brief. Write in the language the document is written in, \
-unless the instructions of the person asking say otherwise."""
+{CLOSING}"""
 
 # Added to SYSTEM when the files are Word documents or OpenDocument texts:
 # their styles reach the model in prosediff's notation (diff.line_markdown),
@@ -282,6 +274,28 @@ ANNOTATE_REVIEW = _reworded(
         "the diff's markers ([- -], {+ +}, {>> <<})": "the comments' markers ({>> <<})",
     },
 )
+
+
+def no_edits(marks: str) -> str:
+    """ANNOTATE (or ANNOTATE_REVIEW) when the AI may not edit the text: the
+    problems marked, no passage rewritten, no key "replacement"."""
+    out, n = re.subn(r'- "replacement":.*?paragraph\.\n', "", marks, flags=re.S)
+    if n != 1:
+        raise ValueError("no replacement key in the prompt")
+    return _reworded(
+        out,
+        {
+            "A program uses these words to change the document: it searches the text "
+            'for "start" and "end" character for character, and puts "replacement" in '
+            "the passage's place as a tracked change.": "You may not edit the text: say "
+            "what is wrong and what to do, never a rewording of the passage. A program "
+            'uses these words to find the passage: it searches the text for "start" and '
+            '"end" character for character.',
+            'copy "start", "end" and every word "replacement" keeps character for '
+            "character": 'copy "start" and "end" character for character',
+            ', and change in "replacement" only what must change. Never': ". Never",
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -381,6 +395,9 @@ class AssessRequest:
     author: str = ""
     system: str = ""
     writing_system: str = ""
+    # whether the AI may edit the text: propose fixes as rewordings of the
+    # passages it marks (Annotation.replacement), or only mark them
+    edits: bool = True
 
 
 def default_system(kind: str, single: bool = False) -> str:
@@ -771,6 +788,8 @@ def assess(
     )
     annotate = request.annotate and kind in ("value", "review")
     marks = (ANNOTATE_REVIEW if review else ANNOTATE) if annotate else ""
+    if marks and not request.edits:
+        marks = no_edits(marks)
     try:
         backend, model = parse_backend(request.spec)
         instructions = instructions_from(request.instructions)
@@ -792,6 +811,8 @@ def assess(
         return made
     if annotate:
         text, made.annotations = split_annotations(text)
+        if not request.edits:  # a rewording given all the same is left out
+            made.annotations = [replace(n, replacement="") for n in made.annotations]
     made.markdown, made.model = text.strip(), answered
     made.seconds = time.monotonic() - started
     return made

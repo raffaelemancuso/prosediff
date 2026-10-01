@@ -61,6 +61,7 @@ from prosediff.document import (
     Text,
     check_changes,
     comment_runs,
+    lineage,
     spaced,
     strip,
 )
@@ -478,11 +479,7 @@ def _resolved(document, comments: dict) -> set[str]:
         paragraphs = c._comment_elm.findall(qn("w:p"))
         pid = paragraphs[-1].get(f"{W14}paraId") if paragraphs else None
         # up the thread: a reply to a resolved comment is resolved with it
-        seen = set()
-        while pid is not None and pid not in done and pid not in seen:
-            seen.add(pid)
-            pid = parent.get(pid)
-        if pid is not None and pid in done:
+        if any(p in done for p in lineage(pid, parent.get)):
             resolved.add(cid)
     return resolved
 

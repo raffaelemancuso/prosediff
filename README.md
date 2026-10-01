@@ -28,8 +28,9 @@ Markdown too.**
 - **It hands you back the document**: the Word or LibreOffice file with the
   AI's comments, and its fixes as tracked changes to accept or reject one by
   one.
-- **It reviews a single file too**, with no older version to compare, and
-  can check whether the added text reads as AI-written.
+- **It reviews a single file too**, with no older version to compare: the
+  report is then a diff of the file and the file with the AI's fixes
+  applied. It can also check whether the text reads as AI-written.
 - **It finds moved paragraphs even when they were edited**: a paragraph,
   sentence or passage moved elsewhere is shown at both ends as a move, the
   words changed on the way highlighted, where code diffs see an unrelated

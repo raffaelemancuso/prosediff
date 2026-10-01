@@ -14,7 +14,7 @@ own commands show (to_markdown()), for --to-markdown and git diff.
 
 import re
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 
 # The styles a run of text can have, as classes of the HTML report: s-strong, ...
@@ -45,6 +45,16 @@ class Span:
     target: str = ""  # a link's address
     author: str = ""  # a tracked change's
     date: str = ""
+
+
+def lineage(key, parent: Callable) -> Iterator:
+    """key, then its parent, its parent's, and on (parent(key): the next, or
+    None or "" at the top), each once: a loop ends it."""
+    seen = set()
+    while key and key not in seen:
+        seen.add(key)
+        yield key
+        key = parent(key)
 
 
 @dataclass

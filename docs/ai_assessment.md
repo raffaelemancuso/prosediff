@@ -116,3 +116,18 @@ comments) or `none` (it is not). `--assess-ai-writing` asks whether the
 file reads as AI-written; with no earlier version to weigh it against, the
 AI can only compare its parts with each other, so this verdict is weaker
 still than for changes.
+
+**The review's report is a diff of the file and its fixed version.** When
+the AI proposes fixes, prosediff applies each one whose passage it finds
+within a paragraph to a copy of the file's text, and the HTML report
+compares the file (**Original**, left) with that copy (**With AI fixes**,
+right), as two versions are compared: the passages fixed struck out on the
+left, the fixes added on the right. A problem the AI fixed is marked on
+the original's side, one with no fix on the fixed side. The file's own
+comments are not shown in this report (the AI is still sent them): only
+the problems the AI marked. The documents to
+download are still made of the file itself, the fixes as tracked changes.
+When no fix applies, or text edits are not allowed
+(`--no-assess-edits`, the window's **Allow text edits** off: the AI then
+only marks the problems and says what to do), the report shows the file
+alone.

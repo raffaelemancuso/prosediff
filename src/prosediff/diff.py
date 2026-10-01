@@ -12,6 +12,7 @@ place and added in another, within a line or between two.
 
 import base64
 import codecs
+import contextlib
 import difflib
 import re
 import subprocess
@@ -422,6 +423,9 @@ class Comparison:
     # its lines are all unchanged rows of the new side, base and target the
     # same file.
     single: bool = False
+    # One file reviewed, compared with itself as the AI's fixes leave it
+    # (review_diff): base the file, target the file fixed.
+    reviewed: bool = False
 
     @property
     def counts(self) -> Counts:
@@ -581,6 +585,20 @@ def image_uri(path: str, data: bytes) -> str | None:
     return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
 
+def stop_process_tree(pid: int) -> None:
+    """Stop a process and every program it started (a filter's, Claude
+    Code, Codex, git), at once."""
+    try:
+        process = psutil.Process(pid)
+        family = [*process.children(recursive=True), process]
+    except psutil.NoSuchProcess:
+        return
+    for p in family:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            p.kill()
+    psutil.wait_procs(family, timeout=5)
+
+
 def run(args: str | list[str], *, timeout: float, **options) -> subprocess.CompletedProcess:
     """subprocess.run(args, capture_output=True, ...) without a console window,
     but a process that outlives timeout is stopped with every process it
@@ -599,13 +617,7 @@ def run(args: str | list[str], *, timeout: float, **options) -> subprocess.Compl
         try:
             out, err = proc.communicate(data, timeout=timeout)
         except subprocess.TimeoutExpired:
-            try:
-                tree = psutil.Process(proc.pid)
-                for child in tree.children(recursive=True):
-                    child.kill()
-                tree.kill()
-            except psutil.NoSuchProcess:
-                pass
+            stop_process_tree(proc.pid)
             proc.communicate()
             raise
     return subprocess.CompletedProcess(args, proc.returncode, out, err)
@@ -2431,6 +2443,7 @@ def build_files(
     entries: list[tuple[FileDiff, bytes, bytes]],
     options: Options = DEFAULT_OPTIONS,
     single: bool = False,
+    edit_new: Callable[[list[str]], list[str]] | None = None,
 ) -> tuple[list[FileDiff], list[CommentEntry]]:
     """Fill in the rows of every file; returns the files, by path, and the
     comments for the panel.
@@ -2440,7 +2453,8 @@ def build_files(
     that carry their styles, languages and kinds; a document that cannot be
     read is listed as a binary file, with the reason. single: each file is
     reviewed alone, its old side empty: its lines are unchanged rows and
-    its comments neither added nor removed (review_file).
+    its comments neither added nor removed (review_file). edit_new, given,
+    makes the new side's lines, as read, into others (review_diff).
     """
     if options.language == DOCUMENT:
         _check_documents(entries)
@@ -2550,6 +2564,8 @@ def build_files(
         fd.markdown = fd.markdown or fd.path.lower().endswith(".md")
         old_lines, old_encoding = side_lines(fd, old_bytes, old_doc)
         new_lines, new_encoding = side_lines(fd, new_bytes, new_doc)
+        if edit_new is not None:
+            new_lines = edit_new(new_lines)
         if read_as := " and ".join(dict.fromkeys(e for e in (old_encoding, new_encoding) if e)):
             fd.note = "; ".join(filter(None, (fd.note, f"read as {read_as}")))
         old_labels = new_labels = None
@@ -2888,17 +2904,54 @@ def compare_paths(
     )
 
 
+def _one_file(path: str | Path) -> tuple[Path, bytes]:
+    """The one file a review reads, and its bytes; SourceError when there is
+    no such file."""
+    path = Path(path)
+    if not path.is_file():
+        raise SourceError(f"no such file: {path}")
+    return path, path.read_bytes()
+
+
+def review_diff(
+    path: str | Path,
+    edit: Callable[[list[str]], list[str]],
+    options: Options = DEFAULT_OPTIONS,
+) -> Comparison:
+    """One file reviewed, compared with itself as edit leaves its lines (the
+    AI's fixes, prosediff.aidocs.with_fixes), paragraph by paragraph as
+    review_file reads it: base the file, target the file fixed."""
+    options = replace(options.checked(), by_sentence=False)
+    path, data = _one_file(path)
+    fd = FileDiff("modified", path.name, path.name)
+    files, panel = build_files([(fd, data, data)], options, edit_new=edit)
+    side = _side_revision(path)
+    fixed = Revision(
+        hexsha=f"{side.hexsha}, with the AI's fixes",
+        short="with AI fixes",
+        subject="the AI's fixes applied",
+        author="",
+        date="",
+    )
+    return Comparison(
+        repo_name=path.name,
+        base=replace(side, short="original"),
+        target=fixed,
+        files=files,
+        comments=panel,
+        reviewed=True,
+    )
+
+
 def review_file(path: str | Path, options: Options = DEFAULT_OPTIONS) -> Comparison:
     """One file alone, read as a comparison reads it, for an AI to review
     (prosediff.assess): its lines, paragraph by paragraph, all shown, its
     comments its own. A Comparison whose one file has no old side (single),
     base and target both the file."""
     options = replace(options.checked(), by_sentence=False, context=None)
-    path = Path(path)
-    if not path.is_file():
-        raise SourceError(f"no such file: {path}")
+    path, data = _one_file(path)
     fd = FileDiff("reviewed", None, path.name)
-    files, panel = build_files([(fd, b"", path.read_bytes())], options, single=True)
+    files, panel = build_files([(fd, b"", data)], options, single=True)
     side = _side_revision(path)
     return Comparison(
         repo_name=path.name,

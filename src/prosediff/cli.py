@@ -396,6 +396,15 @@ def build_parser() -> argparse.ArgumentParser:
         "by (default: the AI and its model, e.g. 'Claude Code (claude-opus-5-5)')",
     )
     ai_group.add_argument(
+        "--assess-edits",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="let the AI edit the text: propose each fix as a rewording of the passage, "
+        "applied as a tracked change in the documents and, reviewing one file, shown as a "
+        "diff (default: on); --no-assess-edits: it only marks the problems and says what "
+        "to do",
+    )
+    ai_group.add_argument(
         "--assess-annotate",
         action=argparse.BooleanOptionalAction,
         default=True,

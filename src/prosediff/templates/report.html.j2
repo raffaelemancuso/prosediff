@@ -664,7 +664,7 @@ thead.print, .print-note { display: none; }
 {{ r.subject }}{% if r.author or r.date %} <span class="role">— {{ r.author }}{% if r.author and r.date %}, {% endif %}{{ r.date }}</span>{% endif %}
 {%- endmacro %}
 <div class="revisions">
-  {% for label, r in ((("Reviewed", c.target),) if c.single else (("Base (older)", c.base), ("Target (newer)", c.target))) %}
+  {% for label, r in ((("Reviewed", c.target),) if c.single else (("Original", c.base), ("With AI fixes", c.target)) if c.reviewed else (("Base (older)", c.base), ("Target (newer)", c.target))) %}
   <span class="role">{{ label }}</span>
   <code title="{{ r.hexsha }}">{{ r.short }}</code>
   <span>{{ side(r) }}</span>
@@ -936,6 +936,17 @@ thead.print, .print-note { display: none; }
   var counter = document.querySelector(".toolbar .counter");
   var current = -1;
   var fmt = function (n) { return n.toLocaleString("en-US"); };
+  // What the report remembers between visits, under "prosediff-" + key:
+  // nothing when the browser keeps nothing (a file:// page may not).
+  function stored(key) {
+    try { return localStorage.getItem("prosediff-" + key); } catch (e) { return null; }
+  }
+  function store(key, value) {  // null forgets it
+    try {
+      if (value === null) localStorage.removeItem("prosediff-" + key);
+      else localStorage.setItem("prosediff-" + key, String(value));
+    } catch (e) {}
+  }
   // What is shown: the whole report, or, when it holds both splits, the one
   // shown.
   function shownRoot() {
@@ -966,7 +977,7 @@ thead.print, .print-note { display: none; }
       ? "Sentences: shown compared sentence by sentence; switch to paragraph by paragraph (s)"
       : "Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)";
     if (remember) {
-      try { localStorage.setItem("prosediff-split", sentences ? "sentence" : "paragraph"); } catch (e) {}
+      store("split", sentences ? "sentence" : "paragraph");
     }
     refreshChanges();
     document.dispatchEvent(new Event("prosediff-layout"));
@@ -974,9 +985,7 @@ thead.print, .print-note { display: none; }
   }
   refreshChanges();
   if (splitSwitch) {
-    var savedSplit = null;
-    try { savedSplit = localStorage.getItem("prosediff-split"); } catch (e) {}
-    setSplit(savedSplit === "sentence", false);
+    setSplit(stored("split") === "sentence", false);
   }
 
   // Jump to change k (wrapping around), opening its file if collapsed.
@@ -1006,7 +1015,7 @@ thead.print, .print-note { display: none; }
   // The same, chosen: the browser remembers it.
   function setView(name, on) {
     applyView(name, on);
-    try { localStorage.setItem("prosediff-" + name, on ? "1" : "0"); } catch (e) {}
+    store(name, on ? "1" : "0");
   }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
   // The View menu: its button opens and closes it; Escape, or a click
@@ -1035,12 +1044,8 @@ thead.print, .print-note { display: none; }
   var VIEW_DEFAULT = { unified: false, formatted: true, formats: true,
                        movelinks: false, passages: false, highlights: true, margin: true };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
-    var on = VIEW_DEFAULT[name];
-    try {
-      var saved = localStorage.getItem("prosediff-" + name);
-      if (saved !== null) on = saved === "1";
-    } catch (e) {}
-    applyView(name, on);
+    var saved = stored(name);
+    applyView(name, saved === null ? VIEW_DEFAULT[name] : saved === "1");
   });
 
   // Reveal the run of unchanged lines a fold row stands for.
@@ -1132,7 +1137,7 @@ thead.print, .print-note { display: none; }
       value.setAttribute("aria-valuenow", String(gapStep * GAP_STEP));
       value.setAttribute("aria-valuetext", lines + (lines === "1.00" ? " line" : " lines"));
     }
-    try { localStorage.setItem("prosediff-gap", String(gapStep)); } catch (e) {}
+    store("gap", gapStep);
   }
   // The value is an ARIA spinbutton: the arrow keys step it, Page Up and
   // Page Down by a line, Home and End to either end.
@@ -1147,10 +1152,8 @@ thead.print, .print-note { display: none; }
     e.preventDefault();
     e.stopPropagation();
   });
-  try {
-    var saved = localStorage.getItem("prosediff-gap");
-    if (saved !== null && !isNaN(Number(saved))) setGap(Number(saved));
-  } catch (e) {}
+  var savedGap = stored("gap");
+  if (savedGap !== null && !isNaN(Number(savedGap))) setGap(Number(savedGap));
 
   document.addEventListener("keydown", function (e) {
     if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
@@ -1520,7 +1523,7 @@ thead.print, .print-note { display: none; }
       c.classList.add("problem");
       c.dataset.note = m.dataset.note;
       button.appendChild(el("span", "chip", "⚠ Problem " + note.num));
-      button.appendChild(el("span", "when", note.side === "old" ? "AI, old version" : "AI"));
+      button.appendChild(el("span", "when", note.side === "old" ? {{ ('"AI, original"' if c.reviewed else '"AI, old version"') | safe }} : "AI"));
       body.appendChild(el("span", "line", note.problem));
       if (note.solution) {
         var s = el("span", "line solution");
@@ -2287,12 +2290,10 @@ thead.print, .print-note { display: none; }
   // the views: the old version's share of the two versions' width, and the
   // margin's width, in every file. None set: the table's own.
   var widths = { share: null, notes: null };
-  try {
-    var savedShare = parseFloat(localStorage.getItem("prosediff-old-share"));
-    if (savedShare >= 0.15 && savedShare <= 0.85) widths.share = savedShare;
-    var savedNotes = parseFloat(localStorage.getItem("prosediff-notes-width"));
-    if (savedNotes >= 180) widths.notes = savedNotes;
-  } catch (e) {}
+  var savedShare = parseFloat(stored("old-share"));
+  if (savedShare >= 0.15 && savedShare <= 0.85) widths.share = savedShare;
+  var savedNotes = parseFloat(stored("notes-width"));
+  if (savedNotes >= 180) widths.notes = savedNotes;
   // The first cell of a kind that shows: those of rows folded away have no
   // size, and a table can start with a fold.
   function shownCell(table, selector) {
@@ -2380,10 +2381,8 @@ thead.print, .print-note { display: none; }
     dragging.handle.classList.remove("dragging");
     document.body.classList.remove("col-dragging");
     dragging = null;
-    try {
-      if (widths.share !== null) localStorage.setItem("prosediff-old-share", String(widths.share));
-      if (widths.notes !== null) localStorage.setItem("prosediff-notes-width", String(widths.notes));
-    } catch (e) {}
+    if (widths.share !== null) store("old-share", widths.share);
+    if (widths.notes !== null) store("notes-width", widths.notes);
     drawAllLinks();
   }
   document.addEventListener("pointerup", endDrag);
@@ -2394,9 +2393,7 @@ thead.print, .print-note { display: none; }
     if (!h) return;
     var key = h.dataset.resize === "split" ? "share" : "notes";
     widths[key] = null;
-    try {
-      localStorage.removeItem(key === "share" ? "prosediff-old-share" : "prosediff-notes-width");
-    } catch (err) {}
+    store(key === "share" ? "old-share" : "notes-width", null);
     document.querySelectorAll("table").forEach(applyWidths);
     drawAllLinks();
   });

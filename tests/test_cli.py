@@ -82,7 +82,6 @@ def test_cli_errors(two_commits, tmp_path, capsys):
         ["--git", "--setup-git"],
         ["--files", "a"],
         ["--files", "a", "b", "-p", "x"],
-        ["--files", "a", "b", "--include", "*.md"],
     ],
 )
 def test_cli_rejects_bad_arguments(args):

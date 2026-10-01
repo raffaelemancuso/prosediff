@@ -59,6 +59,7 @@ from prosediff.document import (
     check_changes,
     comment_runs,
     comments_in,
+    lineage,
     markdown,
     spaced,
     strip,
@@ -129,15 +130,11 @@ def _resolved_names(document: Document) -> set[str]:
             resolved.add(name)
         if p := a.get_attribute_string("loext:parent-name"):
             parent[name] = p
-    out = set()
-    for name in parent.keys() | resolved:
-        seen, n = set(), name
-        while n is not None and n not in resolved and n not in seen:
-            seen.add(n)
-            n = parent.get(n)
-        if n in resolved:
-            out.add(name)
-    return out
+    return {
+        name
+        for name in parent.keys() | resolved
+        if any(n in resolved for n in lineage(name, parent.get))
+    }
 
 
 class OdtError(RuntimeError):
@@ -223,15 +220,16 @@ class Reader(DocumentReader):
 
     def paragraph_level(self, name: str | None) -> int:
         """The heading level a paragraph style stands for (Title: 1), else 0."""
-        seen = set()
-        while name and name not in seen:
-            seen.add(name)
-            if name == "Title":
-                return 1
-            if m := HEADING_STYLE.fullmatch(name):
-                return int(m[1])
+
+        def parent(name: str) -> str | None:
             style = self.document.get_style("paragraph", name)
-            name = style.parent_style if style is not None else None
+            return style.parent_style if style is not None else None
+
+        for style_name in lineage(name, parent):
+            if style_name == "Title":
+                return 1
+            if m := HEADING_STYLE.fullmatch(style_name):
+                return int(m[1])
         return 0
 
     # Tracked changes ---------------------------------------------------------------

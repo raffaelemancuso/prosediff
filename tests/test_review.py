@@ -191,3 +191,52 @@ def test_cli_review(tmp_path, monkeypatch, capsys):
         assert message in capsys.readouterr().err
     assert main(["--review", str(tmp_path / "gone.docx"), "--assess", "claude"]) == 1
     assert "no such file" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt", "md"])
+def test_the_report_shows_the_ais_fixes_as_a_diff(tmp_path, monkeypatch, fmt):
+    """With fixes, a review's report compares the file with the file as the
+    AI's fixes leave it: the passage fixed removed on the original's side,
+    its fix added on the other, the problem marked on the original's; the
+    documents to download still made of the file."""
+    if fmt == "md":
+        path = tmp_path / "paper.md"
+        path.write_text("We find a large and significant effect.\n", encoding="utf-8")
+    else:
+        path = document(tmp_path, fmt)
+    monkeypatch.setattr(assess_module, "run_backend", fake(REVIEW))
+    assert main(["--review", str(path), "--assess", "claude"]) == 0
+    html = (tmp_path / "paper_review.html").read_text(encoding="utf-8")
+    assert '<span class="role">Original</span>' in html
+    assert '<span class="role">With AI fixes</span>' in html
+    assert re.search(r"<del[^>]*>large</del>", html) and re.search(r"<ins[^>]*>small</ins>", html)
+    assert '"side": "old"' in html
+    assert html.count('class="ai-document"') == (0 if fmt == "md" else 1)
+
+
+def test_the_fixes_diff_shows_only_the_ais_comments(tmp_path, monkeypatch):
+    """The file's own comments are not in the report of its fixes (the AI
+    is still sent them): only the problems the AI marked."""
+    path = document(tmp_path, "docx", comment=True)
+    runner = fake(REVIEW)
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    assert main(["--review", str(path), "--assess", "claude"]) == 0
+    html = (tmp_path / "paper_review.html").read_text(encoding="utf-8")
+    assert '<span class="role">With AI fixes</span>' in html
+    assert "{>>Anna Rossi" in runner.asked[0][2]
+    assert "Anna Rossi" not in html.split('id="ai-notes-data"')[0].split("<body")[1]
+
+
+def test_no_text_edits(tmp_path, monkeypatch):
+    """With --no-assess-edits, the AI is asked for no rewording, and one
+    given all the same is dropped: the problem marked, the text left as it
+    is, the report the file alone."""
+    path = document(tmp_path, "docx")
+    runner = fake(REVIEW)
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    assert main(["--review", str(path), "--assess", "claude", "--no-assess-edits"]) == 0
+    system = runner.asked[0][1]
+    assert '"replacement"' not in system and "You may not edit the text" in system
+    html = (tmp_path / "paper_review.html").read_text(encoding="utf-8")
+    assert '<span class="role">Reviewed</span>' in html
+    assert '"replacement": ""' in html and "a small and significant" not in html
