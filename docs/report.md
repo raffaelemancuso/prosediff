@@ -77,7 +77,14 @@ remembers the views, the spacing and the column widths.
 
 - **Review mode** lists the assessment, changes, comments and problems on
   the left, and shows only the chosen item's paragraph, with **Previous**
-  and **Next**.
+  and **Next**. **Problems ↓** at the top of the list jumps to the
+  problems; dragging the list's right edge widens or narrows it
+  (remembered; a double-click puts it back).
+- **Which problems go into the documents to download:** each problem's
+  card, and its line in Review mode's list, has a box, **In the
+  download**; unticked, the problem's comment is left out of the Word or
+  OpenDocument file and its fix rejected. The download buttons' tooltip
+  says how many of the problems the files hold.
 - **Highlights off** removes the colour of changed words and lines; the
   gutters stay tinted and signed.
 - **Formatted** hides Markdown syntax and shows emphasis, headings, links

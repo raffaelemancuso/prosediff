@@ -99,6 +99,10 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
   color: var(--muted); background: var(--panel); white-space: nowrap; }
 .card .who { font-weight: 600; }
 .card .when { color: var(--muted); font-size: 12px; }
+.card .keep { margin-left: auto; color: var(--muted); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px; }
+#review-list .jump { margin: 10px 16px 0; padding: 0; width: auto; color: var(--current);
+  font-size: 12px; }
 .card .body { margin-top: 3px; overflow-wrap: anywhere; }
 .card .body.clamped { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
   overflow: hidden; }
@@ -475,7 +479,10 @@ footer a { color: inherit; }
    assessment, the changes, the comments, the problems), and, beside it,
    the one row it is in, with its cards, under a line saying which it is
    and the buttons to the previous and the next. */
-#review-list, #review-head { display: none; }
+#review-list, #review-head, #review-resizer { display: none; }
+body.review #review-resizer { display: block; position: fixed; top: var(--bar-h); bottom: 0;
+  left: calc(var(--review-w) - 3px); width: 6px; z-index: 3; cursor: col-resize; }
+body.review #review-resizer:hover, body.review #review-resizer.dragging { background: var(--border); }
 body.review #review-list { display: block; position: fixed; left: 0; top: var(--bar-h);
   bottom: 0; width: var(--review-w); z-index: 2; overflow: auto; padding: 8px 0 24px;
   background: var(--bg); border-right: 1px solid var(--border); font-size: 13px; }
@@ -649,6 +656,7 @@ thead.print, .print-note { display: none; }
   </span>
 </div>
 <nav id="review-list" aria-label="Review"></nav>
+<div id="review-resizer" role="separator" aria-orientation="vertical" aria-label="Width of the review list" title="Drag to widen or narrow the list; double-click for its usual width"></div>
 <main>
 <header>
 <h1>{{ c.repo_name }}{% if c.location %}<span class="full-path">{{ c.location }}</span>{% endif %}</h1>
@@ -1512,6 +1520,20 @@ thead.print, .print-note { display: none; }
     });
   }
   function sideOf(m) { return m.closest("td.left") ? "left" : "right"; }
+  // A problem's box: whether it is in the documents to download, ticked
+  // alike wherever it shows (its card, the review list; keep, below).
+  function keepBox(k, note) {
+    var label = el("label", "keep"), box = el("input");
+    box.type = "checkbox";
+    box.className = "keep-box";
+    box.dataset.note = k;
+    box.checked = !(typeof leftOut === "object" && leftOut && leftOut[k]);
+    box.title = "In the documents to download (untick to leave it out)";
+    box.setAttribute("aria-label", "Problem " + note.num + " in the downloaded documents");
+    label.appendChild(box);
+    label.appendChild(document.createTextNode("In the download"));
+    return label;
+  }
   function card(m) {
     var c = el("article", "card"), head = el("div", "head"), button = el("button", "go");
     var body = el("div", "body");
@@ -1522,6 +1544,7 @@ thead.print, .print-note { display: none; }
       c.dataset.note = m.dataset.note;
       button.appendChild(el("span", "chip", "⚠ Problem " + note.num));
       button.appendChild(el("span", "when", note.side === "old" ? {{ ('"AI, original"' if c.reviewed else '"AI, old version"') | safe }} : "AI"));
+      if (document.querySelector("script.ai-document")) head.appendChild(keepBox(m.dataset.note, note));
       body.appendChild(el("span", "line", note.problem));
       if (note.solution) {
         var s = el("span", "line solution");
@@ -1768,26 +1791,40 @@ thead.print, .print-note { display: none; }
   var TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
   var XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
   function withCheck(button, k, note) {
-    var box = el("input");
-    box.type = "checkbox";
-    box.checked = !leftOut[k];
-    box.title = "In the downloaded documents";
-    box.setAttribute("aria-label", "Problem " + note.num + " in the downloaded documents");
-    box.addEventListener("change", function () {
-      if (box.checked) delete leftOut[k]; else leftOut[k] = true;
-      countIncluded();
-    });
+    var box = keepBox(String(k), note).querySelector("input");
     var wrap = el("div", "with-check");
     button.parentNode.insertBefore(wrap, button);
     wrap.appendChild(box);
     wrap.appendChild(button);
   }
+  // A problem ticked or unticked, in any of its boxes: in or out of the
+  // documents, its other boxes alike.
+  function keep(k, on) {
+    if (on) delete leftOut[k]; else leftOut[k] = true;
+    document.querySelectorAll('.keep-box[data-note="' + k + '"]').forEach(function (b) {
+      b.checked = on;
+    });
+    countIncluded();
+  }
+  document.addEventListener("change", function (e) {
+    if (e.target.classList && e.target.classList.contains("keep-box")) {
+      keep(e.target.dataset.note, e.target.checked);
+    }
+  });
   function countIncluded() {
     var out = document.querySelector(".ai-documents .ai-included");
     if (!out) return;
+    if (!aiNotes.length) return;
     var n = aiNotes.filter(function (note, k) { return !leftOut[k]; }).length;
     out.textContent = "They hold " + fmt(n) + " of the " + fmt(aiNotes.length) + " problems" +
-      " (untick those to leave out in Review).";
+      " (untick those to leave out: on their cards, or in Review).";
+    // on the top bar's buttons, whose tooltip is their help once the page is up
+    document.querySelectorAll(".doc-button.ai-download").forEach(function (b) {
+      if (!b.dataset.base) b.dataset.base = b.dataset.help || b.title;
+      var text = b.dataset.base + " (" + fmt(n) + " of " + fmt(aiNotes.length) + " problems)";
+      if ("help" in b.dataset) b.dataset.help = text;
+      else b.title = text;
+    });
   }
   countIncluded();
   function xmlOf(bytes) {
@@ -1922,6 +1959,32 @@ thead.print, .print-note { display: none; }
   // j). A problem whose words were not found is listed, not chosen.
   var reviewing = false, reviewItems = [], reviewAt = -1;
   var reviewList = document.getElementById("review-list");
+  // The list's width, dragged by its right edge and remembered like the
+  // columns'; double-clicked, back to the usual.
+  var reviewResizer = document.getElementById("review-resizer");
+  function setReviewWidth(px) {
+    if (px === null) document.documentElement.style.removeProperty("--review-w");
+    else document.documentElement.style.setProperty("--review-w", px + "px");
+  }
+  var savedReview = parseFloat(stored("review-width"));
+  if (savedReview >= 160) setReviewWidth(savedReview);
+  reviewResizer.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    reviewResizer.setPointerCapture(e.pointerId);
+    reviewResizer.classList.add("dragging");
+  });
+  reviewResizer.addEventListener("pointermove", function (e) {
+    if (!reviewResizer.classList.contains("dragging")) return;
+    setReviewWidth(Math.round(Math.max(160, Math.min(e.clientX, window.innerWidth * 0.7))));
+  });
+  reviewResizer.addEventListener("pointerup", function () {
+    reviewResizer.classList.remove("dragging");
+    store("review-width", parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--review-w")));
+  });
+  reviewResizer.addEventListener("dblclick", function () {
+    setReviewWidth(null);
+    store("review-width", null);
+  });
   var reviewHead = document.getElementById("review-head");
   var reviewButton = document.querySelector("[data-review]");
   var KIND_NAMES = { change: "Change", comment: "Comment", problem: "Problem" };
@@ -2014,7 +2077,15 @@ thead.print, .print-note { display: none; }
       });
     }
     if (aiNotes.length) {
-      reviewList.appendChild(el("h3", null, "Problems · " + fmt(aiNotes.length)));
+      var heading = el("h3", null, "Problems · " + fmt(aiNotes.length));
+      reviewList.appendChild(heading);
+      if (reviewList.firstChild !== heading) {
+        var jump = el("button", "jump", "Problems ↓");
+        jump.type = "button";
+        jump.title = "Go to the problems, below the changes";
+        jump.addEventListener("click", function () { heading.scrollIntoView({ block: "start" }); });
+        reviewList.insertBefore(jump, reviewList.firstChild);
+      }
       aiOrder.forEach(function (k) {
         var note = aiNotes[k], c = root.querySelector('.card[data-note="' + k + '"]');
         var b = add({ kind: "problem", row: c && c.closest("tr"), card: c },

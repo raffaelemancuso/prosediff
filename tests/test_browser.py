@@ -1012,3 +1012,38 @@ def test_a_fix_left_out_gives_the_co_authors_words_back(browser, tmp_path, fmt):
     assert lines(out, "reject-all") == lines(new, "reject-all")
     assert "We find a very significant effect." in lines(out, "reject-all")
     assert authors_of(out, fmt) == {"Anna Rossi"}
+
+
+def test_a_problem_left_out_from_its_card_and_the_review_list_resized(browser, tmp_path):
+    """A problem's card has the box that puts it in the documents to
+    download, ticked alike in the review list, the count on the download
+    buttons; the review list starts with a jump to its problems, and its
+    edge, dragged, widens it, remembered, back to its width on a
+    double-click."""
+    old, new = pair(tmp_path, "docx")
+    c = compare_paths(str(old), str(new), Options())
+    page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
+    button = page.locator(".toolbar .ai-download").first
+    assert "(2 of 2 problems)" in button.get_attribute("data-help")
+    card = page.locator(".card.problem", has_text="Nothing supports")
+    card.locator(".keep-box").uncheck()
+    assert "(1 of 2 problems)" in button.get_attribute("data-help")
+    page.evaluate("document.activeElement.blur()")  # keys typed in a box are its own
+    page.keyboard.press("r")
+    row = page.locator("#review-list .with-check", has_text="Nothing supports")
+    assert not row.locator("input").is_checked()
+    row.locator("input").check()
+    assert card.locator(".keep-box").is_checked()
+    assert page.locator("#review-list .jump").count() == 1
+    handle = page.locator("#review-resizer")
+    box = handle.bounding_box()
+    page.mouse.move(box["x"] + 3, box["y"] + 100)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 203, box["y"] + 100)
+    page.mouse.up()
+    width = page.locator("#review-list").bounding_box()["width"]
+    assert width > box["x"] + 150
+    assert page.evaluate("localStorage.getItem('prosediff-review-width')") is not None
+    handle.dblclick()
+    assert page.evaluate("localStorage.getItem('prosediff-review-width')") is None
+    page.context.close()
