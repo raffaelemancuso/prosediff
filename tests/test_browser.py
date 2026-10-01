@@ -934,7 +934,7 @@ def test_the_margin_hidden_and_shown(page):
 
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
 def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
-    """The drawer saves each document the AI's problems were put in; a
+    """The drawer, and the top bar, save each document the AI's problems were put in; a
     problem left out in review mode (its box unticked) is not in either:
     no comment of its, its fix rejected."""
     from test_aidocs import ADVICE, FIXED, assessment, comments_of
@@ -948,7 +948,7 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     def save(label, name):
         page.click(".verdict-button")
         with page.expect_download() as d:
-            page.click(f".ai-download:has-text('{label}')")
+            page.click(f".ai-documents .ai-download:has-text('{label}')")
         out = tmp_path / name
         d.value.save_as(out)
         assert (
@@ -973,6 +973,11 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     assert "Nothing supports a large effect." not in texts
     assert "Which checks?\nProposed: Name them." in texts
     tracked = save("comments", f"tracked.{fmt}")
+    # the same from the top bar, the drawer closed
+    with page.expect_download() as d:
+        page.click(f".toolbar .ai-download:has-text('With AI fixes .{fmt}')")
+    assert d.value.suggested_filename == f"new_with_AI_fixes.{fmt}"
+    assert page.locator("#assessment").is_hidden()
     assert lines(tracked, "reject-all") == lines(old, "accept-all")
     assert [t for t in comments_of(tracked, fmt) if "Nothing supports" in t] == []
     page.context.close()

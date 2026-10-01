@@ -425,11 +425,15 @@ footer a { color: inherit; }
 .toolbar .spacer { flex: 1; }
 .toolbar .group { display: inline-flex; align-items: center; gap: 2px; }
 .toolbar .group[hidden], .toolbar .comment-nav[hidden] { display: none; }
-.toolbar .verdict-button { display: inline-flex; align-items: center; gap: 8px; padding: 3px 8px;
-  border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); }
-.toolbar .verdict-button:hover, .toolbar .verdict-button[aria-expanded="true"] {
-  border-color: var(--link); }
-.toolbar .verdict-button .role { font-size: 12px; }
+/* The documents with the AI's comments and fixes to download, beside it:
+   the drawer offers them too, but at the end of the assessment. */
+.toolbar .verdict-button, .toolbar .doc-button { display: inline-flex; align-items: center;
+  gap: 8px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--fg); }
+.toolbar .verdict-button:hover, .toolbar .verdict-button[aria-expanded="true"],
+.toolbar .doc-button:hover { border-color: var(--link); }
+.toolbar .verdict-button .role, .toolbar .doc-button .role { font-size: 12px; }
+.toolbar .doc-button { gap: 4px; }
 .toolbar .review-button { padding: 3px 10px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg); }
 .toolbar .review-button[aria-pressed="true"] { background: var(--skip); color: var(--fg);
@@ -630,6 +634,7 @@ thead.print, .print-note { display: none; }
   {% if c.single %}<span class="bar-title" title="{{ c.target.hexsha }}">{{ c.target.short }}</span>
   {% else %}<span class="bar-title" title="{{ c.base.short }} → {{ c.target.short }}">{{ c.base.short }} → {{ c.target.short }}</span>{% endif %}
   {% if assessment %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="AI assessment: what the AI made of the {{ "document" if c.single else "changes" }} as a whole">{% if assessment.error %}<span class="verdict verdict-worsens">failed</span>{% elif assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}<span class="role">AI assessment</span></button>{% endif %}
+  {% for d in ai_documents %}<button type="button" class="doc-button ai-download" data-document="{{ loop.index0 }}" title="{{ d.label }}, to download: {{ d.name }}"><span aria-hidden="true">⤓</span><span class="role">{{ d.short }} .{{ d.fmt }}</span></button>{% endfor %}
   {% if writing %}<button type="button" class="verdict-button" data-drawer="writing" aria-expanded="false" aria-controls="writing" title="AI writing: whether the new text reads as written by an AI, an indication, not a proof">{% if writing.error %}<span class="verdict verdict-likely">failed</span>{% elif writing.verdict %}<span class="verdict verdict-{{ writing.verdict }}">{{ writing.verdict | capitalize }}</span>{% endif %}<span class="role">AI writing</span></button>{% endif %}
   <span class="spacer"></span>
   <span class="group" role="group" aria-label="Changes"{% if c.single %} hidden{% endif %}>

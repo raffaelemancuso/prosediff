@@ -107,12 +107,14 @@ def test_unusable_arguments_are_ignored(tmp_path, args, message):
 
 
 def test_one_file_waits_for_its_partner(tmp_path):
-    from prosediff.gui import single_file
+    from prosediff.gui import single_file, with_second_file
 
     sent = tmp_path / "draft.docx"
     sent.write_bytes(b"x")
     s, note = settings_from_args([str(sent)], Settings(mode="git"))
     assert note == "" and s.mode == "files" and (s.old, s.new) == (str(sent), "")
+    assert s.single == str(sent)  # the One file tab too, to review it alone
+    assert with_second_file(s, sent, sent).single == str(sent)
     assert single_file([str(sent)]) == sent
     assert single_file([str(tmp_path / "notes.txt")]) is None
     assert single_file([str(sent), str(sent)]) is None

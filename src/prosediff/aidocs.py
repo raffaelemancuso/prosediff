@@ -537,16 +537,18 @@ class OdtNotes:
 @dataclass
 class Download:
     """A document offered for download: its file name, what it is, its
-    bytes, its format ("docx", "odt"), and the ids of each problem's
-    comments and changes in it (by the problem's index among the
-    assessment's annotations), for the report's script to take out those of
-    the problems left out."""
+    bytes, its format ("docx", "odt"), the ids of each problem's comments
+    and changes in it (by the problem's index among the assessment's
+    annotations), for the report's script to take out those of the problems
+    left out, and what it is in a word or two, for its button in the top
+    bar."""
 
     name: str
     label: str
     data: bytes
     fmt: str
     notes: dict[int, dict[str, list]] = field(default_factory=dict)
+    short: str = ""
 
     @property
     def base64(self) -> str:
@@ -672,6 +674,7 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
                     data,
                     fmt,
                     ids,
+                    "Tracked changes",
                 )
             )
         except Exception as e:  # a document the redline cannot take
@@ -690,6 +693,7 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
                 data,
                 fmt,
                 ids,
+                "With AI fixes",
             )
         )
     except Exception as e:

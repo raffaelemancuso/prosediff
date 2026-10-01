@@ -288,8 +288,9 @@ through them.
 ### The AI's problems in Word and LibreOffice documents
 
 When a Word document is compared with another (or an OpenDocument text with
-another) and the AI marked problems, the assessment's drawer offers two
-documents to download, made from the new version:
+another) and the AI marked problems, the assessment's drawer, and a button
+for each in the top bar, offer two documents to download, made from the new
+version:
 
 - **The changes, tracked, with the AI's comments**: the document of
   [tracked changes](#tracked-changes), each problem a comment of the AI's
@@ -385,7 +386,7 @@ fix, and, with `--assess-annotate` (on by default), marks each problem in
 the text, a badge before its passage and a card in the margin. The report
 shows the file in one column, paragraph by paragraph. A Word document (or
 an OpenDocument text) comes back as **the document with the AI's fixes,
-tracked**, to download from the assessment's drawer: each problem a
+tracked**, to download from the top bar or the assessment's drawer: each problem a
 comment of the AI's on its passage, each fix it wrote out a tracked change
 of its own, as described above; review mode's boxes choose which problems
 it holds. There are no changes to track, so the other document is not
@@ -425,7 +426,8 @@ elsewhere), the title bar too on Windows.
 `prosediff-gui REPOSITORY` opens it with a git repository filled in (or the
 repository a folder belongs to); `prosediff-gui FILE.docx` (or `.odt`, `.md`) first asks, in a
 file dialog, for the file to compare it with, the older of the two going on
-the left; `prosediff-gui OLD NEW` opens it with two Markdown, Word or
+the left, and fills in the **One file** tab with it too, to review it alone
+instead; `prosediff-gui OLD NEW` opens it with two Markdown, Word or
 OpenDocument files, or two folders. Any other arguments (a folder outside git, a `.txt` file,
 three files) show an error box listing the arguments received, and the
 program exits once it is dismissed.

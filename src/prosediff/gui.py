@@ -303,7 +303,8 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
     One argument that is a git repository (or a folder inside one) fills in
     the repository, the sides starting from their defaults; one Markdown,
     Word or OpenDocument file fills in the files tab, its partner to be
-    chosen when the window opens; two such files fill in the files tab, two
+    chosen when the window opens, and the One file tab, to review it alone
+    instead; two such files fill in the files tab, two
     folders the folders tab. Anything else is ignored, and the second value says why.
     """
     s = replace(base)
@@ -313,6 +314,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
             # the other file is asked for when the window opens (main)
             s.mode = "files"
             s.old, s.new = str(path.resolve()), ""
+            s.single = str(path.resolve())
             s.output = ""
             return s, ""
         if path.is_dir():
