@@ -355,6 +355,31 @@ def settings_file() -> Path:
     return Path(base) / "prosediff" / "gui.json"
 
 
+# The settings that are one of a list of choices: the choices, and the
+# default a value outside them gives way to.
+CHOICES = {
+    "mode": (MODES, "git"),
+    "split": (SPLITS, "both"),
+    "comments": (COMMENT_MODES, "markers"),
+    "docx_changes": (DOCX_CHANGES, "accept-all"),
+    "output_format": (tuple(FORMATS), "html"),
+    "assess_context": (CONTEXTS, "document"),
+}
+
+
+def sanitized(s: Settings) -> Settings:
+    """The settings, each value that is no choice the window offers
+    replaced by its default (CHOICES)."""
+    return replace(
+        s,
+        **{
+            name: default
+            for name, (choices, default) in CHOICES.items()
+            if getattr(s, name) not in choices
+        },
+    )
+
+
 def load_settings(path: Path | None = None) -> Settings:
     """The choices saved (Save options), or the defaults; a value that is
     no choice the window offers gives way to its default."""
@@ -364,14 +389,7 @@ def load_settings(path: Path | None = None) -> Settings:
         s = Settings(**{k: v for k, v in data.items() if k in known})
     except (OSError, ValueError, TypeError):
         return Settings()
-    if s.mode not in MODES:
-        s.mode = "git"
-    if s.split not in SPLITS:
-        s.split = "both"
-    if s.comments not in COMMENT_MODES:
-        s.comments = "markers"
-    if s.docx_changes not in DOCX_CHANGES:
-        s.docx_changes = "accept-all"
+    s = sanitized(s)
     known_passage = {f.name for f in fields(MovedPassageSettings)}
     if not isinstance(s.moved_passages, dict):
         s.moved_passages = {}
@@ -473,10 +491,11 @@ def generate(
         return run(options)
 
     comparison, sentences = compare_split(staged, options, split)
-    out = Path(s.output) if s.output else None
-    if out is None and s.mode != "git":
-        out = default_page(Path(old), Path(new))
-    out = Path(with_format(str(out), fmt)) if out is not None else default_output(fmt)
+    if s.output:
+        out = Path(with_format(s.output, fmt))
+    else:
+        out = s.mode != "git" and default_page(Path(old), Path(new), FORMATS[fmt])
+        out = out or default_output(fmt)
     assessment = writing = None
     write = partial(
         write_output,
@@ -673,7 +692,7 @@ class App:
     def __init__(self, root: tk.Tk | tk.Toplevel, settings: Settings | None = None) -> None:
         self.root = root
         use_theme(root)
-        self.s = settings or load_settings()
+        self.s = sanitized(settings or load_settings())
         self.choices: dict[str, str] = {}  # label -> ref
         # the comparison running (a process of its own), what it sends back,
         # its settings, and the stage it is at
@@ -688,7 +707,7 @@ class App:
 
         # What is compared: a git repository, two files or two folders, one
         # at a time, chosen with a segmented button
-        self.mode = tk.StringVar(value=self.s.mode if self.s.mode in MODES else "git")
+        self.mode = tk.StringVar(value=self.s.mode)
         switch = ttk.Frame(page)
         switch.pack(fill="x", pady=(0, 8))
         for value, text, icon in (
@@ -697,17 +716,17 @@ class App:
             ("folders", "Folders", "folder2"),
             ("review", "One file", "file-earmark-text"),
         ):
-            ttk.Radiobutton(
+            segment(
                 switch,
-                text=text,
-                image=ttk.Icon(icon, size=16),
-                compound="left",
-                value=value,
-                variable=self.mode,
+                self.mode,
+                value,
+                text,
+                padding=(14, 6),
                 command=self.show_mode,
                 bootstyle="primary-outline-toolbutton",
-                padding=(14, 6),
-            ).pack(side="left")
+                image=ttk.Icon(icon, size=16),
+                compound="left",
+            )
         source = ttk.Labelframe(page, text="Versions", padding=(10, 8))
         source.pack(fill="x")
         self.sides = {mode: ttk.Frame(source) for mode in MODES}
@@ -833,14 +852,10 @@ class App:
             compared,
             0,
             "Tracked changes",
-            item_hints(
-                ttk.Combobox(
-                    compared,
-                    textvariable=self.docx,
-                    values=[DOCX_CHANGE_LABELS[v] for v in DOCX_CHANGES],
-                    state="readonly",
-                    width=12,
-                ),
+            choice_box(
+                compared,
+                self.docx,
+                [DOCX_CHANGE_LABELS[v] for v in DOCX_CHANGES],
                 lambda label: DOCX_CHANGE_HINTS.get(DOCX_CHANGE_VALUES.get(label, ""), ""),
             ),
             "Word and OpenDocument tracked changes: accept them all, reject them all, or "
@@ -859,44 +874,24 @@ class App:
             "Splits sentences and hyphenates lines. default: the language Word and "
             "OpenDocument files are marked with, else guessed; or a code such as it.",
         )
-        self.comments = tk.StringVar(
-            value=self.s.comments if self.s.comments in COMMENT_MODES else "markers"
-        )
+        self.comments = tk.StringVar(value=self.s.comments)
         field_row(
             right,
             0,
             "Comments",
-            item_hints(
-                ttk.Combobox(
-                    right,
-                    textvariable=self.comments,
-                    values=COMMENT_MODES,
-                    state="readonly",
-                    width=12,
-                ),
-                COMMENT_HINTS.get,
-            ),
+            choice_box(right, self.comments, COMMENT_MODES, COMMENT_HINTS.get),
             "markers: only the comments added or removed, set apart (a marker and a panel in "
             "the HTML report, CriticMarkup in the diffs); text: compared as text; none: left "
             "out.",
         )
         self.comments.trace_add("write", lambda *_: self.update_empty_comments())
-        self.split = tk.StringVar(value=self.s.split if self.s.split in SPLITS else "both")
+        self.split = tk.StringVar(value=self.s.split)
         splits = ttk.Frame(compared)
         split_names = (("paragraph", "Paragraphs"), ("sentence", "Sentences"), ("both", "Both"))
         # what only a comparison has, greyed out reviewing one file (show_mode)
         self.comparing_only: list[tk_ttk.Widget] = []
         for value, text in split_names:
-            button = ttk.Radiobutton(
-                splits,
-                text=text,
-                value=value,
-                variable=self.split,
-                bootstyle="secondary-outline-toolbutton",
-                padding=(8, 3),
-            )
-            button.pack(side="left")
-            self.comparing_only.append(button)
+            self.comparing_only.append(segment(splits, self.split, value, text))
         field_row(
             compared,
             2,
@@ -938,12 +933,7 @@ class App:
             compared,
             1,
             "Wrapped lines",
-            item_hints(
-                ttk.Combobox(
-                    compared, textvariable=self.align, values=ALIGNMENTS, state="readonly", width=12
-                ),
-                ALIGNMENT_HINTS.get,
-            ),
+            choice_box(compared, self.align, ALIGNMENTS, ALIGNMENT_HINTS.get),
             "How long lines that wrap are aligned in the HTML report.",
         )
         self.move_passages = tk.BooleanVar(value=self.s.move_passages)
@@ -1022,7 +1012,7 @@ class App:
         self.passage_vars: dict[str, tk.StringVar] = {}
         for k, f in enumerate(fields(MovedPassageSettings)):
             value = self.s.moved_passages.get(f.name, f.default)
-            var = tk.StringVar(value=f"{value:g}" if f.metadata["share"] else f"{int(value):,}")
+            var = tk.StringVar(value=passage_text(f, value))
             self.passage_vars[f.name] = var
             spin = (
                 ttk.Spinbox(passages, from_=0.01, to=1, increment=0.05, textvariable=var, width=10)
@@ -1070,9 +1060,7 @@ class App:
         formats = ttk.Frame(out)
         formats.grid(row=0, column=1, columnspan=3, sticky="w", **PAD)
         self.format_buttons: dict[str, ttk.Radiobutton] = {}
-        self.output_format = tk.StringVar(
-            value=self.s.output_format if self.s.output_format in FORMATS else "html"
-        )
+        self.output_format = tk.StringVar(value=self.s.output_format)
         for value, text, tip in (
             ("html", "HTML report", "Side by side, in the browser: words, moves, comments."),
             ("diff", "Unified diff", "A .diff, as git diff writes it; a patch for text files."),
@@ -1093,18 +1081,15 @@ class App:
                 "files).",
             ),
         ):
-            button = ttk.Radiobutton(
+            self.format_buttons[value] = segment(
                 formats,
-                text=text,
-                value=value,
-                variable=self.output_format,
-                command=self.rename_output,
-                bootstyle="secondary-outline-toolbutton",
+                self.output_format,
+                value,
+                text,
+                tip,
                 padding=(12, 4),
+                command=self.rename_output,
             )
-            button.pack(side="left")
-            hint(button, tip)
-            self.format_buttons[value] = button
         ttk.Label(out, text="Save to").grid(row=1, column=0, sticky="w", **PAD)
         self.output = tk.StringVar(value=self.s.output)
         output_entry = ttk.Entry(out, textvariable=self.output)
@@ -1205,9 +1190,7 @@ class App:
             ),
         ):
             hint(w, tip)
-        self.assess_context = tk.StringVar(
-            value=self.s.assess_context if self.s.assess_context in CONTEXTS else "document"
-        )
+        self.assess_context = tk.StringVar(value=self.s.assess_context)
         # what only matters when an AI assesses, greyed out while none is
         # chosen (update_ai_switches)
         self.ai_switches = []
@@ -1231,16 +1214,7 @@ class App:
                 "but nothing of the text around them.",
             ),
         ):
-            button = ttk.Radiobutton(
-                reads,
-                text=text,
-                value=value,
-                variable=self.assess_context,
-                bootstyle="secondary-outline-toolbutton",
-                padding=(8, 3),
-            )
-            button.pack(side="left")
-            hint(button, tip)
+            button = segment(reads, self.assess_context, value, text, tip)
             self.ai_switches.append(button)
             self.changes_only.append(button)
         field_row(card, 1, "Reads", reads, "What the model is sent, besides the instructions.")
@@ -1366,13 +1340,13 @@ class App:
             w = widgets.pop()
             widgets.extend(w.winfo_children())
             if isinstance(w, tk_ttk.Widget):
-                w.state(["!disabled"] if html else ["disabled"])
+                enable(w, html)
         if self.assess_ai.get() == LOADING:
             self.ai_box.state(["disabled"])  # until the AIs are known
         self.update_ai_switches()
         on = self.ai_active() and self.assess_model.get() != LOADING
         for box in (self.model_box, self.effort_box):
-            box.state(["!disabled"] if on else ["disabled"])
+            enable(box, on)
 
     def update_ai_switches(self) -> None:
         """What the AI is sent and the AI assessment's switches, greyed out
@@ -1385,7 +1359,7 @@ class App:
             # what the model reads and the AI-writing check are of changes
             if switch in self.changes_only:
                 on = on and not self.reviewing()
-            switch.state(["!disabled"] if on else ["disabled"])
+            enable(switch, on)
 
     def pick_into(self, var: tk.StringVar, title: str) -> None:
         chosen = filedialog.askopenfilename(
@@ -1448,7 +1422,7 @@ class App:
         becomes the AI's own default, the first it reports, unless keep and
         one is already chosen."""
         ai = self.ai_chosen()
-        self.model_box.state(["!disabled"] if self.ai_active() else ["disabled"])
+        enable(self.model_box, self.ai_active())
         if ai in ("", NO_ASSESSMENT):
             self.model_box.configure(values=())
             self.update_efforts()
@@ -1511,7 +1485,7 @@ class App:
         if levels and not model.default_effort:
             levels.insert(0, MODEL_DEFAULT)  # shown, not an empty box
         self.effort_box.configure(values=levels)
-        self.effort_box.state(["!disabled"] if self.ai_active() else ["disabled"])
+        enable(self.effort_box, self.ai_active())
         if keep and (self.assess_effort.get() in levels or model is None):
             return
         default = model.default_effort if model else ""
@@ -1702,8 +1676,10 @@ class App:
         old, new = (self.old, self.new) if mode == "files" else (self.old_folder, self.new_folder)
         if not old.get().strip() or not new.get().strip():
             return ""
-        page = default_page(Path(old.get().strip()), Path(new.get().strip()))
-        return with_format(str(page.resolve()), self.output_format.get()) if page else ""
+        page = default_page(
+            Path(old.get().strip()), Path(new.get().strip()), FORMATS[self.output_format.get()]
+        )
+        return str(page.resolve()) if page else ""
 
     def follow_sides(self) -> None:
         """Keep Save to on the default as the sides change: an empty one, or one
@@ -1722,15 +1698,15 @@ class App:
             fits = not files or all(
                 Path(v.get().strip()).suffix.lower() == suffix for v in (self.old, self.new)
             )
-            self.format_buttons[fmt].state(["!disabled"] if fits else ["disabled"])
+            enable(self.format_buttons[fmt], fits)
         if self.reviewing():  # a review is an HTML report: no diff, no changes
             for fmt, button in self.format_buttons.items():
-                button.state(["!disabled"] if fmt == "html" else ["disabled"])
+                enable(button, fmt == "html")
 
     def update_empty_comments(self) -> None:
         """Comments without text are a choice of markers only."""
         markers = self.comments.get() == "markers"
-        self.empty_comments_box.state(["!disabled"] if markers else ["disabled"])
+        enable(self.empty_comments_box, markers)
 
     def pick_output(self) -> None:
         fmt = self.output_format.get()
@@ -1789,7 +1765,7 @@ class App:
 
     def update_untracked(self) -> None:
         on_worktree = self.ref_of(self.target.get()) in ("worktree", "")
-        self.untracked_box.state(["!disabled"] if on_worktree else ["disabled"])
+        enable(self.untracked_box, on_worktree)
 
     def collect(self) -> Settings:
         """The settings the window shows."""
@@ -1900,7 +1876,7 @@ class App:
 
     def reset_passage_settings(self) -> None:
         for f in fields(MovedPassageSettings):
-            default = f"{f.default:g}" if f.metadata["share"] else f"{f.default:,}"
+            default = passage_text(f, f.default)
             self.passage_vars[f.name].set(default)
 
     def save_options(self) -> None:
@@ -2142,6 +2118,58 @@ def popdown_listbox(combo: ttk.Combobox, popdown: str) -> str | None:
     return None
 
 
+def passage_text(f, value: float) -> str:
+    """A setting of moved passages (a field of MovedPassageSettings) as its
+    box shows it: a share as it is, a count with its thousands separated."""
+    return f"{value:g}" if f.metadata["share"] else f"{int(value):,}"
+
+
+def segment(
+    parent,
+    variable: tk.StringVar,
+    value: str,
+    text: str,
+    tip: str = "",
+    padding: tuple[int, int] = (8, 3),
+    command=None,
+    bootstyle: str = "secondary-outline-toolbutton",
+    **options,
+) -> ttk.Radiobutton:
+    """One button of a segmented choice, packed after the others in
+    parent, with its tooltip (tip, if any)."""
+    if command is not None:
+        options["command"] = command
+    button = ttk.Radiobutton(
+        parent,
+        text=text,
+        value=value,
+        variable=variable,
+        bootstyle=bootstyle,
+        padding=padding,
+        **options,
+    )
+    button.pack(side="left")
+    if tip:
+        hint(button, tip)
+    return button
+
+
+def enable(widget, on: bool) -> None:
+    """Enable a widget, or grey it out."""
+    widget.state(["!disabled"] if on else ["disabled"])
+
+
+def choice_box(
+    parent, variable: tk.StringVar, values, tip: Callable[[str], str], width: int = 12
+) -> ttk.Combobox:
+    """A drop-down list to choose one of values from, each item's hint
+    shown beside it (item_hints)."""
+    combo = ttk.Combobox(
+        parent, textvariable=variable, values=values, state="readonly", width=width
+    )
+    return item_hints(combo, tip)
+
+
 def item_hints(combo: ttk.Combobox, tip: Callable[[str], str]) -> ttk.Combobox:
     """What each item of a drop-down list means, shown beside the item under
     the pointer while the list is open; tip gives an item's hint ("" for
@@ -2234,12 +2262,9 @@ def move_fields(parent: tk.Misc, similarity: tk.DoubleVar, algorithm: tk.StringV
         textvariable=similarity,
         width=5,
     ).pack(side="left")
-    item_hints(
-        ttk.Combobox(
-            frame, textvariable=algorithm, values=tuple(MOVE_ALGORITHMS), state="readonly", width=11
-        ),
-        MOVE_ALGORITHM_HINTS.get,
-    ).pack(side="left", padx=(6, 0))
+    choice_box(frame, algorithm, tuple(MOVE_ALGORITHMS), MOVE_ALGORITHM_HINTS.get, width=11).pack(
+        side="left", padx=(6, 0)
+    )
     return frame
 
 

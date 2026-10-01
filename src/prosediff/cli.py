@@ -486,12 +486,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _check_compare_args(ap, args, mode)
     if args.assess is not None:
-        try:
-            parse_backend(args.assess)
-        except AssessError as e:
-            ap.error(f"--assess: {e}")
-        if args.assess_timeout <= 0:
-            ap.error("--assess-timeout must be above 0")
+        _check_assess(ap, args)
     elif (
         args.assess_effort
         or args.assess_instructions
@@ -609,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
             fmt,
             args.paths,
             align=args.align,
-            context=None if args.full else (CONTEXT if args.context is None else args.context),
+            context=options.context,
             sentences=sentences,
             split=split,
             assessment=assessment,
@@ -643,12 +638,7 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         ap.error("--review takes one FILE")
     if args.assess is None:
         ap.error("--review has an AI review the file: say which with --assess")
-    try:
-        parse_backend(args.assess)
-    except AssessError as e:
-        ap.error(f"--assess: {e}")
-    if args.assess_timeout <= 0:
-        ap.error("--assess-timeout must be above 0")
+    _check_assess(ap, args)
     if args.assess_ai_writing:
         ap.error("--assess-ai-writing asks about the text changes added: --review compares none")
     if (args.format or format_of(args.output)) != "html":
@@ -663,22 +653,15 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     ):
         if given:
             ap.error(f"{option} picks what to compare: --review takes one file")
-    try:
-        language = normalize_language(args.language)
-    except ValueError as e:
-        ap.error(f"--language: {e}")
-    try:
-        encoding = check_encoding(args.encoding)
-    except ValueError as e:
-        ap.error(f"--encoding: {e}")
+    _check_reading(ap, args)
     path = Path(args.repo)
     options = Options(
         md_filter=args.md_filter,
         comments=args.comments or "markers",
         empty_comments=args.empty_comments,
         docx_changes=args.docx_changes,
-        language=language,
-        encoding=encoding,
+        language=args.language,
+        encoding=args.encoding,
     )
     try:
         comparison = review_file(path, options)
@@ -744,13 +727,19 @@ def _login_codex() -> int:
     return 0 if ok else 1
 
 
-def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, mode: str) -> None:
-    """Refuse the options of a comparison that make no sense (ap.error);
-    normalize the language and the encoding."""
-    if args.context is not None and args.context < 0:
-        ap.error("--context must be 0 or more")
-    if args.max_hidden < 0:
-        ap.error("--max-hidden must be 0 or more")
+def _check_assess(ap: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse an AI --assess cannot name, or a timeout of none (ap.error)."""
+    try:
+        parse_backend(args.assess)
+    except AssessError as e:
+        ap.error(f"--assess: {e}")
+    if args.assess_timeout <= 0:
+        ap.error("--assess-timeout must be above 0")
+
+
+def _check_reading(ap: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Normalize the language and the encoding, refusing those not known
+    (ap.error)."""
     try:
         args.language = normalize_language(args.language)
     except ValueError as e:
@@ -759,6 +748,16 @@ def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, m
         args.encoding = check_encoding(args.encoding)
     except ValueError as e:
         ap.error(f"--encoding: {e}")
+
+
+def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, mode: str) -> None:
+    """Refuse the options of a comparison that make no sense (ap.error);
+    normalize the language and the encoding."""
+    if args.context is not None and args.context < 0:
+        ap.error("--context must be 0 or more")
+    if args.max_hidden < 0:
+        ap.error("--max-hidden must be 0 or more")
+    _check_reading(ap, args)
     if not args.git:
         if args.target:
             ap.error(f"--{mode} compares OLD with NEW: give no TARGET")
@@ -791,9 +790,7 @@ def _output_path(args: argparse.Namespace, fmt: str) -> Path:
     if output is None and args.open:
         output = default_output(fmt)
     if output is None and (args.folders or args.files):
-        output = default_page(Path(args.repo), Path(args.base))
-        if output is not None:
-            output = output.with_suffix(FORMATS[fmt])
+        output = default_page(Path(args.repo), Path(args.base), FORMATS[fmt])
     if output is None:
         output = Path("diff").with_suffix(FORMATS[fmt])
     return output

@@ -114,15 +114,15 @@ def read_side(path: Path, include: str | None = None) -> dict[str, bytes]:
     return files
 
 
-def default_page(old: Path, new: Path) -> Path | None:
-    """Where the HTML report goes when no output is given: comparing two
-    folders, into the new one, as FOLDER_PAGE; comparing two files, next to the
-    new one, named after both, so reports of different pairs do not overwrite
-    each other. None for anything else."""
+def default_page(old: Path, new: Path, suffix: str = ".html") -> Path | None:
+    """Where the output (the HTML report, or what suffix names) goes when
+    none is given: comparing two folders, into the new one, as FOLDER_PAGE;
+    comparing two files, next to the new one, named after both, so reports
+    of different pairs do not overwrite each other. None for anything else."""
     if old.is_dir() and new.is_dir():
-        return new / FOLDER_PAGE
+        return (new / FOLDER_PAGE).with_suffix(suffix)
     if old.is_file() and new.is_file():
-        return new.parent / f"{old.stem}_vs_{new.stem}.html"
+        return new.parent / f"{old.stem}_vs_{new.stem}{suffix}"
     return None
 
 
