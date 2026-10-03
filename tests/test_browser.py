@@ -22,7 +22,7 @@ from helpers import (
 )
 
 from prosediff import Options, compare, compare_paths, render
-from prosediff.aidocs import FIX_APPLIED
+from prosediff.aidocs import FIX_APPLIED, FIX_APPLIED_HOW
 from prosediff.odt import read_odt
 from prosediff.word import read_docx
 
@@ -980,7 +980,10 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     assert "2 of the 2 problems" in included.inner_text()
     fixed = save("fixes", f"all.{fmt}")
     assert "We find a small and significant effect." in lines(fixed, "accept-all")
-    fixed_note = f"Nothing supports a large effect.\nProposed: Say a small effect.\n{FIX_APPLIED}"
+    fixed_note = (
+        f"{FIX_APPLIED}\nNothing supports a large effect.\nProposed: Say a small effect.\n"
+        f"{FIX_APPLIED_HOW}"
+    )
     assert fixed_note in comments_of(fixed, fmt)
     # the fixed problem left out in review mode
     page.keyboard.press("r")
@@ -1101,6 +1104,49 @@ def test_the_documents_drawer_lists_the_problems_with_their_boxes(browser, tmp_p
     assert "active" in page.locator(".card.problem", has_text="Which checks?").get_attribute(
         "class"
     )
+    page.context.close()
+
+
+def test_the_documents_drawer_filters_and_resolves_the_fixes_applied(browser, tmp_path):
+    """The list shows the problems in the download or left out, resolved or
+    not, as asked; each column's box acts on the rows shown only. A button
+    marks resolved the comments of the problems whose fix the version with
+    the AI's fixes holds, and is greyed out once they all are."""
+    old, new = pair(tmp_path, "docx")
+    c = compare_paths(str(old), str(new), Options())
+    page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
+    page.click(".toolbar [data-drawer='documents']")
+    drawer = page.locator("#documents")
+    rows = drawer.locator("tbody tr")
+    fixed, advice = rows.filter(has_text="Nothing supports"), rows.filter(has_text="Which checks?")
+    shown = drawer.locator(".doc-shown")
+
+    def visible():
+        return [r.is_visible() for r in (fixed, advice)]
+
+    assert fixed.locator(".fix-tag").count() == 1 and advice.locator(".fix-tag").count() == 0
+    button = drawer.locator(".resolve-applied")
+    assert button.inner_text() == "✓ Resolve the fixes applied (1)"
+    button.click()
+    assert fixed.locator(".resolve-box").is_checked()
+    assert not advice.locator(".resolve-box").is_checked()
+    assert button.is_disabled()
+    drawer.locator(".doc-filter-resolved").select_option("no")
+    assert visible() == [False, True] and shown.inner_text() == "1 of 2 shown"
+    # the column's box: the row shown only, which then leaves the list
+    drawer.locator("[data-all='resolve-box']").click()  # left unticked: no row shown
+    assert advice.locator(".resolve-box").is_checked() and visible() == [False, False]
+    assert drawer.locator(".doc-none").is_visible()
+    drawer.locator(".doc-filter-resolved").select_option("")
+    assert visible() == [True, True] and shown.inner_text() == ""
+    advice.locator(".keep-box").uncheck()
+    drawer.locator(".doc-filter-keep").select_option("out")
+    assert visible() == [False, True]
+    drawer.locator(".doc-filter-keep").select_option("in")
+    assert visible() == [True, False]
+    drawer.locator("[data-all='keep-box']").click()  # the row shown only, which leaves
+    assert not fixed.locator(".keep-box").is_checked()
+    assert page.locator(".toolbar .ai-count").inner_text() == "0 of 2"
     page.context.close()
 
 

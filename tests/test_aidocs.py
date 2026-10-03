@@ -25,7 +25,15 @@ from helpers import (
     revisions,
 )
 
-from prosediff.aidocs import FIX_APPLIED, Place, downloads, fix_of, haystack, locate
+from prosediff.aidocs import (
+    FIX_APPLIED,
+    FIX_APPLIED_HOW,
+    Place,
+    downloads,
+    fix_of,
+    haystack,
+    locate,
+)
 from prosediff.assess import Annotation, Assessment
 from prosediff.diff import Options, compare_paths
 from prosediff.render import render
@@ -106,9 +114,12 @@ def test_the_two_documents_with_the_ais_comments_and_fixes(tmp_path, fmt):
     assert got[1].notes[0]["changes"] and not got[1].notes[1]["changes"]
     texts = comments_of(out, fmt)
     assert "fixes it wrote out are tracked changes" in texts[0]
-    assert (
-        f"Nothing supports a large effect.\nProposed: Say a small effect.\n{FIX_APPLIED}" in texts
+    # the fix applied: said first, and what to do with it last
+    fixed_note = (
+        f"{FIX_APPLIED}\nNothing supports a large effect.\nProposed: Say a small effect.\n"
+        f"{FIX_APPLIED_HOW}"
     )
+    assert fixed_note in texts
     assert "Which checks?\nProposed: Name them." in texts
     if fmt == "docx":
         authors = {r.get(W + "author") for r in revisions(out)}
@@ -293,15 +304,15 @@ def test_fixes_in_a_rich_document(tmp_path, fmt):
         assert put["a small part"].find(f".//{W}b") is not None
         assert put["more"].find(f".//{W}i") is not None
         # Word takes no comment in a footnote: the footnote's is on its number
-        firsts = [t.split("\n")[0] for t in texts]
-        assert "In the footnote: Wrong." in firsts
+        # (after the heading of the fix applied)
+        assert any(t.startswith(f"{FIX_APPLIED}\nIn the footnote: Wrong.") for t in texts)
         notes_xml = zipfile.ZipFile(out).read("word/footnotes.xml").decode()
         assert "commentRangeStart" not in notes_xml
         # every fix applied, the footnote's (on its number) too
-        assert sum(t.endswith(FIX_APPLIED) for t in texts) == 9
+        assert sum(t.startswith(FIX_APPLIED) for t in texts) == 9
     else:
         assert 0 not in notes and 10 not in notes
-        assert sum(t.endswith(FIX_APPLIED) for t in texts) == 9
+        assert sum(t.startswith(FIX_APPLIED) for t in texts) == 9
 
 
 @pytest.mark.parametrize(

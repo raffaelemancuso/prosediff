@@ -343,10 +343,12 @@ class WordNotes:
         self.author = author
         self.lines = red.f.new_text
 
-    def comment(self, place: Place, paragraphs: list[str], bold_first: str = "") -> int | None:
-        """A comment on a place, its paragraphs of text (the first word of
-        the second bold when bold_first names it); its id, None when the
-        place is not in the document."""
+    def comment(
+        self, place: Place, paragraphs: list[str], bold: tuple[str, ...] = ()
+    ) -> int | None:
+        """A comment on a place, its paragraphs of text (the start of each
+        that begins with one of bold, bold); its id, None when the place is
+        not in the document."""
         red, lines = self.red, self.lines
         # the start first: a split keeps a run's first part in the run, so the
         # end's run, found first, could be left before the start
@@ -356,7 +358,9 @@ class WordNotes:
         ref, kind = note_reference(red, starts[0])
         if ref is not None:  # Word takes no comment in a note: on its number
             first = last = ref
-            paragraphs = [f"In the {kind}: {paragraphs[0]}", *paragraphs[1:]]
+            # on the first paragraph that is not a heading (the fix applied)
+            k = next((k for k, t in enumerate(paragraphs) if not t.startswith(bold)), 0)
+            paragraphs = [*paragraphs[:k], f"In the {kind}: {paragraphs[k]}", *paragraphs[k + 1 :]]
         else:
             first = word_run(starts, lines[place.j1], place.o1)
             last = word_run(ends, lines[place.j2], place.o2, before=True)
@@ -371,9 +375,10 @@ class WordNotes:
         c._comment_elm.set(qn("w:date"), red.date)
         for k, text in enumerate(paragraphs):
             p = c.paragraphs[0] if k == 0 else c.add_paragraph()
-            if k and bold_first and text.startswith(bold_first):
-                p.add_run(bold_first).bold = True
-                text = text[len(bold_first) :]
+            first = next((b for b in bold if text.startswith(b)), "")
+            if first:
+                p.add_run(first).bold = True
+                text = text[len(first) :]
             p.add_run(text)
         for ref in red.new.doc.element.body.iter(qn("w:commentReference")):
             if ref.get(qn("w:id")) == str(c.comment_id) and ref.getparent().tag == qn("w:r"):
@@ -486,7 +491,9 @@ class OdtNotes:
         self.count = 0
         self.mine: set[str] = set()  # the ids of the AI's changes
 
-    def comment(self, place: Place, paragraphs: list[str], bold_first: str = "") -> str | None:
+    def comment(
+        self, place: Place, paragraphs: list[str], bold: tuple[str, ...] = ()
+    ) -> str | None:
         """A comment on a place (an office:annotation and its end), its
         paragraphs of text; its name, None when the place is not in the
         document."""
@@ -693,15 +700,24 @@ def document_file(comparison: Comparison) -> tuple[FileDiff, str] | None:
     return None
 
 
-# The end of the comment of a problem whose fix is in the file.
-FIX_APPLIED = "Fix already applied: it is the tracked change on this passage."
+# The comment of a problem whose fix is in the file: its first line, in
+# bold, and its last, saying what to do with the fix.
+FIX_APPLIED = "✓ Fix already applied"
+FIX_APPLIED_HOW = (
+    "The tracked change on this passage is this fix: accept it to keep it, reject it to undo it."
+)
+# The starts of a problem's comment's paragraphs put in bold.
+BOLD = (FIX_APPLIED, "Proposed: ")
 
 
 def comment_text(note: Annotation, fixed: bool) -> list[str]:
-    """A problem's comment: what is wrong, the change proposed, and, when
-    the fix is in the text as a tracked change, that it is applied."""
+    """A problem's comment: what is wrong and the change proposed; when the
+    fix is in the text as a tracked change, a heading saying it is applied
+    before them and what to do with it after."""
     proposed = [f"Proposed: {note.solution}"] if note.solution else []
-    return [note.problem, *proposed, *([FIX_APPLIED] if fixed else [])]
+    if not fixed:
+        return [note.problem, *proposed]
+    return [FIX_APPLIED, note.problem, *proposed, FIX_APPLIED_HOW]
 
 
 def summary(assessment: Assessment, fixes: bool) -> list[str]:
@@ -798,7 +814,7 @@ def notes_in(red, notes, author: str, assessment: Assessment, fixes: bool) -> di
             ids[-1] = {"comments": [c], "changes": []}
     # the comments first: the fixes change the text they are placed by
     for k, p in places.items():
-        c = put.comment(p, comment_text(notes[k], bool(edits.get(k))), "Proposed: ")
+        c = put.comment(p, comment_text(notes[k], bool(edits.get(k))), BOLD)
         ids[k] = {"comments": [c] if c is not None else [], "changes": []}
     # from the end of the document, each fix's lines as they were
     for k in sorted((k for k in edits if edits[k]), key=lambda k: places[k].j1, reverse=True):

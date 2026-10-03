@@ -88,13 +88,19 @@ remembers the views, the spacing and the column widths.
   the file (Word's Resolve, LibreOffice's Resolved), greyed out while the
   problem is left out. The box at the top of each column ticks or unticks
   them all (a dash when only some are ticked); a problem's text goes to
-  it. The download buttons are below. The same boxes are on each
+  it. Above the list, **Show** narrows it to the problems in the download
+  or left out, resolved or not, and the boxes at the top of the columns
+  then act on those shown only; **✓ Resolve the fixes applied** marks
+  resolved the comments of the problems whose fix the version with the
+  AI's fixes holds. The download buttons are below. The same boxes are on each
   problem's card, and **In the download** on its line in Review mode's
   list.
 - **A fix already applied:** in the report of one file's fixes, a
   problem whose fix the version on the right holds has a green card that
-  says so, its **Resolved** box ticked from the start; in the documents, its comment ends "Fix already applied: it is
-  the tracked change on this passage."
+  says so, its **Resolved** box ticked from the start; in the documents, its comment starts with
+  "✓ Fix already applied" (in bold in Word) and ends saying that the
+  tracked change on the passage is the fix: accept it to keep it, reject
+  it to undo it.
 - **Highlights off** removes the colour of changed words and lines; the
   gutters stay tinted and signed.
 - **Formatted** hides Markdown syntax and shows emphasis, headings, links

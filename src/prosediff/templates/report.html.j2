@@ -205,6 +205,13 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
   font: inherit; color: var(--fg); text-align: left; cursor: pointer; }
 .doc-problems .go-problem:hover:not(:disabled) .what { text-decoration: underline; }
 .doc-problems .go-problem:disabled { color: var(--muted); cursor: default; }
+.doc-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 0 0;
+  font-size: 13px; }
+.doc-filter select { font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; }
+.doc-filter .resolve-applied { margin-left: auto; }
+.doc-problems .fix-tag { flex-shrink: 0; color: var(--add);
+  font-size: 12px; white-space: nowrap; }
 .doc-problems .num { flex-shrink: 0; min-width: 2.4em; color: var(--current); font-weight: 600; }
 .ai-documents-link { margin: 10px 0 2px; }
 .ai-documents-link button { padding: 0; border: 0; background: none; font: inherit;
@@ -927,12 +934,21 @@ thead.print, .print-note { display: none; }
     <span class="role">{{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }}</span>
     <button type="button" class="btn close" data-drawer="documents" aria-label="Close the documents to download">Close</button></div>
   <p class="role">Each problem the AI marked is a comment on its passage; in the {{ "document" if c.single else "new version" }} with its fixes, the fixes it wrote out are its own tracked changes, to accept or reject. A problem left out of the documents loses its comment, and its fix is rejected; a comment resolved is marked so (Word's Resolve, LibreOffice's Resolved).</p>
+  <div class="doc-filter" role="group" aria-label="Which problems the list shows">
+    <label>Show <select class="doc-filter-keep" aria-label="Show the problems in the download, left out, or both">
+      <option value="">in the download or not</option><option value="in">in the download</option><option value="out">left out</option></select></label>
+    <label><select class="doc-filter-resolved" aria-label="Show the problems resolved, not resolved, or both">
+      <option value="">resolved or not</option><option value="yes">resolved</option><option value="no">not resolved</option></select></label>
+    <span class="role doc-shown"></span>
+    <button type="button" class="btn resolve-applied" title="Mark resolved the comments of the problems whose fix is already applied (the version with the AI's fixes has it as a tracked change)">✓ Resolve the fixes applied</button>
+  </div>
   <table class="doc-problems">
     <thead><tr><th scope="col">Problem</th>
       <th scope="col"><label>In the download<input type="checkbox" class="all-box" data-all="keep-box" aria-label="Every problem in the downloaded documents"></label></th>
       <th scope="col"><label>Resolved<input type="checkbox" class="all-box" data-all="resolve-box" aria-label="Every problem's comment resolved in the downloaded documents"></label></th></tr></thead>
     <tbody></tbody>
   </table>
+  <p class="role doc-none" hidden>No problem matches: change what the list shows above.</p>
   <p class="role ai-included"></p>
   <ul>
   {% for d in ai_documents %}
@@ -1925,6 +1941,7 @@ thead.print, .print-note { display: none; }
   if (docRows) {
     aiOrder.forEach(function (k) {
       var note = aiNotes[k], row = el("tr"), go = el("button", "go-problem");
+      row.dataset.note = k;
       go.type = "button";
       go.dataset.problem = k;
       go.appendChild(el("span", "num", "⚠ " + note.num));
@@ -1941,24 +1958,89 @@ thead.print, .print-note { display: none; }
       docRows.appendChild(row);
     });
   }
+  // The problems whose fix is already applied: in the documents, those with
+  // tracked changes of their own (the version with the AI's fixes); in the
+  // report, those fixApplied names.
+  var fixedInDocuments = {};
+  document.querySelectorAll("script.ai-document").forEach(function (holder) {
+    var notes = JSON.parse(holder.dataset.spec).notes || {};
+    Object.keys(notes).forEach(function (k) {
+      if (notes[k].changes && notes[k].changes.length) fixedInDocuments[k] = true;
+    });
+  });
+  function fixDone(k) {
+    return !!fixedInDocuments[k] || fixApplied(aiNotes[k]);
+  }
+  // in the list, a tag on those
+  if (docRows) {
+    Array.prototype.forEach.call(docRows.rows, function (row) {
+      if (fixDone(row.dataset.note)) {
+        row.querySelector(".go-problem").appendChild(el("span", "fix-tag", "✓ fix applied"));
+      }
+    });
+  }
+  // The rows the filters above the list let through: in the download or
+  // left out, resolved or not.
+  function shownRows() {
+    var keepWanted = (document.querySelector(".doc-filter-keep") || {}).value || "";
+    var resolvedWanted = (document.querySelector(".doc-filter-resolved") || {}).value || "";
+    return Array.prototype.filter.call(docRows.rows, function (row) {
+      var kept = row.querySelector(".keep-box").checked;
+      var resolved = row.querySelector(".resolve-box").checked;
+      return (!keepWanted || (keepWanted === "in") === kept) &&
+        (!resolvedWanted || (resolvedWanted === "yes") === resolved);
+    });
+  }
+  // The list redrawn: the rows the filters let through shown, how many, and
+  // each column's box for all of them (the rows shown).
   function allBoxes() {
     if (!docRows) return;
+    var shown = shownRows();
+    Array.prototype.forEach.call(docRows.rows, function (row) {
+      row.hidden = shown.indexOf(row) < 0;
+    });
+    var count = document.querySelector(".doc-shown"), none = document.querySelector(".doc-none");
+    if (count) {
+      count.textContent = shown.length === docRows.rows.length ? ""
+        : fmt(shown.length) + " of " + fmt(docRows.rows.length) + " shown";
+    }
+    if (none) none.hidden = shown.length > 0;
     document.querySelectorAll(".doc-problems .all-box").forEach(function (all) {
-      var boxes = Array.prototype.slice.call(docRows.querySelectorAll("." + all.dataset.all));
+      var boxes = shown.map(function (row) { return row.querySelector("." + all.dataset.all); });
       var on = boxes.filter(function (b) { return b.checked; }).length;
       all.checked = on > 0 && on === boxes.length;
       all.indeterminate = on > 0 && on < boxes.length;
+      all.disabled = !boxes.length;
     });
+    var button = document.querySelector(".resolve-applied");
+    if (button) {
+      var open = aiNotes.filter(function (note, k) { return fixDone(k) && !resolvedNotes[k]; });
+      var applied = aiNotes.filter(function (note, k) { return fixDone(k); });
+      button.hidden = !applied.length;
+      button.disabled = !open.length;
+      button.textContent = "✓ Resolve the fixes applied" + (open.length ? " (" + fmt(open.length) + ")" : "");
+    }
   }
   allBoxes();
   document.addEventListener("change", function (e) {
+    if (e.target.closest && e.target.closest(".doc-filter")) {
+      allBoxes();
+      return;
+    }
     var all = e.target.closest && e.target.closest(".all-box");
     if (!all) return;
-    // read once: each problem's box set redraws the column's
+    // read once: each problem's box set redraws the list; and only the rows
+    // shown, read before they change
     var on = all.checked;
+    shownRows().forEach(function (row) {
+      if (all.dataset.all === "keep-box") keep(row.dataset.note, on);
+      else resolve(row.dataset.note, on);
+    });
+  });
+  document.addEventListener("click", function (e) {
+    if (!(e.target.closest && e.target.closest(".resolve-applied"))) return;
     aiNotes.forEach(function (note, k) {
-      if (all.dataset.all === "keep-box") keep(String(k), on);
-      else resolve(String(k), on);
+      if (fixDone(k)) resolve(String(k), true);
     });
   });
   document.addEventListener("click", function (e) {
