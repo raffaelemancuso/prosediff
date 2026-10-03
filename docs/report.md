@@ -80,21 +80,21 @@ remembers the views, the spacing and the column widths.
   and **Next**. **Problems ↓** at the top of the list jumps to the
   problems; dragging the list's right edge widens or narrows it
   (remembered; a double-click puts it back).
-- **Which problems go into the documents to download:** **Documents**
-  in the top bar (with how many of the problems the files hold) opens a
-  drawer with a row per problem and two boxes: **In the download**,
-  unticked, leaves the problem's comment out of the Word or OpenDocument
-  file and rejects its fix; **Resolved** marks its comment resolved in
-  the file (Word's Resolve, LibreOffice's Resolved), greyed out while the
-  problem is left out. The box at the top of each column ticks or unticks
-  them all (a dash when only some are ticked); a problem's text goes to
-  it. Above the list, **Show** narrows it to the problems in the download
-  or left out, resolved or not, and the boxes at the top of the columns
-  then act on those shown only; **✓ Resolve the fixes applied** marks
-  resolved the comments of the problems whose fix the version with the
-  AI's fixes holds. The download buttons are below. The same boxes are on each
-  problem's card, and **In the download** on its line in Review mode's
-  list.
+- **The documents to download:** a button in the top bar for each
+  (**⤓ Tracked changes**, **⤓ With AI fixes**) saves it at once; its
+  tooltip says how many of the problems it holds.
+- **Which problems go into them:** each problem's card has two boxes:
+  **In the download**, unticked, leaves the problem's comment out of the
+  Word or OpenDocument file and rejects its fix; **Resolved** marks its
+  comment resolved in the file (Word's Resolve, LibreOffice's Resolved),
+  greyed out while the problem is left out. **In the download** is also
+  on the problem's line in Review mode's list.
+  **✓ Resolve fixes applied** in the top bar marks resolved the comments
+  of the problems whose fix the version with the AI's fixes holds.
+- **Filter** in the top bar shows only the problems in the download or
+  left out of it, resolved or not: the others lose their card and their
+  badge and leave Review's list, and the problems' ◀ ▶ skip them. A
+  problem that stops matching, a box clicked, goes at once.
 - **A fix already applied:** in the report of one file's fixes, a
   problem whose fix the version on the right holds has a green card that
   says so, its **Resolved** box ticked from the start; in the documents, its comment starts with

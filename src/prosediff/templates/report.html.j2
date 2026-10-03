@@ -184,39 +184,12 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
 /* The problems the AI marked: in the text, a numbered badge before each
    passage; its card in the margin. */
 .ai-pointer { margin: 10px 0 2px; }
-/* The documents to download, in a drawer of their own: a row per problem,
-   with its boxes (in the documents, its comment resolved), each column's
-   box at the top for all of them; then the documents' buttons. */
-.ai-documents p { margin: 4px 0; }
-.ai-documents ul { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
-.ai-documents li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.ai-documents .file-name { font-size: 12px; overflow-wrap: anywhere; }
-.doc-problems { width: 100%; border-collapse: collapse; margin: 10px 0 6px; table-layout: auto;
-  font-family: inherit; font-size: 13px; line-height: 1.4; }
-.doc-problems th, .doc-problems td { padding: 4px 6px; border-bottom: 1px solid var(--border);
-  text-align: left; vertical-align: top; }
-.doc-problems th + th, .doc-problems td + td { width: 1%; text-align: center; white-space: nowrap; }
-.doc-problems th { font-size: 12px; font-weight: 600; color: var(--muted); vertical-align: bottom; }
-.doc-problems th label { display: inline-flex; flex-direction: column; align-items: center; gap: 3px;
-  cursor: pointer; }
-.doc-problems input { margin: 0; cursor: pointer; }
-.doc-problems input:disabled { cursor: default; opacity: .5; }
-.doc-problems .go-problem { display: flex; gap: 8px; padding: 0; border: 0; background: none;
-  font: inherit; color: var(--fg); text-align: left; cursor: pointer; }
-.doc-problems .go-problem:hover:not(:disabled) .what { text-decoration: underline; }
-.doc-problems .go-problem:disabled { color: var(--muted); cursor: default; }
-.doc-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 0 0;
-  font-size: 13px; }
-.doc-filter select { font: inherit; color: var(--fg); background: var(--bg);
-  border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; }
-.doc-filter .resolve-applied { margin-left: auto; }
-.doc-problems .fix-tag { flex-shrink: 0; color: var(--add);
-  font-size: 12px; white-space: nowrap; }
-.doc-problems .num { flex-shrink: 0; min-width: 2.4em; color: var(--current); font-weight: 600; }
-.ai-documents-link { margin: 10px 0 2px; }
-.ai-documents-link button { padding: 0; border: 0; background: none; font: inherit;
-  color: var(--link); cursor: pointer; }
-.ai-documents-link button:hover { text-decoration: underline; }
+/* the problems the Filter menu leaves out: no card, no badge */
+.ai-mark.filtered, .card.problem[hidden], #review-list .with-check[hidden] { display: none !important; }
+.toolbar .menu-panel select { font: inherit; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+.toolbar .resolve-applied[hidden] { display: none; }
+.toolbar .filter-count { color: var(--current); font-weight: 600; }
 #review-list .with-check { display: flex; align-items: center; }
 #review-list .with-check input { flex-shrink: 0; margin: 0 0 0 16px; }
 #review-list .with-check button { flex: 1; width: auto; min-width: 0; padding-left: 8px; }
@@ -587,8 +560,7 @@ thead.print, .print-note { display: none; }
 @media print {
   body { padding: 0; font-size: 11px; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .toolbar, .btn, #review-list, #review-head, .drawer .close, .card .more,
-  #documents, .ai-documents-link { display: none !important; }
+  .toolbar, .btn, #review-list, #review-head, .drawer .close, .card .more { display: none !important; }
   body.review main { margin-left: 0; }
   /* The assessment at the top, whether opened or not. */
   .drawer, .drawer[hidden] { display: block; position: static; width: auto; box-shadow: none;
@@ -651,7 +623,7 @@ thead.print, .print-note { display: none; }
   {% if c.single %}<span class="bar-title" title="{{ c.target.hexsha }}">{{ c.target.short }}</span>
   {% else %}<span class="bar-title" title="{{ c.base.short }} → {{ c.target.short }}">{{ c.base.short }} → {{ c.target.short }}</span>{% endif %}
   {% if assessment %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="AI assessment: what the AI made of the {{ "document" if c.single else "changes" }} as a whole">{% if assessment.error %}<span class="verdict verdict-worsens">failed</span>{% elif assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}<span class="role">AI assessment</span></button>{% endif %}
-  {% if ai_documents %}<button type="button" class="doc-button" data-drawer="documents" aria-expanded="false" aria-controls="documents" title="Documents to download: choose which problems go into the {{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }} documents, and save them"><span aria-hidden="true">⤓</span><span class="role">Documents · <span class="ai-count"></span></span></button>{% endif %}
+  {% for d in ai_documents %}<button type="button" class="doc-button ai-download" data-document="{{ loop.index0 }}" title="{{ d.label }}, to download: {{ d.name }}"><span aria-hidden="true">⤓</span><span class="role">{{ "With AI fixes" if "_with_AI_fixes." in d.name else "Tracked changes" }} .{{ d.fmt }}</span></button>{% endfor %}
   {% if writing %}<button type="button" class="verdict-button" data-drawer="writing" aria-expanded="false" aria-controls="writing" title="AI writing: whether the {{ "document" if c.single else "new text" }} reads as written by an AI, an indication, not a proof">{% if writing.error %}<span class="verdict verdict-likely">failed</span>{% elif writing.verdict %}<span class="verdict verdict-{{ writing.verdict }}">{{ writing.verdict | capitalize }}</span>{% endif %}<span class="role">AI writing</span></button>{% endif %}
   <span class="spacer"></span>
   <span class="group" role="group" aria-label="Changes"{% if c.single %} hidden{% endif %}>
@@ -666,6 +638,15 @@ thead.print, .print-note { display: none; }
     <button type="button" data-ai-nav="-1" title="Previous problem (Shift+A)" aria-label="Previous problem">◀</button>
     <span class="ai-counter" aria-live="polite" title="Problems: those the AI marked in the text, ⚠ in the text and in the margin">⚠ {{ assessment.annotations | length | counted("problem") }}</span>
     <button type="button" data-ai-nav="1" title="Next problem (a)" aria-label="Next problem">▶</button></span>{% endif %}
+  {% if marks and ai_documents %}<span class="menu">
+    <button type="button" class="menu-button filter-button" aria-haspopup="true" aria-expanded="false" aria-controls="filter-menu" title="Filter: show only the problems in the download or left out of it, resolved or not, on their cards and in Review">Filter<span class="filter-count"></span><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <div class="menu-panel" id="filter-menu" role="group" aria-label="Which problems are shown" hidden>
+      <label class="item"><span class="label">In the download</span><select class="filter-keep" aria-label="Show the problems in the download, left out, or both">
+        <option value="">all</option><option value="in">in it</option><option value="out">left out</option></select></label>
+      <label class="item"><span class="label">Resolved</span><select class="filter-resolved" aria-label="Show the problems resolved, not resolved, or both">
+        <option value="">all</option><option value="yes">resolved</option><option value="no">not resolved</option></select></label>
+    </div></span>
+  <button type="button" class="resolve-applied" hidden title="Mark resolved, in the documents to download, the comments of the problems whose fix is already applied (the version with the AI's fixes has it)">✓ Resolve fixes applied</button>{% endif %}
   {% if marks or c.comments or (alt and alt.comments) %}<button type="button" class="margin-button" data-toggle="margin" aria-pressed="true" title="Margin: the cards of the comments and the problems beside the text; off, the two versions take its width (g)">Margin</button>{% endif %}
   <button type="button" class="review-button" data-review aria-pressed="false" title="Review: the changes, the comments and the problems listed, to go through one by one (r)">Review</button>
   {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
@@ -919,46 +900,15 @@ thead.print, .print-note { display: none; }
   {% if a.annotations %}
   <p class="ai-pointer">It marked {{ a.annotations | length | counted("problem") }} in the text: ⚠ in the text, and in the margin beside it.</p>
   <script type="application/json" id="ai-notes-data">{{ a.notes_json | tojson }}</script>
-  {% if id == "assessment" and ai_documents %}
-  <p class="ai-documents-link"><button type="button" data-drawer="documents">Choose what goes into the {{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }} documents →</button></p>
-  {% endif %}
   {% endif %}
   <p class="role assess-note">{{ note }}</p>
   {% endif %}
 </aside>
 {% endmacro %}
 {% if assessment %}{{ drawer(assessment, "assessment", "AI assessment", "Written by an AI: check it against the text.") }}{% endif %}
-{% if ai_documents %}
-<aside class="drawer ai-documents" id="documents" aria-labelledby="documents-title" hidden>
-  <div class="drawer-head"><h2 id="documents-title">Documents to download</h2>
-    <span class="role">{{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }}</span>
-    <button type="button" class="btn close" data-drawer="documents" aria-label="Close the documents to download">Close</button></div>
-  <p class="role">Each problem the AI marked is a comment on its passage; in the {{ "document" if c.single else "new version" }} with its fixes, the fixes it wrote out are its own tracked changes, to accept or reject. A problem left out of the documents loses its comment, and its fix is rejected; a comment resolved is marked so (Word's Resolve, LibreOffice's Resolved).</p>
-  <div class="doc-filter" role="group" aria-label="Which problems the list shows">
-    <label>Show <select class="doc-filter-keep" aria-label="Show the problems in the download, left out, or both">
-      <option value="">in the download or not</option><option value="in">in the download</option><option value="out">left out</option></select></label>
-    <label><select class="doc-filter-resolved" aria-label="Show the problems resolved, not resolved, or both">
-      <option value="">resolved or not</option><option value="yes">resolved</option><option value="no">not resolved</option></select></label>
-    <span class="role doc-shown"></span>
-    <button type="button" class="btn resolve-applied" title="Mark resolved the comments of the problems whose fix is already applied (the version with the AI's fixes has it as a tracked change)">✓ Resolve the fixes applied</button>
-  </div>
-  <table class="doc-problems">
-    <thead><tr><th scope="col">Problem</th>
-      <th scope="col"><label>In the download<input type="checkbox" class="all-box" data-all="keep-box" aria-label="Every problem in the downloaded documents"></label></th>
-      <th scope="col"><label>Resolved<input type="checkbox" class="all-box" data-all="resolve-box" aria-label="Every problem's comment resolved in the downloaded documents"></label></th></tr></thead>
-    <tbody></tbody>
-  </table>
-  <p class="role doc-none" hidden>No problem matches: change what the list shows above.</p>
-  <p class="role ai-included"></p>
-  <ul>
-  {% for d in ai_documents %}
-    <li><button type="button" class="btn ai-download" data-document="{{ loop.index0 }}">⤓ {{ d.label }}</button><span class="role file-name">{{ d.name }}</span>
-      <script type="application/octet-stream" class="ai-document" data-spec="{{ d.spec | tojson | forceescape }}">{{ d.base64 }}</script></li>
-  {% endfor %}
-  </ul>
-</aside>
-{% endif %}
-{% if writing %}{{ drawer(writing, "writing", "AI writing", "Written by an AI, and an indication, not a proof: careful writers show these signs too, and writers in a second language are often taken for an AI wrongly.") }}{% endif %}
+{# the documents to download, saved by their buttons in the top bar #}
+{% for d in ai_documents %}<script type="application/octet-stream" class="ai-document" data-spec="{{ d.spec | tojson | forceescape }}">{{ d.base64 }}</script>
+{% endfor %}{% if writing %}{{ drawer(writing, "writing", "AI writing", "Written by an AI, and an indication, not a proof: careful writers show these signs too, and writers in a second language are often taken for an AI wrongly.") }}{% endif %}
 <div id="review-head" aria-live="polite"><span class="which"></span><span class="where"></span><span class="spacer"></span>
   <button type="button" data-review-step="-1" title="Previous (k)">‹ Previous</button>
   <button type="button" class="next" data-review-step="1" title="Next (j)">Next ›</button></div>
@@ -1084,25 +1034,33 @@ thead.print, .print-note { display: none; }
     store(name, on ? "1" : "0");
   }
   function toggle(name) { setView(name, !document.body.classList.contains(name)); }
-  // The View menu: its button opens and closes it; Escape, or a click
-  // outside it, closes it. Its switches leave it open, to switch several.
-  var menuButton = document.querySelector(".menu-button");
-  var menuPanel = document.getElementById("view-menu");
-  function setMenu(open) {
-    if (!menuPanel) return;
-    menuPanel.hidden = !open;
-    menuButton.setAttribute("aria-expanded", open ? "true" : "false");
+  // The menus (View, and Filter for the problems): a menu's button opens
+  // and closes its panel, closing any other; Escape, or a click outside,
+  // closes it. Its switches leave it open, to switch several.
+  function setMenu(button, open) {
+    var panel = document.getElementById(button.getAttribute("aria-controls"));
+    if (!panel) return;
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  function openMenus() {
+    return Array.prototype.filter.call(document.querySelectorAll(".menu-button"), function (b) {
+      return b.getAttribute("aria-expanded") === "true";
+    });
   }
   document.addEventListener("click", function (e) {
-    if (!menuPanel) return;
-    if (e.target.closest(".menu-button")) setMenu(menuPanel.hidden);
-    else if (!e.target.closest(".menu-panel")) setMenu(false);
+    var button = e.target.closest(".menu-button"), panel = e.target.closest(".menu-panel");
+    openMenus().forEach(function (b) {
+      if (b !== button && !(panel && panel.id === b.getAttribute("aria-controls"))) setMenu(b, false);
+    });
+    if (button) setMenu(button, button.getAttribute("aria-expanded") !== "true");
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && menuPanel && !menuPanel.hidden) {
-      setMenu(false);
-      menuButton.focus();
-    }
+    if (e.key !== "Escape") return;
+    openMenus().forEach(function (b) {
+      setMenu(b, false);
+      b.focus();
+    });
   });
   // Formatted text and formatting changes are on by default, the other
   // views off; a choice the
@@ -1624,11 +1582,11 @@ thead.print, .print-note { display: none; }
       c.classList.add("problem");
       c.dataset.note = m.dataset.note;
       button.appendChild(el("span", "chip", "⚠ Problem " + note.num));
-      // where it is marked: in a review shown beside the file with the AI's
-      // fixes, which of the two; comparing, "old version" for text only it has
-      button.appendChild(el("span", "when", FIXES_SHOWN
-        ? (note.side === "old" ? "Marked in the original" : "Marked in the version with AI fixes")
-        : (note.side === "old" ? "AI, old version" : "AI")));
+      // comparing, "old version" for text only it has; in a review beside
+      // the file with the AI's fixes, the side says only whether the fix is
+      // applied, which the card says itself
+      button.appendChild(el("span", "when",
+        note.side === "old" && !FIXES_SHOWN ? "AI, old version" : "AI"));
       if (document.querySelector("script.ai-document")) {
         foot = el("div", "foot");
         foot.appendChild(keepBox(m.dataset.note, note));
@@ -1821,7 +1779,7 @@ thead.print, .print-note { display: none; }
   var aiCurrent = -1;
   var aiCounter = document.querySelector(".ai-counter");
   function goAiMark(step) {
-    var found = aiOrder.filter(function (k) { return shownMark(aiNotes[k]); });
+    var found = aiOrder.filter(function (k) { return shownMark(aiNotes[k]) && !aiNotes[k].filtered; });
     if (!found.length) return;
     var at = found.indexOf(aiCurrent);
     at = cycle(at, step, found.length);
@@ -1912,7 +1870,7 @@ thead.print, .print-note { display: none; }
       b.disabled = !on;
     });
     countIncluded();
-    allBoxes();
+    applyFilter();
   }
   // The problems whose comments are marked resolved in the documents: at
   // first, those whose fix is applied.
@@ -1932,31 +1890,7 @@ thead.print, .print-note { display: none; }
     document.querySelectorAll('.resolve-box[data-note="' + k + '"]').forEach(function (b) {
       b.checked = on;
     });
-    allBoxes();
-  }
-  // The documents' drawer: a row per problem, in reading order, its text
-  // going to it, its boxes those of its card; at the top of each column, a
-  // box for all of them, ticked when all are, a dash when some are.
-  var docRows = document.querySelector(".doc-problems tbody");
-  if (docRows) {
-    aiOrder.forEach(function (k) {
-      var note = aiNotes[k], row = el("tr"), go = el("button", "go-problem");
-      row.dataset.note = k;
-      go.type = "button";
-      go.dataset.problem = k;
-      go.appendChild(el("span", "num", "⚠ " + note.num));
-      go.appendChild(el("span", "what", note.problem));
-      if (!shownMark(note)) {
-        go.disabled = true;
-        go.title = "Not found in the text";
-      }
-      [go, keepBox(String(k), note), resolveBox(String(k), note)].forEach(function (x, i) {
-        var td = el("td");
-        td.appendChild(i ? x.querySelector("input") : x);
-        row.appendChild(td);
-      });
-      docRows.appendChild(row);
-    });
+    applyFilter();
   }
   // The problems whose fix is already applied: in the documents, those with
   // tracked changes of their own (the version with the AI's fixes); in the
@@ -1971,83 +1905,58 @@ thead.print, .print-note { display: none; }
   function fixDone(k) {
     return !!fixedInDocuments[k] || fixApplied(aiNotes[k]);
   }
-  // in the list, a tag on those
-  if (docRows) {
-    Array.prototype.forEach.call(docRows.rows, function (row) {
-      if (fixDone(row.dataset.note)) {
-        row.querySelector(".go-problem").appendChild(el("span", "fix-tag", "✓ fix applied"));
-      }
-    });
+  // The Filter menu: the problems shown, on their cards, their badges and in
+  // Review's list, are those in the download or left out of it, resolved or
+  // not, as it says; a problem that stops matching (a box clicked) goes at
+  // once. Previous and next skip the others.
+  function matches(k) {
+    var keepWanted = (document.querySelector(".filter-keep") || {}).value || "";
+    var resolvedWanted = (document.querySelector(".filter-resolved") || {}).value || "";
+    return (!keepWanted || (keepWanted === "in") === !leftOut[k]) &&
+      (!resolvedWanted || (resolvedWanted === "yes") === !!resolvedNotes[k]);
   }
-  // The rows the filters above the list let through: in the download or
-  // left out, resolved or not.
-  function shownRows() {
-    var keepWanted = (document.querySelector(".doc-filter-keep") || {}).value || "";
-    var resolvedWanted = (document.querySelector(".doc-filter-resolved") || {}).value || "";
-    return Array.prototype.filter.call(docRows.rows, function (row) {
-      var kept = row.querySelector(".keep-box").checked;
-      var resolved = row.querySelector(".resolve-box").checked;
-      return (!keepWanted || (keepWanted === "in") === kept) &&
-        (!resolvedWanted || (resolvedWanted === "yes") === resolved);
+  function applyFilter() {
+    var shown = 0;
+    aiNotes.forEach(function (note, k) {
+      var on = matches(k);
+      note.filtered = !on;
+      if (on) shown++;
+      document.querySelectorAll('.card.problem[data-note="' + k + '"]').forEach(function (c) {
+        c.hidden = !on;
+      });
+      (note.marks || []).forEach(function (m) { m.classList.toggle("filtered", !on); });
     });
-  }
-  // The list redrawn: the rows the filters let through shown, how many, and
-  // each column's box for all of them (the rows shown).
-  function allBoxes() {
-    if (!docRows) return;
-    var shown = shownRows();
-    Array.prototype.forEach.call(docRows.rows, function (row) {
-      row.hidden = shown.indexOf(row) < 0;
+    (reviewItems || []).forEach(function (it) {  // none before Review's list is made
+      if (it.kind !== "problem") return;
+      it.filtered = aiNotes[it.note].filtered;
+      (it.button.closest(".with-check") || it.button).hidden = it.filtered;
     });
-    var count = document.querySelector(".doc-shown"), none = document.querySelector(".doc-none");
-    if (count) {
-      count.textContent = shown.length === docRows.rows.length ? ""
-        : fmt(shown.length) + " of " + fmt(docRows.rows.length) + " shown";
+    var heading = document.querySelector("#review-list .problems-heading");
+    if (heading) {
+      heading.textContent = "Problems · " + (shown < aiNotes.length
+        ? fmt(shown) + " of " + fmt(aiNotes.length) : fmt(aiNotes.length));
     }
-    if (none) none.hidden = shown.length > 0;
-    document.querySelectorAll(".doc-problems .all-box").forEach(function (all) {
-      var boxes = shown.map(function (row) { return row.querySelector("." + all.dataset.all); });
-      var on = boxes.filter(function (b) { return b.checked; }).length;
-      all.checked = on > 0 && on === boxes.length;
-      all.indeterminate = on > 0 && on < boxes.length;
-      all.disabled = !boxes.length;
-    });
+    var count = document.querySelector(".filter-count");
+    if (count) count.textContent = shown < aiNotes.length ? " · " + fmt(shown) + " of " + fmt(aiNotes.length) : "";
     var button = document.querySelector(".resolve-applied");
     if (button) {
       var open = aiNotes.filter(function (note, k) { return fixDone(k) && !resolvedNotes[k]; });
       var applied = aiNotes.filter(function (note, k) { return fixDone(k); });
       button.hidden = !applied.length;
       button.disabled = !open.length;
-      button.textContent = "✓ Resolve the fixes applied" + (open.length ? " (" + fmt(open.length) + ")" : "");
+      button.textContent = "✓ Resolve fixes applied" + (open.length ? " (" + fmt(open.length) + ")" : "");
     }
+    document.dispatchEvent(new Event("prosediff-layout"));  // the cards placed again
   }
-  allBoxes();
+  applyFilter();
   document.addEventListener("change", function (e) {
-    if (e.target.closest && e.target.closest(".doc-filter")) {
-      allBoxes();
-      return;
-    }
-    var all = e.target.closest && e.target.closest(".all-box");
-    if (!all) return;
-    // read once: each problem's box set redraws the list; and only the rows
-    // shown, read before they change
-    var on = all.checked;
-    shownRows().forEach(function (row) {
-      if (all.dataset.all === "keep-box") keep(row.dataset.note, on);
-      else resolve(row.dataset.note, on);
-    });
+    if (e.target.closest && e.target.closest("#filter-menu select")) applyFilter();
   });
   document.addEventListener("click", function (e) {
     if (!(e.target.closest && e.target.closest(".resolve-applied"))) return;
     aiNotes.forEach(function (note, k) {
       if (fixDone(k)) resolve(String(k), true);
     });
-  });
-  document.addEventListener("click", function (e) {
-    var go = e.target.closest && e.target.closest(".go-problem");
-    if (!go) return;
-    setDrawer(false);
-    goProblem(Number(go.dataset.problem));
   });
   var W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml";
   var W15_NS = "http://schemas.microsoft.com/office/word/2012/wordml";
@@ -2080,14 +1989,16 @@ thead.print, .print-note { display: none; }
     });
     files["content.xml"] = bytesOfXml(doc);
   }
+  // The download buttons' tooltips: how many of the problems the documents hold.
   function countIncluded() {
-    var out = document.querySelector(".ai-documents .ai-included");
-    if (!out) return;
     if (!aiNotes.length) return;
     var n = aiNotes.filter(function (note, k) { return !leftOut[k]; }).length;
-    out.textContent = "They hold " + fmt(n) + " of the " + fmt(aiNotes.length) + " problems.";
-    document.querySelectorAll(".toolbar .ai-count").forEach(function (c) {
-      c.textContent = fmt(n) + " of " + fmt(aiNotes.length);
+    document.querySelectorAll(".doc-button.ai-download").forEach(function (b) {
+      if (!b.dataset.base) b.dataset.base = b.dataset.help || b.title;
+      var text = b.dataset.base + " (" + fmt(n) + " of " + fmt(aiNotes.length) + " problems; " +
+        "choose which, and which are resolved, on their cards or in Review)";
+      if ("help" in b.dataset) b.dataset.help = text;
+      else b.title = text;
     });
   }
   countIncluded();
@@ -2349,7 +2260,7 @@ thead.print, .print-note { display: none; }
       });
     }
     if (aiNotes.length) {
-      var heading = el("h3", null, "Problems · " + fmt(aiNotes.length));
+      var heading = el("h3", "problems-heading", "Problems · " + fmt(aiNotes.length));
       reviewList.appendChild(heading);
       if (reviewList.firstChild !== heading) {
         var jump = el("button", "jump", "Problems ↓");
@@ -2360,7 +2271,7 @@ thead.print, .print-note { display: none; }
       }
       aiOrder.forEach(function (k) {
         var note = aiNotes[k], c = root.querySelector('.card[data-note="' + k + '"]');
-        var b = add({ kind: "problem", row: c && c.closest("tr"), card: c },
+        var b = add({ kind: "problem", row: c && c.closest("tr"), card: c, note: k },
           "⚠ " + note.num, note.problem);
         if (!c) {
           b.disabled = true;
@@ -2368,6 +2279,7 @@ thead.print, .print-note { display: none; }
         }
         if (aiDocuments.length) withCheck(b, k, note);
       });
+      applyFilter();
     }
   }
   function selectReview(k) {
@@ -2403,7 +2315,7 @@ thead.print, .print-note { display: none; }
     var k = reviewAt;
     for (var t = 0; t < reviewItems.length; t++) {
       k = (k + step + reviewItems.length) % reviewItems.length;
-      if (!reviewItems[k].button.disabled) { selectReview(k); return; }
+      if (!reviewItems[k].button.disabled && !reviewItems[k].filtered) { selectReview(k); return; }
     }
   }
   function setReview(on) {

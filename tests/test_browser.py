@@ -32,13 +32,19 @@ NOTE = '[Old remark.]{.comment-start id="1" author="Anna" date="2026-09-23T10:15
 
 
 def save_document(page, label="fixes"):
-    """The download of the document whose button holds label, from the
-    documents' drawer (opened from the top bar, closed again)."""
-    page.click(".toolbar [data-drawer='documents']")
+    """The download of a document from its button in the top bar: the one
+    with the AI's fixes, or ("comments") the changes tracked with its
+    comments."""
+    text = "With AI fixes" if label == "fixes" else "Tracked changes"
     with page.expect_download() as d:
-        page.click(f"#documents .ai-download:has-text('{label}')")
-    page.keyboard.press("Escape")
+        page.click(f".toolbar .ai-download:has-text('{text}')")
     return d.value
+
+
+def download_tip(page) -> str:
+    """The tooltip of the top bar's download buttons (the first's)."""
+    b = page.locator(".toolbar .ai-download").first
+    return b.get_attribute("data-help") or b.get_attribute("title")
 
 
 def open_report(browser, tmp_path, comparison, **render_options):
@@ -959,13 +965,13 @@ def test_the_margin_hidden_and_shown(page):
 
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
 def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
-    """The documents' drawer saves each document the AI's problems were put
-    in; a problem left out in review mode (its box unticked) is not in
-    either: no comment of its, its fix rejected."""
+    """The top bar's buttons save each document the AI's problems were put
+    in, at once; a problem left out in review mode (its box unticked) is not
+    in either: no comment of its, its fix rejected."""
     old, new = pair(tmp_path, fmt)
     c = compare_paths(str(old), str(new), Options())
     page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
-    included = page.locator(".ai-documents .ai-included")
+    assert page.locator("#documents").count() == 0  # no drawer
 
     def save(label, name):
         d = save_document(page, label)
@@ -977,7 +983,7 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
         )
         return out
 
-    assert "2 of the 2 problems" in included.inner_text()
+    assert "2 of 2 problems" in download_tip(page)
     fixed = save("fixes", f"all.{fmt}")
     assert "We find a small and significant effect." in lines(fixed, "accept-all")
     fixed_note = (
@@ -989,14 +995,13 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     page.keyboard.press("r")
     page.locator("#review-list .with-check", has_text="Nothing supports").locator("input").uncheck()
     page.keyboard.press("r")
-    assert "1 of the 2 problems" in included.inner_text()
+    assert "1 of 2 problems" in download_tip(page)
     fewer = save("fixes", f"fewer.{fmt}")
     assert lines(fewer, "accept-all") == lines(new, "accept-all")
     texts = comments_of(fewer, fmt)
     assert not any(t.startswith("Nothing supports") for t in texts)
     assert "Which checks?\nProposed: Name them." in texts
     tracked = save("comments", f"tracked.{fmt}")
-    assert page.locator("#documents").is_hidden()
     assert lines(tracked, "reject-all") == lines(old, "accept-all")
     assert [t for t in comments_of(tracked, fmt) if "Nothing supports" in t] == []
     page.context.close()
@@ -1035,11 +1040,10 @@ def test_a_problem_left_out_from_its_card_and_the_review_list_resized(browser, t
     old, new = pair(tmp_path, "docx")
     c = compare_paths(str(old), str(new), Options())
     page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
-    count = page.locator(".toolbar .ai-count")
-    assert count.inner_text() == "2 of 2"
+    assert "2 of 2 problems" in download_tip(page)
     card = page.locator(".card.problem", has_text="Nothing supports")
     card.locator(".keep-box").uncheck()
-    assert count.inner_text() == "1 of 2"
+    assert "1 of 2 problems" in download_tip(page)
     page.evaluate("document.activeElement.blur()")  # keys typed in a box are its own
     page.keyboard.press("r")
     row = page.locator("#review-list .with-check", has_text="Nothing supports")
@@ -1064,89 +1068,64 @@ def test_a_problem_left_out_from_its_card_and_the_review_list_resized(browser, t
     page.context.close()
 
 
-def test_the_documents_drawer_lists_the_problems_with_their_boxes(browser, tmp_path):
-    """The top bar's Documents opens a drawer with a row per problem, its
-    boxes those of its card; each column's box ticks or unticks them all, a
-    dash when only some are ticked; a problem's text goes to it."""
+def test_the_problems_filtered_and_the_fixes_applied_resolved(browser, tmp_path):
+    """The top bar's button marks resolved the comments of the problems
+    whose fix the version with the AI's fixes holds, greyed out once they
+    all are. The Filter menu shows the problems in the download or left out,
+    resolved or not: the others lose their card and their badge, leave
+    Review's list, and the problems' previous and next skip them; a problem
+    that stops matching goes at once."""
     old, new = pair(tmp_path, "docx")
     c = compare_paths(str(old), str(new), Options())
     page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
-    page.click(".toolbar [data-drawer='documents']")
-    drawer = page.locator("#documents")
-    assert drawer.is_visible()
-    rows = drawer.locator("tbody tr")
-    assert rows.count() == 2
-    keep_all, resolve_all = (
-        drawer.locator("[data-all='keep-box']"),
-        drawer.locator("[data-all='resolve-box']"),
-    )
-    card_keep = page.locator(".card.problem", has_text="Which checks?").locator(".keep-box")
-    row = rows.filter(has_text="Which checks?")
+    fixed = page.locator(".card.problem", has_text="Nothing supports")
+    advice = page.locator(".card.problem", has_text="Which checks?")
+    badges = page.locator(".ai-mark")
 
-    def dash(box):
-        return box.evaluate("b => b.indeterminate")
+    def shown():
+        return [fixed.is_visible(), advice.is_visible()]
 
-    assert keep_all.is_checked() and not dash(keep_all)
-    assert not resolve_all.is_checked() and not dash(resolve_all)
-    row.locator(".keep-box").uncheck()
-    assert not card_keep.is_checked()
-    assert dash(keep_all) and row.locator(".resolve-box").is_disabled()
-    assert drawer.locator(".ai-included").inner_text() == "They hold 1 of the 2 problems."
-    keep_all.check()
-    assert card_keep.is_checked() and not dash(keep_all)
-    resolve_all.check()
-    assert all(rows.nth(i).locator(".resolve-box").is_checked() for i in range(2))
-    resolve_all.uncheck()
-    keep_all.uncheck()
-    assert page.locator(".toolbar .ai-count").inner_text() == "0 of 2"
-    row.locator(".go-problem").click()
-    assert drawer.is_hidden()
-    assert "active" in page.locator(".card.problem", has_text="Which checks?").get_attribute(
-        "class"
-    )
-    page.context.close()
-
-
-def test_the_documents_drawer_filters_and_resolves_the_fixes_applied(browser, tmp_path):
-    """The list shows the problems in the download or left out, resolved or
-    not, as asked; each column's box acts on the rows shown only. A button
-    marks resolved the comments of the problems whose fix the version with
-    the AI's fixes holds, and is greyed out once they all are."""
-    old, new = pair(tmp_path, "docx")
-    c = compare_paths(str(old), str(new), Options())
-    page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
-    page.click(".toolbar [data-drawer='documents']")
-    drawer = page.locator("#documents")
-    rows = drawer.locator("tbody tr")
-    fixed, advice = rows.filter(has_text="Nothing supports"), rows.filter(has_text="Which checks?")
-    shown = drawer.locator(".doc-shown")
-
-    def visible():
-        return [r.is_visible() for r in (fixed, advice)]
-
-    assert fixed.locator(".fix-tag").count() == 1 and advice.locator(".fix-tag").count() == 0
-    button = drawer.locator(".resolve-applied")
-    assert button.inner_text() == "✓ Resolve the fixes applied (1)"
+    button = page.locator(".toolbar .resolve-applied")
+    assert button.inner_text() == "✓ Resolve fixes applied (1)"
     button.click()
     assert fixed.locator(".resolve-box").is_checked()
     assert not advice.locator(".resolve-box").is_checked()
-    assert button.is_disabled()
-    drawer.locator(".doc-filter-resolved").select_option("no")
-    assert visible() == [False, True] and shown.inner_text() == "1 of 2 shown"
-    # the column's box: the row shown only, which then leaves the list
-    drawer.locator("[data-all='resolve-box']").click()  # left unticked: no row shown
-    assert advice.locator(".resolve-box").is_checked() and visible() == [False, False]
-    assert drawer.locator(".doc-none").is_visible()
-    drawer.locator(".doc-filter-resolved").select_option("")
-    assert visible() == [True, True] and shown.inner_text() == ""
-    advice.locator(".keep-box").uncheck()
-    drawer.locator(".doc-filter-keep").select_option("out")
-    assert visible() == [False, True]
-    drawer.locator(".doc-filter-keep").select_option("in")
-    assert visible() == [True, False]
-    drawer.locator("[data-all='keep-box']").click()  # the row shown only, which leaves
-    assert not fixed.locator(".keep-box").is_checked()
-    assert page.locator(".toolbar .ai-count").inner_text() == "0 of 2"
+    assert button.is_disabled() and button.inner_text() == "✓ Resolve fixes applied"
+    # not resolved only: the fixed problem's card and badge go
+    page.click(".toolbar .filter-button")
+    page.locator(".filter-resolved").select_option("no")
+    assert shown() == [False, True]
+    assert sum(badges.nth(i).is_visible() for i in range(badges.count())) == 1
+    assert page.locator(".filter-count").inner_text().strip() == "· 1 of 2"
+    page.keyboard.press("Escape")
+    page.click("[data-ai-nav='1']")
+    page.click("[data-ai-nav='1']")
+    assert "active" in advice.get_attribute("class")  # the only one: never the other
+    # resolved there, it goes at once
+    advice.locator(".resolve-box").check()
+    assert shown() == [False, False]
+    page.click(".toolbar .filter-button")
+    page.locator(".filter-resolved").select_option("")
+    page.locator(".filter-keep").select_option("out")
+    page.keyboard.press("Escape")
+    assert shown() == [False, False]
+    # in Review: the list holds the problems shown; one put back in the
+    # download by its card shows once the filter lets it
+    page.evaluate("document.activeElement.blur()")
+    page.keyboard.press("r")
+    heading = page.locator("#review-list .problems-heading")
+    assert heading.text_content() == "Problems · 0 of 2"
+    page.keyboard.press("r")
+    page.click(".toolbar .filter-button")
+    page.locator(".filter-keep").select_option("in")
+    page.keyboard.press("Escape")
+    fixed.locator(".keep-box").uncheck()
+    assert shown() == [False, True]
+    page.evaluate("document.activeElement.blur()")
+    page.keyboard.press("r")
+    items = page.locator("#review-list .with-check")
+    assert [items.nth(i).is_visible() for i in range(items.count())] == [False, True]
+    assert heading.text_content() == "Problems · 1 of 2"
     page.context.close()
 
 
@@ -1209,7 +1188,8 @@ def test_a_fix_applied_shown_on_its_card(browser, tmp_path):
     assert applied.count() == 1
     assert "Fix already applied" in applied.inner_text()
     assert "Nothing supports" in applied.inner_text()
-    assert "Marked in the original" in applied.inner_text()
+    # no "Marked in the original": the card says the fix is applied
+    assert "Marked in" not in applied.inner_text() and "old version" not in applied.inner_text()
     # its comment resolved in the documents from the start; the other not
     assert applied.locator(".resolve-box").is_checked()
     # a box clicked on a pinned card leaves it pinned
@@ -1222,7 +1202,7 @@ def test_a_fix_applied_shown_on_its_card(browser, tmp_path):
     other = page.locator(".card.problem", has_text="Which checks?")
     assert "applied" not in other.get_attribute("class")
     assert not other.locator(".resolve-box").is_checked()
-    assert "Marked in the version with AI fixes" in other.inner_text()
+    assert "Marked in" not in other.inner_text()
     # and so in the file downloaded: one comment resolved, the fixed one's
     d = save_document(page)
     out = tmp_path / "fixed.docx"

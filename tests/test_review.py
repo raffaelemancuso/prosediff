@@ -148,9 +148,9 @@ def test_the_file_comes_back_with_the_ais_fixes(tmp_path, fmt):
                 for r in revisions(out)} == {"Claude Code (opus)"}  # fmt: skip
     html = render(c, assessment=a)
     assert html.count('class="ai-document"') == 1
-    assert "in the document with its fixes" in html
-    # the documents' drawer, opened from the top bar
-    assert html.count('data-drawer="documents"') == 3  # top bar, assessment, close
+    # its button in the top bar, which saves it at once (no drawer)
+    assert html.count('class="doc-button ai-download"') == 1 and f"With AI fixes .{fmt}" in html
+    assert 'id="documents"' not in html
     data = re.search(r'class="ai-document"[^>]*>([^<]+)<', html)[1]
     assert base64.b64decode(data)[:2] == b"PK"  # a zip: made anew, its dates the time's
 
