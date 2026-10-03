@@ -39,7 +39,8 @@ The segmented button at the top chooses what is compared:
   between them).
 - **Files**: two files, Word documents included.
 - **Folders**: two folders; only the files matching "Only" (`--include`)
-  are compared.
+  are compared, and with **Only the files in both folders**
+  (`--common-only`) only those at the same path in both.
 - **One file**: a file reviewed whole by the AI (see
   [Reviewing one file](ai_assessment.md#reviewing-one-file)). Compare
   becomes **Review**, the output is `NAME_review.html` next to the file,

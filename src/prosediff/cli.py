@@ -148,6 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
         f'case; "" for every file (default: "{FOLDER_FILES}")',
     )
     ap.add_argument(
+        "--common-only",
+        action="store_true",
+        help="with --folders, compare only the files found at the same path in both "
+        "folders: those only in one, added, deleted or renamed, are left out",
+    )
+    ap.add_argument(
         "-p",
         "--path",
         action="append",
@@ -598,6 +604,7 @@ def main(argv: list[str] | None = None) -> int:
         untracked=args.untracked,
         paths=args.paths,
         include=FOLDER_FILES if args.include is None else args.include,
+        common_only=args.common_only,
         options=options,
         fmt=fmt,
         split=split,
@@ -728,6 +735,7 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     for option, given in (
         ("--path", args.paths),
         ("--include", args.include is not None),
+        ("--common-only", args.common_only),
         ("--cached", args.cached),
         ("--untracked", args.untracked),
     ):
@@ -834,6 +842,8 @@ def _check_compare_args(ap: argparse.ArgumentParser, args: argparse.Namespace, m
             ap.error("OLD and NEW are files: use --files")
     if args.include is not None and not args.folders:
         ap.error("--include picks the files of two folders: it goes with --folders")
+    if args.common_only and not args.folders:
+        ap.error("--common-only picks the files of two folders: it goes with --folders")
     if args.paths and args.files:
         ap.error("--path picks files of a repository or of two folders, not of --files")
     if args.cached and args.target:

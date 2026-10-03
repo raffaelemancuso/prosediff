@@ -40,7 +40,8 @@ class Run:
 
     mode: "git" (old: the repository, new: the base, target: a ref, None
     for the working tree; cached: the index instead; untracked: new files
-    too), "files" or "folders" (old and new; include: the folders' files),
+    too), "files" or "folders" (old and new; include: the folders' files;
+    common_only: only those in both),
     or "review" (old: the file request's AI reviews alone). paths limit what
     is compared. The output goes to output, as fmt (one of render.FORMATS),
     the prose compared as split says. request: the AI that assesses (None:
@@ -58,6 +59,7 @@ class Run:
     untracked: bool = False
     paths: list[str] | None = None
     include: str | None = FOLDER_FILES
+    common_only: bool = False
     options: Options = field(default_factory=Options)
     fmt: str = "html"
     split: str = "both"
@@ -202,7 +204,14 @@ def execute(
                     cached=run.cached,
                     untracked=run.untracked,
                 )
-            return compare_paths(run.old, run.new, options, paths=run.paths, include=run.include)
+            return compare_paths(
+                run.old,
+                run.new,
+                options,
+                paths=run.paths,
+                include=run.include,
+                common_only=run.common_only,
+            )
 
         # paragraph by paragraph, sentence by sentence, or both (the paragraphs first)
         comparison = compared(replace(run.options, by_sentence=run.split == "sentence"))

@@ -125,6 +125,10 @@ def test_cli_files_and_folders_are_told_apart(tmp_path, capsys):
     assert "use --files" in capsys.readouterr().err
     assert main(["--folders", *folders, *out]) == 0
     assert main(["--files", *files, *out]) == 0
+    with pytest.raises(SystemExit):
+        main(["--files", *files, "--common-only", *out])
+    assert "--common-only picks the files of two folders" in capsys.readouterr().err
+    assert main(["--folders", *folders, "--common-only", *out]) == 0
 
 
 def test_cli_writes_a_unified_diff(tmp_path, monkeypatch):

@@ -153,6 +153,8 @@ class Settings:
     rebuild_file: str = ""
     # the files of two folders compared: glob patterns separated by "|"
     include: str = FOLDER_FILES
+    # only the files at the same path in both folders
+    common_only: bool = False
     # "markers": set apart from the text (a marker and a panel in the HTML
     # report, CriticMarkup in the diffs); "text": compared as text; "none"
     comments: str = "markers"
@@ -446,6 +448,7 @@ def run_of(s: Settings) -> Run:
         run.untracked = s.untracked and s.target in ("worktree", "")
     elif s.mode == "folders":
         run.include = s.include
+        run.common_only = s.common_only
     return run
 
 
@@ -719,6 +722,14 @@ class App:
             include_entry,
             "The files compared: patterns separated by |, matched against each file's name "
             "(its path within the folder for a pattern with a /); empty: every file.",
+        )
+        self.common_only = self.setting("common_only")
+        common_box = toggle(folders_side, "Only the files in both folders", self.common_only)
+        common_box.grid(row=3, column=1, sticky="w", **PAD)
+        hint(
+            common_box,
+            "Compare only the files found at the same path in both folders: "
+            "those only in one (added, deleted or renamed) are left out.",
         )
 
     def build_review_side(self, side: ttk.Frame) -> None:

@@ -49,6 +49,9 @@ def test_two_folders(tmp_path):
     assert c.base.subject == "folder"
     c = compare_paths(old, new, paths=["sub"])
     assert [f.change for f in c.files] == ["deleted"]
+    # only the files in both folders: none added, deleted or renamed
+    c = compare_paths(old, new, common_only=True)
+    assert {f.path: f.change for f in c.files} == {"mod.txt": "modified"}
 
 
 def test_file_against_folder_is_an_error(tmp_path):

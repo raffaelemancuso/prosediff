@@ -2843,6 +2843,7 @@ def compare_paths(
     *,
     paths: list[str] | None = None,
     include: str | None = FOLDER_FILES,
+    common_only: bool = False,
 ) -> Comparison:
     """Compare two files, or two folders, outside git.
 
@@ -2853,8 +2854,9 @@ def compare_paths(
     glob patterns, separated by "|" (by default Word, OpenDocument, Markdown,
     Typst and text files; None or "" for every file), matched against each
     file's name, or its path within the folder for a pattern with a "/",
-    ignoring case. options says how the files are compared and shown
-    (Options).
+    ignoring case. common_only compares only the files at the same path in
+    both folders: none added, deleted or renamed. options says how the files
+    are compared and shown (Options).
     """
     options = options.checked()
     old, new = Path(old), Path(new)
@@ -2871,6 +2873,8 @@ def compare_paths(
         )
         gone = {p: a_files[p] for p in a_files.keys() - b_files.keys()}
         came = {p: b_files[p] for p in b_files.keys() - a_files.keys()}
+        if common_only:
+            gone, came = {}, {}
         for p in sorted(a_files.keys() & b_files.keys()):
             if a_files[p] != b_files[p]:
                 entries.append((FileDiff("modified", p, p), a_files[p], b_files[p]))

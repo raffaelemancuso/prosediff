@@ -28,6 +28,7 @@ or named by `GIT_PYTHON_GIT_EXECUTABLE`.
 | `--folders OLD NEW`        | compare two folders, file by file, outside git |
 | `--review FILE`            | review one file whole, without comparing, by the AI `--assess` names (required). Writes `NAME_review.html` next to it by default (see [Reviewing one file](ai_assessment.md#reviewing-one-file)) |
 | `--include PATTERNS`       | with `--folders`, compare only files matching these glob patterns, quoted and separated by `\|`. A pattern matches the name, or the relative path if it has a `/`, ignoring case. Default `"*.docx\|*.odt\|*.md\|*.typ\|*.txt"`; `""` compares every file. Office lock files are always skipped |
+| `--common-only`            | with `--folders`, compare only the files found at the same path in both folders: those only in one (added, deleted or renamed) are left out |
 | `--cached`                 | with `--git`, compare BASE with the index, as `git diff --cached BASE` does |
 | `--untracked`              | with `--git` and the working tree, also show untracked files that `.gitignore` does not exclude |
 | `-w`, `--ignore-whitespace`| ignore whitespace, as `git diff -w` does |

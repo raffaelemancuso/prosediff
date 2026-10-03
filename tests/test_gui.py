@@ -113,6 +113,21 @@ def test_a_json_file_fills_in_the_rebuild_tab(tmp_path):
     assert note == "" and s.mode == "rebuild" and s.rebuild_file == str(saved) and s.output == ""
 
 
+def test_folders_only_in_common(tmp_path):
+    """The folders tab's switch compares only the files in both folders."""
+    old, new = tmp_path / "a", tmp_path / "b"
+    for d in (old, new):
+        d.mkdir()
+        (d / "both.md").write_text(f"{d.name}\n")
+    (new / "added.md").write_text("new\n")
+    s = Settings(mode="folders", old_folder=str(old), new_folder=str(new))
+    s.output = str(tmp_path / "page.html")
+    every = execute(run_of(s)).comparison
+    assert sorted(f.path for f in every.files) == ["added.md", "both.md"]
+    s.common_only = True
+    assert [f.path for f in execute(run_of(s)).comparison.files] == ["both.md"]
+
+
 def test_context_lines_box():
     from prosediff.gui import context_of
 
