@@ -265,6 +265,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
     One argument that is a git repository (or a folder inside one) fills in
     the repository, the sides starting from their defaults; one Markdown,
     Word or OpenDocument file fills in the One file tab, to review it alone;
+    one JSON file (the NAME.ai.json saved beside a report) the Rebuild tab;
     two such files fill in the files tab, two
     folders the folders tab. Anything else is ignored, and the second value says why.
     """
@@ -276,6 +277,11 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
             s.single = str(path.resolve())
             s.output = ""  # next to the file (App.follow_sides)
             return s, ""
+        if path.is_file() and path.suffix.lower() == ".json":
+            s.mode = "rebuild"
+            s.rebuild_file = str(path.resolve())
+            s.output = ""  # over the report it was saved beside (App.follow_sides)
+            return s, ""
         if path.is_dir():
             try:
                 repo = git.Repo(path, search_parent_directories=True)
@@ -286,7 +292,7 @@ def settings_from_args(args: list[str], base: Settings) -> tuple[Settings, str]:
             s.base = s.target = ""  # start from the defaults
             s.paths = []
             return s, ""
-        return s, f"Not a folder, a Markdown, Word or OpenDocument file: {path}"
+        return s, f"Not a folder, a Markdown, Word, OpenDocument or JSON file: {path}"
     if len(args) == 2:
         old, new = Path(args[0]), Path(args[1])
         if prefillable(old) and prefillable(new):
@@ -2695,7 +2701,8 @@ def set_icon(root: tk.Tk) -> None:
 def main(argv: list[str] | None = None) -> None:
     """prosediff-gui [REPOSITORY | FILE | OLD NEW]: the window, prefilled from
     the arguments when they are a git repository, Markdown, Word or OpenDocument files, or
-    two folders; one file fills in the One file tab, to review it alone.
+    two folders; one file fills in the One file tab, to review it alone, and
+    one JSON file (NAME.ai.json) the Rebuild tab.
     Arguments that are none of these are reported in an error box, with the
     arguments received, and the program exits once it is dismissed."""
     args = sys.argv[1:] if argv is None else argv

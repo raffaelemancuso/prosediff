@@ -9,6 +9,9 @@ system's light or dark mode on Windows and macOS, and is light elsewhere.
   the repository a folder belongs to).
 - `prosediff-gui FILE.docx` (or `.odt`, `.md`) opens it on the **One file**
   tab, the file filled in, to review it alone.
+- `prosediff-gui NAME.ai.json` (any `.json` file) opens it on the
+  **Rebuild** tab, the AI's saved answers filled in, to make the report
+  again.
 - `prosediff-gui OLD NEW` opens it with two Markdown, Word or OpenDocument
   files, or two folders.
 

@@ -106,6 +106,13 @@ def test_one_file_fills_in_the_one_file_tab(tmp_path):
     assert note == "" and s.mode == "review" and s.single == str(sent) and s.output == ""
 
 
+def test_a_json_file_fills_in_the_rebuild_tab(tmp_path):
+    saved = tmp_path / "paper_review.ai.json"
+    saved.write_text("{}")
+    s, note = settings_from_args([str(saved)], Settings(mode="git", output="elsewhere.html"))
+    assert note == "" and s.mode == "rebuild" and s.rebuild_file == str(saved) and s.output == ""
+
+
 def test_context_lines_box():
     from prosediff.gui import context_of
 
