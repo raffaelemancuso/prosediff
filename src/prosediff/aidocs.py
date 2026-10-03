@@ -656,15 +656,13 @@ class Download:
     bytes, its format ("docx", "odt"), the ids of each problem's comments
     and changes in it (by the problem's index among the assessment's
     annotations), for the report's script to take out those of the problems
-    left out, and what it is in a word or two, for its button in the top
-    bar."""
+    left out."""
 
     name: str
     label: str
     data: bytes
     fmt: str
     notes: dict[int, dict[str, list]] = field(default_factory=dict)
-    short: str = ""
 
     @property
     def base64(self) -> str:
@@ -828,7 +826,7 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
     red_of = WordRedline if fmt == "docx" else OdtRedline
     out = []
 
-    def made(what, red_of_it, fixes: bool, name: str, label: str, short: str) -> None:
+    def made(what, red_of_it, fixes: bool, name: str, label: str) -> None:
         """The document of red_of_it() with the AI's comments (and its fixes),
         added to out; left out with a warning when it cannot be made: the
         report must not cost it."""
@@ -841,7 +839,7 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
                 resolvable(red.new.doc, [c for v in ids.values() for c in v["comments"]])
             data = BytesIO()
             red.save(data)
-            out.append(Download(name, label, data.getvalue(), fmt, ids, short))
+            out.append(Download(name, label, data.getvalue(), fmt, ids))
         except Exception as e:  # a document the redline cannot take
             warnings.warn(f"{what} could not be made: {e}", stacklevel=3)
 
@@ -862,7 +860,6 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
             False,
             f"{stem}_tracked_with_AI_comments.{fmt}",
             "The changes, tracked, with the AI's comments",
-            "Tracked changes",
         )
     which = "document" if comparison.single else "new version"
     made(
@@ -873,6 +870,5 @@ def downloads(comparison: Comparison, assessment: Assessment | None) -> list[Dow
         True,
         f"{stem}_with_AI_fixes.{fmt}",
         f"The {which} with the AI's fixes, tracked",
-        "With AI fixes",
     )
     return out

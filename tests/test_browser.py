@@ -4,6 +4,8 @@ Skipped when Playwright's Chromium is not installed
 (uv run playwright install chromium).
 """
 
+import zipfile
+
 import pytest
 from conftest import RepoBuilder
 from helpers import (
@@ -14,6 +16,7 @@ from helpers import (
     co_authored,
     commented_documents,
     comments_of,
+    docx,
     lines,
     pair,
 )
@@ -26,6 +29,16 @@ from prosediff.word import read_docx
 sync_api = pytest.importorskip("playwright.sync_api")
 
 NOTE = '[Old remark.]{.comment-start id="1" author="Anna" date="2026-09-23T10:15:00Z"}'
+
+
+def save_document(page, label="fixes"):
+    """The download of the document whose button holds label, from the
+    documents' drawer (opened from the top bar, closed again)."""
+    page.click(".toolbar [data-drawer='documents']")
+    with page.expect_download() as d:
+        page.click(f"#documents .ai-download:has-text('{label}')")
+    page.keyboard.press("Escape")
+    return d.value
 
 
 def open_report(browser, tmp_path, comparison, **render_options):
@@ -946,25 +959,22 @@ def test_the_margin_hidden_and_shown(page):
 
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
 def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
-    """The drawer, and the top bar, save each document the AI's problems were put in; a
-    problem left out in review mode (its box unticked) is not in either:
-    no comment of its, its fix rejected."""
+    """The documents' drawer saves each document the AI's problems were put
+    in; a problem left out in review mode (its box unticked) is not in
+    either: no comment of its, its fix rejected."""
     old, new = pair(tmp_path, fmt)
     c = compare_paths(str(old), str(new), Options())
     page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
     included = page.locator(".ai-documents .ai-included")
 
     def save(label, name):
-        page.click(".verdict-button")
-        with page.expect_download() as d:
-            page.click(f".ai-documents .ai-download:has-text('{label}')")
+        d = save_document(page, label)
         out = tmp_path / name
-        d.value.save_as(out)
+        d.save_as(out)
         assert (
-            d.value.suggested_filename
+            d.suggested_filename
             == f"new_{'with_AI_fixes' if 'fixes' in label else 'tracked_with_AI_comments'}.{fmt}"
         )
-        page.keyboard.press("Escape")
         return out
 
     assert "2 of the 2 problems" in included.inner_text()
@@ -983,11 +993,7 @@ def test_the_ai_documents_downloaded(browser, tmp_path, fmt):
     assert not any(t.startswith("Nothing supports") for t in texts)
     assert "Which checks?\nProposed: Name them." in texts
     tracked = save("comments", f"tracked.{fmt}")
-    # the same from the top bar, the drawer closed
-    with page.expect_download() as d:
-        page.click(f".toolbar .ai-download:has-text('With AI fixes .{fmt}')")
-    assert d.value.suggested_filename == f"new_with_AI_fixes.{fmt}"
-    assert page.locator("#assessment").is_hidden()
+    assert page.locator("#documents").is_hidden()
     assert lines(tracked, "reject-all") == lines(old, "accept-all")
     assert [t for t in comments_of(tracked, fmt) if "Nothing supports" in t] == []
     page.context.close()
@@ -1008,10 +1014,9 @@ def test_a_fix_left_out_gives_the_co_authors_words_back(browser, tmp_path, fmt):
     page.keyboard.press("r")
     page.locator("#review-list .with-check", has_text="Nothing supports").locator("input").uncheck()
     page.keyboard.press("r")
-    with page.expect_download() as d:
-        page.click(".toolbar .ai-download")
+    d = save_document(page)
     out = tmp_path / f"out.{fmt}"
-    d.value.save_as(out)
+    d.save_as(out)
     assert lines(out, "accept-all") == lines(new, "accept-all")
     assert lines(out, "reject-all") == lines(new, "reject-all")
     assert "We find a very significant effect." in lines(out, "reject-all")
@@ -1023,15 +1028,15 @@ def test_a_problem_left_out_from_its_card_and_the_review_list_resized(browser, t
     download, ticked alike in the review list, the count on the download
     buttons; the review list starts with a jump to its problems, and its
     edge, dragged, widens it, remembered, back to its width on a
-    double-click."""
+    double-click; the list has no horizontal scrollbar."""
     old, new = pair(tmp_path, "docx")
     c = compare_paths(str(old), str(new), Options())
     page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
-    button = page.locator(".toolbar .ai-download").first
-    assert "(2 of 2 problems)" in button.get_attribute("data-help")
+    count = page.locator(".toolbar .ai-count")
+    assert count.inner_text() == "2 of 2"
     card = page.locator(".card.problem", has_text="Nothing supports")
     card.locator(".keep-box").uncheck()
-    assert "(1 of 2 problems)" in button.get_attribute("data-help")
+    assert count.inner_text() == "1 of 2"
     page.evaluate("document.activeElement.blur()")  # keys typed in a box are its own
     page.keyboard.press("r")
     row = page.locator("#review-list .with-check", has_text="Nothing supports")
@@ -1039,6 +1044,9 @@ def test_a_problem_left_out_from_its_card_and_the_review_list_resized(browser, t
     row.locator("input").check()
     assert card.locator(".keep-box").is_checked()
     assert page.locator("#review-list .jump").count() == 1
+    assert page.evaluate(
+        "(l => l.scrollWidth <= l.clientWidth)(document.getElementById('review-list'))"
+    )
     handle = page.locator("#review-resizer")
     box = handle.bounding_box()
     page.mouse.move(box["x"] + 3, box["y"] + 100)
@@ -1050,6 +1058,49 @@ def test_a_problem_left_out_from_its_card_and_the_review_list_resized(browser, t
     assert page.evaluate("localStorage.getItem('prosediff-review-width')") is not None
     handle.dblclick()
     assert page.evaluate("localStorage.getItem('prosediff-review-width')") is None
+    page.context.close()
+
+
+def test_the_documents_drawer_lists_the_problems_with_their_boxes(browser, tmp_path):
+    """The top bar's Documents opens a drawer with a row per problem, its
+    boxes those of its card; each column's box ticks or unticks them all, a
+    dash when only some are ticked; a problem's text goes to it."""
+    old, new = pair(tmp_path, "docx")
+    c = compare_paths(str(old), str(new), Options())
+    page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
+    page.click(".toolbar [data-drawer='documents']")
+    drawer = page.locator("#documents")
+    assert drawer.is_visible()
+    rows = drawer.locator("tbody tr")
+    assert rows.count() == 2
+    keep_all, resolve_all = (
+        drawer.locator("[data-all='keep-box']"),
+        drawer.locator("[data-all='resolve-box']"),
+    )
+    card_keep = page.locator(".card.problem", has_text="Which checks?").locator(".keep-box")
+    row = rows.filter(has_text="Which checks?")
+
+    def dash(box):
+        return box.evaluate("b => b.indeterminate")
+
+    assert keep_all.is_checked() and not dash(keep_all)
+    assert not resolve_all.is_checked() and not dash(resolve_all)
+    row.locator(".keep-box").uncheck()
+    assert not card_keep.is_checked()
+    assert dash(keep_all) and row.locator(".resolve-box").is_disabled()
+    assert drawer.locator(".ai-included").inner_text() == "They hold 1 of the 2 problems."
+    keep_all.check()
+    assert card_keep.is_checked() and not dash(keep_all)
+    resolve_all.check()
+    assert all(rows.nth(i).locator(".resolve-box").is_checked() for i in range(2))
+    resolve_all.uncheck()
+    keep_all.uncheck()
+    assert page.locator(".toolbar .ai-count").inner_text() == "0 of 2"
+    row.locator(".go-problem").click()
+    assert drawer.is_hidden()
+    assert "active" in page.locator(".card.problem", has_text="Which checks?").get_attribute(
+        "class"
+    )
     page.context.close()
 
 
@@ -1067,10 +1118,9 @@ def test_a_problems_comment_marked_resolved_in_the_download(browser, tmp_path, f
     assert card.locator(".resolve-box").is_disabled()
     card.locator(".keep-box").check()
     assert card.locator(".resolve-box").is_enabled() and card.locator(".resolve-box").is_checked()
-    with page.expect_download() as d:
-        page.click(f".toolbar .ai-download:has-text('With AI fixes .{fmt}')")
+    d = save_document(page)
     out = tmp_path / f"resolved.{fmt}"
-    d.value.save_as(out)
+    d.save_as(out)
     page.context.close()
     reader = read_docx if fmt == "docx" else read_odt
     found = {}
@@ -1093,21 +1143,44 @@ def test_a_problems_comment_marked_resolved_in_the_download(browser, tmp_path, f
 def test_a_fix_applied_shown_on_its_card(browser, tmp_path):
     """In the report of one file's fixes, a problem whose fix the version on
     the right holds says so, its card set apart; one without a fix does not."""
-    from prosediff.pipeline import Run, fixes_shown, review_diff  # noqa: F401
+    from prosediff.diff import review_file
+    from prosediff.pipeline import Run, fixes_shown
 
-    path = tmp_path / "paper.md"
-    path.write_text(
-        "We find a large and significant effect.\n\nRobustness checks confirm every result.\n",
-        encoding="utf-8",
+    path = tmp_path / "paper.docx"
+    docx(
+        path,
+        [
+            [("run", "We find a large and significant effect.")],
+            [("run", "Robustness checks confirm every result.")],
+        ],
     )
     a = assessment([FIXED, ADVICE])
     run = Run("review", str(path), tmp_path / "out.html")
     comparison, shown = fixes_shown(run, a)
-    page = open_report(browser, tmp_path, comparison, assessment=shown)
+    single = review_file(path, Options())
+    page = open_report(browser, tmp_path, comparison, assessment=shown, documents_of=(single, a))
     applied = page.locator(".card.problem.applied")
     assert applied.count() == 1
     assert "Fix already applied" in applied.inner_text()
     assert "Nothing supports" in applied.inner_text()
+    assert "Marked in the original" in applied.inner_text()
+    # its comment resolved in the documents from the start; the other not
+    assert applied.locator(".resolve-box").is_checked()
+    # a box clicked on a pinned card leaves it pinned
+    applied.locator(".chip").click()
+    assert "active" in applied.get_attribute("class")
+    applied.locator(".resolve-box").uncheck()
+    applied.locator(".resolve-box").check()
+    applied.locator(".foot").click(position={"x": 2, "y": 2})
+    assert "active" in applied.get_attribute("class")
     other = page.locator(".card.problem", has_text="Which checks?")
     assert "applied" not in other.get_attribute("class")
+    assert not other.locator(".resolve-box").is_checked()
+    assert "Marked in the version with AI fixes" in other.inner_text()
+    # and so in the file downloaded: one comment resolved, the fixed one's
+    d = save_document(page)
+    out = tmp_path / "fixed.docx"
+    d.save_as(out)
+    extended = zipfile.ZipFile(out).read("word/commentsExtended.xml").decode()
+    assert extended.count('w15:done="1"') == 1
     page.context.close()

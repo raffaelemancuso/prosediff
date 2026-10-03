@@ -93,7 +93,7 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
 /* a problem whose fix is applied (the version with the AI's fixes holds it) */
 .card.problem.applied { border-color: color-mix(in srgb, var(--add) 55%, var(--border));
   background: color-mix(in srgb, var(--ins-line) 45%, var(--bg)); }
-.card .applied-note { color: var(--add); font-weight: 600; }
+.card .applied-note { display: block; margin-top: 4px; color: var(--add); font-size: 13px; }
 .card .keep input:disabled + span, .card .keep:has(input:disabled) { opacity: .5; cursor: default; }
 .card.active { border-color: var(--current); box-shadow: 0 0 0 2px var(--current); }
 .card .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
@@ -104,8 +104,12 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
   color: var(--muted); background: var(--panel); white-space: nowrap; }
 .card .who { font-weight: 600; }
 .card .when { color: var(--muted); font-size: 12px; }
-.card .keep { margin-left: auto; color: var(--muted); font-size: 12px; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 4px; }
+.card .keep { color: var(--muted); font-size: 12px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; }
+.card .keep input { margin: 0; }
+/* below the text: what goes into the documents to download */
+.card .foot { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 7px; padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
 #review-list .jump { margin: 10px 16px 0; padding: 0; width: auto; color: var(--current);
   font-size: 12px; }
 .card .body { margin-top: 3px; overflow-wrap: anywhere; }
@@ -180,18 +184,35 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
 /* The problems the AI marked: in the text, a numbered badge before each
    passage; its card in the margin. */
 .ai-pointer { margin: 10px 0 2px; }
-/* The documents to download: the tracked changes with the AI's comments,
-   and the new version with its fixes. */
-.ai-documents { margin: 14px 0 4px; padding: 10px 12px; border: 1px solid var(--border);
-  border-radius: 6px; }
-.ai-documents h3 { font-size: 14px; margin: 0 0 4px; }
+/* The documents to download, in a drawer of their own: a row per problem,
+   with its boxes (in the documents, its comment resolved), each column's
+   box at the top for all of them; then the documents' buttons. */
 .ai-documents p { margin: 4px 0; }
-.ai-documents ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.ai-documents ul { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
 .ai-documents li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .ai-documents .file-name { font-size: 12px; overflow-wrap: anywhere; }
+.doc-problems { width: 100%; border-collapse: collapse; margin: 10px 0 6px; table-layout: auto;
+  font-family: inherit; font-size: 13px; line-height: 1.4; }
+.doc-problems th, .doc-problems td { padding: 4px 6px; border-bottom: 1px solid var(--border);
+  text-align: left; vertical-align: top; }
+.doc-problems th + th, .doc-problems td + td { width: 1%; text-align: center; white-space: nowrap; }
+.doc-problems th { font-size: 12px; font-weight: 600; color: var(--muted); vertical-align: bottom; }
+.doc-problems th label { display: inline-flex; flex-direction: column; align-items: center; gap: 3px;
+  cursor: pointer; }
+.doc-problems input { margin: 0; cursor: pointer; }
+.doc-problems input:disabled { cursor: default; opacity: .5; }
+.doc-problems .go-problem { display: flex; gap: 8px; padding: 0; border: 0; background: none;
+  font: inherit; color: var(--fg); text-align: left; cursor: pointer; }
+.doc-problems .go-problem:hover:not(:disabled) .what { text-decoration: underline; }
+.doc-problems .go-problem:disabled { color: var(--muted); cursor: default; }
+.doc-problems .num { flex-shrink: 0; min-width: 2.4em; color: var(--current); font-weight: 600; }
+.ai-documents-link { margin: 10px 0 2px; }
+.ai-documents-link button { padding: 0; border: 0; background: none; font: inherit;
+  color: var(--link); cursor: pointer; }
+.ai-documents-link button:hover { text-decoration: underline; }
 #review-list .with-check { display: flex; align-items: center; }
 #review-list .with-check input { flex-shrink: 0; margin: 0 0 0 16px; }
-#review-list .with-check button { padding-left: 8px; }
+#review-list .with-check button { flex: 1; width: auto; min-width: 0; padding-left: 8px; }
 .ai-mark { display: inline-block; font: 600 11px/1.4 -apple-system, "Segoe UI", sans-serif;
   color: var(--bg); background: var(--current); border-radius: 8px; padding: 0 5px;
   margin-right: 3px; vertical-align: 1px; }
@@ -559,7 +580,8 @@ thead.print, .print-note { display: none; }
 @media print {
   body { padding: 0; font-size: 11px; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .toolbar, .btn, #review-list, #review-head, .drawer .close, .card .more { display: none !important; }
+  .toolbar, .btn, #review-list, #review-head, .drawer .close, .card .more,
+  #documents, .ai-documents-link { display: none !important; }
   body.review main { margin-left: 0; }
   /* The assessment at the top, whether opened or not. */
   .drawer, .drawer[hidden] { display: block; position: static; width: auto; box-shadow: none;
@@ -622,7 +644,7 @@ thead.print, .print-note { display: none; }
   {% if c.single %}<span class="bar-title" title="{{ c.target.hexsha }}">{{ c.target.short }}</span>
   {% else %}<span class="bar-title" title="{{ c.base.short }} → {{ c.target.short }}">{{ c.base.short }} → {{ c.target.short }}</span>{% endif %}
   {% if assessment %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="AI assessment: what the AI made of the {{ "document" if c.single else "changes" }} as a whole">{% if assessment.error %}<span class="verdict verdict-worsens">failed</span>{% elif assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}<span class="role">AI assessment</span></button>{% endif %}
-  {% for d in ai_documents %}<button type="button" class="doc-button ai-download" data-document="{{ loop.index0 }}" title="{{ d.label }}, to download: {{ d.name }}"><span aria-hidden="true">⤓</span><span class="role">{{ d.short }} .{{ d.fmt }}</span></button>{% endfor %}
+  {% if ai_documents %}<button type="button" class="doc-button" data-drawer="documents" aria-expanded="false" aria-controls="documents" title="Documents to download: choose which problems go into the {{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }} documents, and save them"><span aria-hidden="true">⤓</span><span class="role">Documents · <span class="ai-count"></span></span></button>{% endif %}
   {% if writing %}<button type="button" class="verdict-button" data-drawer="writing" aria-expanded="false" aria-controls="writing" title="AI writing: whether the {{ "document" if c.single else "new text" }} reads as written by an AI, an indication, not a proof">{% if writing.error %}<span class="verdict verdict-likely">failed</span>{% elif writing.verdict %}<span class="verdict verdict-{{ writing.verdict }}">{{ writing.verdict | capitalize }}</span>{% endif %}<span class="role">AI writing</span></button>{% endif %}
   <span class="spacer"></span>
   <span class="group" role="group" aria-label="Changes"{% if c.single %} hidden{% endif %}>
@@ -891,16 +913,7 @@ thead.print, .print-note { display: none; }
   <p class="ai-pointer">It marked {{ a.annotations | length | counted("problem") }} in the text: ⚠ in the text, and in the margin beside it.</p>
   <script type="application/json" id="ai-notes-data">{{ a.notes_json | tojson }}</script>
   {% if id == "assessment" and ai_documents %}
-  <section class="ai-documents" aria-labelledby="ai-documents-title">
-    <h3 id="ai-documents-title">{{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }} documents</h3>
-    <p class="role">Each problem the AI marked is a comment on its passage; in the {{ "document" if c.single else "new version" }} with its fixes, the fixes it wrote out are its own tracked changes, to accept or reject. <span class="ai-included"></span></p>
-    <ul>
-    {% for d in ai_documents %}
-      <li><button type="button" class="btn ai-download" data-document="{{ loop.index0 }}">{{ d.label }}</button><span class="role file-name">{{ d.name }}</span>
-        <script type="application/octet-stream" class="ai-document" data-spec="{{ d.spec | tojson | forceescape }}">{{ d.base64 }}</script></li>
-    {% endfor %}
-    </ul>
-  </section>
+  <p class="ai-documents-link"><button type="button" data-drawer="documents">Choose what goes into the {{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }} documents →</button></p>
   {% endif %}
   {% endif %}
   <p class="role assess-note">{{ note }}</p>
@@ -908,6 +921,27 @@ thead.print, .print-note { display: none; }
 </aside>
 {% endmacro %}
 {% if assessment %}{{ drawer(assessment, "assessment", "AI assessment", "Written by an AI: check it against the text.") }}{% endif %}
+{% if ai_documents %}
+<aside class="drawer ai-documents" id="documents" aria-labelledby="documents-title" hidden>
+  <div class="drawer-head"><h2 id="documents-title">Documents to download</h2>
+    <span class="role">{{ "Word" if ai_documents[0].fmt == "docx" else "LibreOffice" }}</span>
+    <button type="button" class="btn close" data-drawer="documents" aria-label="Close the documents to download">Close</button></div>
+  <p class="role">Each problem the AI marked is a comment on its passage; in the {{ "document" if c.single else "new version" }} with its fixes, the fixes it wrote out are its own tracked changes, to accept or reject. A problem left out of the documents loses its comment, and its fix is rejected; a comment resolved is marked so (Word's Resolve, LibreOffice's Resolved).</p>
+  <table class="doc-problems">
+    <thead><tr><th scope="col">Problem</th>
+      <th scope="col"><label>In the download<input type="checkbox" class="all-box" data-all="keep-box" aria-label="Every problem in the downloaded documents"></label></th>
+      <th scope="col"><label>Resolved<input type="checkbox" class="all-box" data-all="resolve-box" aria-label="Every problem's comment resolved in the downloaded documents"></label></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="role ai-included"></p>
+  <ul>
+  {% for d in ai_documents %}
+    <li><button type="button" class="btn ai-download" data-document="{{ loop.index0 }}">⤓ {{ d.label }}</button><span class="role file-name">{{ d.name }}</span>
+      <script type="application/octet-stream" class="ai-document" data-spec="{{ d.spec | tojson | forceescape }}">{{ d.base64 }}</script></li>
+  {% endfor %}
+  </ul>
+</aside>
+{% endif %}
 {% if writing %}{{ drawer(writing, "writing", "AI writing", "Written by an AI, and an indication, not a proof: careful writers show these signs too, and writers in a second language are often taken for an AI wrongly.") }}{% endif %}
 <div id="review-head" aria-live="polite"><span class="which"></span><span class="where"></span><span class="spacer"></span>
   <button type="button" data-review-step="-1" title="Previous (k)">‹ Previous</button>
@@ -1551,7 +1585,8 @@ thead.print, .print-note { display: none; }
     box.className = "resolve-box";
     box.dataset.note = k;
     var out = typeof leftOut === "object" && leftOut && leftOut[k];
-    box.checked = !!(typeof resolvedNotes === "object" && resolvedNotes && resolvedNotes[k]);
+    box.checked = typeof resolvedNotes === "object" && resolvedNotes
+      ? !!resolvedNotes[k] : fixApplied(note);
     box.disabled = !!out;
     box.title = "Its comment marked resolved in the documents to download";
     box.setAttribute("aria-label", "Problem " + note.num + " resolved in the downloaded documents");
@@ -1559,32 +1594,41 @@ thead.print, .print-note { display: none; }
     label.appendChild(document.createTextNode("Resolved"));
     return label;
   }
+  // Whether a problem's fix is applied: in a review shown beside the file
+  // with the AI's fixes, the problems marked on the original's side.
+  function fixApplied(note) {
+    return !!(FIXES_SHOWN && note.side === "old" && note.replacement);
+  }
   function card(m) {
     var c = el("article", "card"), head = el("div", "head"), button = el("button", "go");
-    var body = el("div", "body");
+    var body = el("div", "body"), applied = null, foot = null;
     button.type = "button";
     if (m.classList.contains("ai-mark")) {
       var note = aiNotes[Number(m.dataset.note)];
       c.classList.add("problem");
       c.dataset.note = m.dataset.note;
       button.appendChild(el("span", "chip", "⚠ Problem " + note.num));
-      button.appendChild(el("span", "when", note.side === "old" ? {{ ('"AI, original"' if c.reviewed else '"AI, old version"') | safe }} : "AI"));
+      // where it is marked: in a review shown beside the file with the AI's
+      // fixes, which of the two; comparing, "old version" for text only it has
+      button.appendChild(el("span", "when", FIXES_SHOWN
+        ? (note.side === "old" ? "Marked in the original" : "Marked in the version with AI fixes")
+        : (note.side === "old" ? "AI, old version" : "AI")));
       if (document.querySelector("script.ai-document")) {
-        head.appendChild(keepBox(m.dataset.note, note));
-        head.appendChild(resolveBox(m.dataset.note, note));
+        foot = el("div", "foot");
+        foot.appendChild(keepBox(m.dataset.note, note));
+        foot.appendChild(resolveBox(m.dataset.note, note));
       }
-      var applied = FIXES_SHOWN && note.side === "old" && note.replacement;
-      if (applied) c.classList.add("applied");
+      if (fixApplied(note)) {
+        c.classList.add("applied");
+        // after the text, not in it: never cut off with it
+        applied = el("span", "applied-note", "✓ Fix already applied: the version with AI fixes has it.");
+      }
       body.appendChild(el("span", "line", note.problem));
       if (note.solution) {
         var s = el("span", "line solution");
         s.appendChild(el("b", null, "Proposed: "));
         s.appendChild(document.createTextNode(note.solution));
         body.appendChild(s);
-      }
-      if (applied) {
-        body.appendChild(el("span", "line applied-note",
-          "✓ Fix already applied: the version with AI fixes has it."));
       }
     } else {
       var status = m.classList.contains("new") ? "new" : m.classList.contains("removed") ? "removed" : "";
@@ -1611,6 +1655,8 @@ thead.print, .print-note { display: none; }
     more.hidden = true;
     more.setAttribute("aria-expanded", "false");
     c.appendChild(more);
+    if (applied) c.appendChild(applied);
+    if (foot) c.appendChild(foot);
     return c;
   }
   // A card's text shown whole (opening) or cut to its first lines again,
@@ -1708,6 +1754,8 @@ thead.print, .print-note { display: none; }
       slide(body, opening);
       return;
     }
+    // its boxes (what goes into the documents) leave its pin as it is
+    if (e.target.closest(".card .foot")) return;
     var c = e.target.closest(".card");
     if (c) pinMark(markOf(c));
   });
@@ -1761,12 +1809,17 @@ thead.print, .print-note { display: none; }
     if (!found.length) return;
     var at = found.indexOf(aiCurrent);
     at = cycle(at, step, found.length);
-    aiCurrent = found[at];
-    var mark = shownMark(aiNotes[aiCurrent]);
+    goProblem(found[at]);
+  }
+  // Problem k brought into view and pinned, the counter saying which.
+  function goProblem(k) {
+    var mark = shownMark(aiNotes[k]);
+    if (!mark) return;
+    aiCurrent = k;
     reveal(mark);
     if (!(pinned && pinned.mark === mark)) pinNote(mark);
     if (aiCounter) {
-      aiCounter.textContent = "⚠ " + aiNotes[aiCurrent].num + " / " + aiNotes.length;
+      aiCounter.textContent = "⚠ " + aiNotes[k].num + " / " + aiNotes.length;
     }
   }
   document.addEventListener("click", function (e) {
@@ -1788,7 +1841,7 @@ thead.print, .print-note { display: none; }
     document.querySelectorAll(".drawer").forEach(function (d) {
       d.hidden = !(open && d.id === (id || "assessment"));
     });
-    document.querySelectorAll(".verdict-button").forEach(function (b) {
+    document.querySelectorAll(".toolbar [data-drawer]").forEach(function (b) {
       var shown = document.getElementById(b.dataset.drawer);
       b.setAttribute("aria-expanded", shown && !shown.hidden ? "true" : "false");
     });
@@ -1843,20 +1896,76 @@ thead.print, .print-note { display: none; }
       b.disabled = !on;
     });
     countIncluded();
+    allBoxes();
   }
-  // The problems whose comments are marked resolved in the documents.
+  // The problems whose comments are marked resolved in the documents: at
+  // first, those whose fix is applied.
   var resolvedNotes = {};
+  aiNotes.forEach(function (note, k) {
+    if (fixApplied(note)) resolvedNotes[k] = true;
+  });
   document.addEventListener("change", function (e) {
     var t = e.target;
     if (!t.classList) return;
     if (t.classList.contains("keep-box")) keep(t.dataset.note, t.checked);
-    if (t.classList.contains("resolve-box")) {
-      if (t.checked) resolvedNotes[t.dataset.note] = true;
-      else delete resolvedNotes[t.dataset.note];
-      document.querySelectorAll('.resolve-box[data-note="' + t.dataset.note + '"]').forEach(function (b) {
-        b.checked = t.checked;
+    if (t.classList.contains("resolve-box")) resolve(t.dataset.note, t.checked);
+  });
+  // A problem's comment marked resolved or not, in all its boxes.
+  function resolve(k, on) {
+    if (on) resolvedNotes[k] = true; else delete resolvedNotes[k];
+    document.querySelectorAll('.resolve-box[data-note="' + k + '"]').forEach(function (b) {
+      b.checked = on;
+    });
+    allBoxes();
+  }
+  // The documents' drawer: a row per problem, in reading order, its text
+  // going to it, its boxes those of its card; at the top of each column, a
+  // box for all of them, ticked when all are, a dash when some are.
+  var docRows = document.querySelector(".doc-problems tbody");
+  if (docRows) {
+    aiOrder.forEach(function (k) {
+      var note = aiNotes[k], row = el("tr"), go = el("button", "go-problem");
+      go.type = "button";
+      go.dataset.problem = k;
+      go.appendChild(el("span", "num", "⚠ " + note.num));
+      go.appendChild(el("span", "what", note.problem));
+      if (!shownMark(note)) {
+        go.disabled = true;
+        go.title = "Not found in the text";
+      }
+      [go, keepBox(String(k), note), resolveBox(String(k), note)].forEach(function (x, i) {
+        var td = el("td");
+        td.appendChild(i ? x.querySelector("input") : x);
+        row.appendChild(td);
       });
-    }
+      docRows.appendChild(row);
+    });
+  }
+  function allBoxes() {
+    if (!docRows) return;
+    document.querySelectorAll(".doc-problems .all-box").forEach(function (all) {
+      var boxes = Array.prototype.slice.call(docRows.querySelectorAll("." + all.dataset.all));
+      var on = boxes.filter(function (b) { return b.checked; }).length;
+      all.checked = on > 0 && on === boxes.length;
+      all.indeterminate = on > 0 && on < boxes.length;
+    });
+  }
+  allBoxes();
+  document.addEventListener("change", function (e) {
+    var all = e.target.closest && e.target.closest(".all-box");
+    if (!all) return;
+    // read once: each problem's box set redraws the column's
+    var on = all.checked;
+    aiNotes.forEach(function (note, k) {
+      if (all.dataset.all === "keep-box") keep(String(k), on);
+      else resolve(String(k), on);
+    });
+  });
+  document.addEventListener("click", function (e) {
+    var go = e.target.closest && e.target.closest(".go-problem");
+    if (!go) return;
+    setDrawer(false);
+    goProblem(Number(go.dataset.problem));
   });
   var W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml";
   var W15_NS = "http://schemas.microsoft.com/office/word/2012/wordml";
@@ -1894,14 +2003,9 @@ thead.print, .print-note { display: none; }
     if (!out) return;
     if (!aiNotes.length) return;
     var n = aiNotes.filter(function (note, k) { return !leftOut[k]; }).length;
-    out.textContent = "They hold " + fmt(n) + " of the " + fmt(aiNotes.length) + " problems" +
-      " (untick those to leave out: on their cards, or in Review).";
-    // on the top bar's buttons, whose tooltip is their help once the page is up
-    document.querySelectorAll(".doc-button.ai-download").forEach(function (b) {
-      if (!b.dataset.base) b.dataset.base = b.dataset.help || b.title;
-      var text = b.dataset.base + " (" + fmt(n) + " of " + fmt(aiNotes.length) + " problems)";
-      if ("help" in b.dataset) b.dataset.help = text;
-      else b.title = text;
+    out.textContent = "They hold " + fmt(n) + " of the " + fmt(aiNotes.length) + " problems.";
+    document.querySelectorAll(".toolbar .ai-count").forEach(function (c) {
+      c.textContent = fmt(n) + " of " + fmt(aiNotes.length);
     });
   }
   countIncluded();

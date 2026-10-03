@@ -30,8 +30,8 @@ it until clicked again; the top bar's ◀ ⚠ ▶
 ## The AI's problems in Word and LibreOffice documents
 
 When two Word documents (or two OpenDocument texts) are compared and the
-AI marked problems, the drawer and the top bar offer two documents to
-download, made from the new version:
+AI marked problems, **Documents** in the top bar opens a drawer that
+offers two documents to download, made from the new version:
 
 - **The changes, tracked, with the AI's comments**: the
   [tracked-changes document](how_it_works.md#tracked-changes), each
