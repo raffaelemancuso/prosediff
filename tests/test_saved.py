@@ -152,3 +152,23 @@ def test_a_project_holds_the_settings_and_the_report_to_make_again(tmp_path, mon
         load(empty)
     with pytest.raises(SavedError, match="not a prosediff project"):
         load_project(done.saved)
+
+
+def test_answers_an_earlier_prosediff_saved_are_refused(tmp_path, monkeypatch):
+    """Answers without the current format (an earlier prosediff's, whose
+    checksums left out the context files) are not made again, nor put in
+    a project."""
+    from prosediff.saved import SAVED_FORMAT, answers, save_project
+
+    _, done, _ = assessed(tmp_path, monkeypatch)
+    data = json.loads(done.saved.read_text(encoding="utf-8"))
+    assert data["format"] == SAVED_FORMAT
+    del data["format"]
+    done.saved.write_text(json.dumps(data), encoding="utf-8")
+    for read in (load, answers):
+        with pytest.raises(SavedError, match="saved by an earlier prosediff"):
+            read(done.saved)
+    project = tmp_path / "old.prosediff"
+    save_project(project, {}, data)
+    with pytest.raises(SavedError, match="saved by an earlier prosediff"):
+        load(project)

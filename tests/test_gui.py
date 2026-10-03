@@ -1306,6 +1306,7 @@ def test_a_project_saved_and_opened_again(root, tmp_path):
     assert again.sides_page() == str(tmp_path / "a_vs_b.html")
     # a run's answers kept for the next Save project
     answers = tmp_path / "r.ai.json"
-    answers.write_text(json.dumps({"run": {}, "assessment": {"markdown": "y"}}), encoding="utf-8")
+    data = {"format": 2, "run": {}, "assessment": {"markdown": "y"}}
+    answers.write_text(json.dumps(data), encoding="utf-8")
     again.keep_answers(again.collect(), SimpleNamespace(saved=str(answers)))
     assert again.project_report["assessment"]["markdown"] == "y"

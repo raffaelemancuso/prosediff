@@ -18,6 +18,10 @@ from prosediff.pipeline import Run
 from prosediff.render import package_version
 
 SAVED_SUFFIX = ".ai.json"
+# The format of the answers kept; those of another (an earlier prosediff,
+# whose fingerprints left out the context files and the files of two
+# folders) are refused: the report cannot be shown to fit the text.
+SAVED_FORMAT = 2
 
 
 class SavedError(ValueError):
@@ -76,6 +80,7 @@ def save(
     now). OSError when it cannot be written."""
     absolute = {k: str(Path(getattr(run, k)).resolve()) for k in ("old", "new") if getattr(run, k)}
     data = {
+        "format": SAVED_FORMAT,
         "prosediff": package_version(),
         "saved": datetime.now().isoformat(timespec="seconds"),
         "run": {**asdict(run), **absolute, "output": str(report.resolve())},
@@ -139,6 +144,7 @@ def load(path: str | Path) -> tuple[Run, Assessment, Assessment | None]:
         if not data.get("report"):
             raise SavedError(f"{path.name}: the project holds no report to make again")
         data = data["report"]
+    current(data, path)
     try:
         run = _run(data["run"])
         assessment = _assessment(data["assessment"])
@@ -177,7 +183,18 @@ def answers(path: str | Path) -> dict:
         raise SavedError(f"{Path(path).name}: not answers prosediff saved ({e})") from e
     if not isinstance(data, dict) or "run" not in data or "assessment" not in data:
         raise SavedError(f"{Path(path).name}: not answers prosediff saved")
+    current(data, Path(path))
     return data
+
+
+def current(data: object, path: Path) -> None:
+    """SavedError for answers kept in a format other than SAVED_FORMAT."""
+    if not isinstance(data, dict) or data.get("format") != SAVED_FORMAT:
+        raise SavedError(
+            f"{path.name}: saved by an earlier prosediff, whose answers do not hold the "
+            "checksums of every file the AI read: the report cannot be made again from "
+            "them; ask the AI again"
+        )
 
 
 def save_project(path: str | Path, settings: dict, report: dict | None) -> None:

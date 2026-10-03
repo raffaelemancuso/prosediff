@@ -113,7 +113,9 @@ answers hold the SHA-256 checksum of each file the AI read, taken as the
 run began (the files compared, the files of two folders, and the other
 files sent as context), and if one changed since or is gone, the report
 is not made again, since the AI's marks would not fit the new text. Ask
-the AI again instead. A [project](window.md#projects) (`NAME.prosediff`)
+the AI again instead. Answers an earlier prosediff saved, whose checksums
+left out the context files and the files of two folders, are refused the
+same way. A [project](window.md#projects) (`NAME.prosediff`)
 holds these answers too, with all the window's settings, and is made
 again the same way.
 
