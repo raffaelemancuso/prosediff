@@ -73,6 +73,7 @@ remembers the views, the spacing and the column widths.
 | `f` | Formatted text (View menu) | on |
 | `m` | Formatting changes (View menu) | on |
 | `[`, `]` | Less, more space between paragraphs | |
+| Ctrl+`+`, Ctrl+`−`, Ctrl+`0`, Ctrl+wheel | Zoom in, out, back to 100% (View menu, in prosediff's window; a browser zooms with its own keys) | 100% |
 | Esc | Unpin a comment or problem | |
 
 - **Review mode** lists the assessment, changes, comments and problems on

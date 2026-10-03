@@ -198,14 +198,17 @@ def test_files_listed_and_opened_and_closed_all_at_once(browser, tmp_path):
 
 def test_view_menu_opens_and_closes(page):
     """The View menu holds the switches few use: its button opens it, a
-    switch leaves it open, Escape or a click outside closes it."""
+    switch leaves it open, Escape or a click outside closes it. In a
+    browser it has no Zoom, the browser's own zooming the page."""
     panel = page.locator("#view-menu")
     button = page.locator(".menu-button")
     assert not panel.is_visible()
     button.click()
     assert panel.is_visible() and button.get_attribute("aria-expanded") == "true"
-    names = panel.locator(".label").all_inner_texts()
+    names = panel.locator(".label:visible").all_inner_texts()
     assert names == ["Formatted", "Change highlights", "Formatting changes", "Paragraph spacing"]
+    page.keyboard.press("Control+Equal")
+    assert page.inner_text(".zoom-value") == "100%"
     page.click('[data-toggle="formats"]')
     assert panel.is_visible() and "formats" not in page.evaluate("document.body.className")
     page.keyboard.press("Escape")

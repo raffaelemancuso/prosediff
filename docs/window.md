@@ -111,7 +111,9 @@ opens first, and the Open screen asks whether to send it to the AI.
 
 In a report's window, the documents to download (**With AI fixes**,
 **Tracked changes**) are saved where a dialog says, beside the report at
-first, rather than in the Downloads folder.
+first, rather than in the Downloads folder. **View > Zoom** (or Ctrl+`+`,
+Ctrl+`−`, Ctrl+`0`, Ctrl with the mouse wheel) zooms the report as a browser
+would, from 25% to 500%; the window remembers the zoom for the next report.
 
 The window remembers its choices only when asked. **Options > Save options** writes
 them to `%APPDATA%\prosediff\gui.json` (elsewhere, under

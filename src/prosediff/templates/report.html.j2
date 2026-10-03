@@ -493,6 +493,10 @@ footer a { color: inherit; }
 .toolbar .stepper button:hover:not(:disabled) { color: var(--link); background: var(--skip); }
 .toolbar .stepper button:disabled { color: var(--border); }
 .stepper .gap-value:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.menu-panel .item[hidden] { display: none; }
+.toolbar .stepper button.zoom-value { width: auto; min-width: 3.4em; padding: 3px 4px;
+  font-size: 12px; font-weight: 400; color: var(--fg); background: var(--bg);
+  font-variant-numeric: tabular-nums; border-inline: 1px solid var(--border); }
 .stepper .gap-value { min-width: 2.6em; text-align: center; padding: 3px 4px;
   font-size: 12px; font-variant-numeric: tabular-nums;
   border-inline: 1px solid var(--border); }
@@ -683,6 +687,13 @@ thead.print, .print-note { display: none; }
         aria-valuemin="0" aria-valuemax="3" aria-valuenow="0.75" aria-valuetext="0.75 lines"
         title="Space between paragraphs, in lines: arrow keys to change, Home for none, End for the most">0.75</span>
       <button type="button" tabindex="-1" aria-hidden="true" data-gap="1" title="More space between paragraphs (])">+</button>
+    </span></span>
+      {# In prosediff's window alone: a browser zooms a page itself. #}
+      <span class="zoom item" hidden><span class="spacing-icon" title="Zoom" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="6.5" cy="6.5" r="4.5"/><path d="M10 10l4.5 4.5M4.5 6.5h4M6.5 4.5v4"/></svg></span><span class="label">Zoom</span>
+    <span class="stepper">
+      <button type="button" data-zoom="-1" aria-label="Zoom out" title="Zoom out (Ctrl+−, Ctrl+wheel)">−</button>
+      <button type="button" class="zoom-value" data-zoom="0" aria-label="Zoom: 100%, click for 100%" title="Back to 100% (Ctrl+0)">100%</button>
+      <button type="button" data-zoom="1" aria-label="Zoom in" title="Zoom in (Ctrl++, Ctrl+wheel)">+</button>
     </span></span>
     </div>
   </span>
@@ -1154,6 +1165,8 @@ thead.print, .print-note { display: none; }
     if (nav) { go(current + Number(nav.dataset.nav)); return; }
     var view = e.target.closest("[data-toggle]");
     if (view) { toggle(view.dataset.toggle); return; }
+    var zoomButton = e.target.closest("[data-zoom]");
+    if (zoomButton) { zoomStep(Number(zoomButton.dataset.zoom)); return; }
     var gap = e.target.closest("[data-gap]");
     if (gap) setGap(gapStep + Number(gap.dataset.gap));
   });
@@ -2999,13 +3012,62 @@ thead.print, .print-note { display: none; }
     e.preventDefault();
   });
 
+  // The zoom, in prosediff's window: the window's own (ReportApi.zoom), as
+  // a browser zooms a page, in a browser's steps; remembered like the
+  // views. Ctrl with +, − or 0, or with the wheel, as in a browser, whose
+  // keys the window does not have. In a browser the page leaves it alone.
+  var ZOOMS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
+  var ZOOM_DEFAULT = ZOOMS.indexOf(1), zoomAt = ZOOM_DEFAULT, zoomWheel = 0;
+  function zoomApi() {
+    var api = appApi();
+    return api && api.zoom ? api : null;
+  }
+  function setZoom(at) {
+    var api = zoomApi();
+    if (!api) return;
+    zoomAt = Math.max(0, Math.min(ZOOMS.length - 1, at));
+    var row = document.querySelector(".zoom.item");
+    api.zoom(ZOOMS[zoomAt]).then(function (ok) { if (row) row.hidden = !ok; });
+    var percent = Math.round(ZOOMS[zoomAt] * 100) + "%";
+    var value = document.querySelector(".zoom-value");
+    if (value) {
+      value.textContent = percent;
+      value.setAttribute("aria-label", "Zoom: " + percent + ", click for 100%");
+    }
+    var less = document.querySelector('[data-zoom="-1"]'), more = document.querySelector('[data-zoom="1"]');
+    if (less) less.disabled = zoomAt === 0;
+    if (more) more.disabled = zoomAt === ZOOMS.length - 1;
+    store("zoom", zoomAt === ZOOM_DEFAULT ? null : ZOOMS[zoomAt]);
+  }
+  // step: 1 in, -1 out, 0 back to 100%
+  function zoomStep(step) { setZoom(step ? zoomAt + step : ZOOM_DEFAULT); }
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || !zoomApi()) return;
+    var step = { "+": 1, "=": 1, "-": -1, "_": -1, "0": 0 }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    zoomStep(step);
+  });
+  // a notch of a wheel a step; a touchpad's many small ones added up first
+  window.addEventListener("wheel", function (e) {
+    if (!e.ctrlKey || !zoomApi()) return;
+    e.preventDefault();
+    zoomWheel += e.deltaY;
+    if (Math.abs(zoomWheel) < 50) return;
+    zoomStep(zoomWheel < 0 ? 1 : -1);
+    zoomWheel = 0;
+  }, { passive: false });
+
   // The choices made at the last visit (choicesChanged), made again: the
   // browser's at once; in prosediff's window, the window's once it is there.
+  // There too, the zoom of the last visit, and the zoom shown in View.
   function inApp() {
     var api = appApi();
     if (!api || IN_APP) return;
     IN_APP = true;
     if (aiNotes.length) api.choices().then(restoreChoices);
+    var saved = ZOOMS.indexOf(Number(stored("zoom")));
+    if (zoomApi()) setZoom(saved < 0 ? ZOOM_DEFAULT : saved);
   }
   if (aiNotes.length && !appApi()) {
     try { restoreChoices(JSON.parse(stored("choices-" + reportId()))); } catch (e) {}

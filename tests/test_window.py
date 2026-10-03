@@ -348,6 +348,90 @@ def test_the_choices_made_in_a_report_opened_as_a_file_kept_by_the_browser(brows
     page.context.close()
 
 
+class ZoomingUi(Ui):
+    """A screen whose report's window zooms (or, with zooms False, cannot),
+    recording each zoom asked for."""
+
+    def __init__(self, zooms: bool = True) -> None:
+        super().__init__()
+        self.zooms = zooms
+        self.zoomed: list[float] = []
+
+    def zoom_report(self, factor: float) -> bool:
+        self.zoomed.append(factor)
+        return self.zooms
+
+
+def zoom_page(browser, report, ui, context=None, shown=True):
+    """The report in prosediff's window (its calls answered as by ReportApi),
+    once it has asked for its zoom."""
+    app = gui.App(ui, gui.Settings(mode="review"))
+    page = (context or browser.new_context()).new_page()
+    bridge = gui.ReportApi(app, None, report, ui)
+    page.expose_function(
+        "__call", lambda name, args: json.loads(json.dumps(getattr(bridge, name)(*args)))
+    )
+    page.add_init_script(SHIM.replace("NAMES", json.dumps(["choices", "save_choices", "zoom"])))
+    page.goto(report.as_uri())
+    if shown:
+        page.wait_for_function("!document.querySelector('.zoom.item').hidden")
+    else:
+        until(page, ui, lambda u: u.zoomed)
+    return page
+
+
+def test_the_report_window_zoomed_from_view_and_with_ctrl(browser, tmp_path):
+    """In prosediff's window, View has Zoom: − and + step the window's own
+    zoom as a browser does, the value back to 100%; Ctrl with + − 0 and with
+    the wheel do the same; the zoom comes back with the report reopened."""
+    report = fixed_report(tmp_path)
+    ui = ZoomingUi()
+    context = browser.new_context()
+    page = zoom_page(browser, report, ui, context)
+    assert ui.zoomed == [1]
+    page.click(".menu-button[aria-controls=view-menu]")
+    page.click('[data-zoom="1"]')
+    until(page, ui, lambda u: u.zoomed[-1] == 1.1)
+    assert page.inner_text(".zoom-value") == "110%"
+    page.keyboard.press("Control+Equal")
+    until(page, ui, lambda u: u.zoomed[-1] == 1.25)
+    page.keyboard.press("Control+Minus")
+    page.keyboard.press("Control+Minus")
+    until(page, ui, lambda u: u.zoomed[-1] == 1)
+    page.mouse.move(400, 400)
+    page.keyboard.down("Control")
+    page.mouse.wheel(0, -100)
+    page.keyboard.up("Control")
+    until(page, ui, lambda u: u.zoomed[-1] == 1.1)
+    page.click(".zoom-value")
+    until(page, ui, lambda u: u.zoomed[-1] == 1)
+    page.click('[data-zoom="1"]')
+    until(page, ui, lambda u: u.zoomed[-1] == 1.1)
+    page.close()
+    again = zoom_page(browser, report, ZoomingUi(), context)
+    assert again.inner_text(".zoom-value") == "110%"
+    context.close()
+
+
+def test_a_window_that_cannot_zoom_shows_no_zoom(browser, tmp_path):
+    """A window whose web view has no zoom of its own: View shows no Zoom."""
+    page = zoom_page(browser, fixed_report(tmp_path), ZoomingUi(zooms=False), shown=False)
+    page.wait_for_timeout(200)
+    page.click(".menu-button[aria-controls=view-menu]")
+    assert page.locator(".zoom.item").is_hidden()
+    page.context.close()
+
+
+def test_report_api_zoom_keeps_within_its_range():
+    """The zoom asked for is kept between the least and the most; one that
+    is no number zooms nothing."""
+    ui = ZoomingUi()
+    api = gui.ReportApi(gui.App(ui, gui.Settings()), None, None, ui)
+    assert api.zoom(10) and api.zoom(0.01) and api.zoom("1.5")
+    assert ui.zoomed == [gui.ZOOM_RANGE[1], gui.ZOOM_RANGE[0], 1.5]
+    assert api.zoom("big") is False and len(ui.zoomed) == 3
+
+
 def test_a_document_to_download_saved_through_the_window(browser, tmp_path):
     """In prosediff's window, a document to download is saved where its
     dialog says, beside the report at first, not downloaded by the page."""

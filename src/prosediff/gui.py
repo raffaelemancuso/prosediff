@@ -1833,6 +1833,9 @@ REVIEW_COMMENTS_TIP = (
 WINDOW_SIZE = (940, 900)
 WINDOW_MIN = (760, 560)
 REPORT_SIZE = (1400, 900)
+# The least and the most a report's window may be zoomed (its page steps
+# between them as a browser does).
+ZOOM_RANGE = (0.25, 5.0)
 
 
 def page_html() -> str:
@@ -1949,6 +1952,39 @@ class WebUi:
 
         self.report.events.closed += closed
 
+    def zoom_report(self, factor: float) -> bool:
+        """The report's window zoomed to factor (1: as made), as a browser
+        zooms a page: the web view's own zoom, so the page lays itself out
+        again at the new size, its margin cards still beside their passages.
+        Whether the window could (WebView2 on Windows, Qt on Linux; not on
+        macOS, where the page leaves the zoom to the system)."""
+        native = getattr(self.report, "native", None)
+        view = getattr(native, "webview", None)
+        if view is None:
+            return False
+        try:
+            # WebView2 known by its class's name: reading any of its
+            # properties off the form's thread waits for that thread
+            if type(view).__name__ == "WebView2":
+                from System import Func, Type  # pythonnet, with pywebview on Windows
+
+                def set_zoom() -> None:
+                    view.ZoomFactor = factor
+
+                # set on the form's thread, not waited for: asked from the
+                # page as it loads, Invoke would wait on the form's thread
+                # while that waits on pywebview giving the page its functions
+                native.BeginInvoke(Func[Type](set_zoom))
+                return True
+            if hasattr(view, "setZoomFactor"):  # Qt, on its own thread
+                from qtpy import QtCore
+
+                QtCore.QTimer.singleShot(0, view, lambda: view.setZoomFactor(factor))
+                return True
+        except Exception:
+            return False
+        return False
+
     def open_file(self, path: Path) -> None:
         open_output(path)
 
@@ -2050,7 +2086,8 @@ class WindowApi:
 
 class ReportApi:
     """A report's calls into Python, in its window: the choices made in it,
-    kept for the project, and the documents to download saved."""
+    kept for the project, the documents to download saved, and the window
+    zoomed."""
 
     def __init__(self, app: App, serial: int | None, path: Path, ui: WebUi) -> None:
         self._app = app
@@ -2064,6 +2101,15 @@ class ReportApi:
     def save_choices(self, made: dict) -> None:
         if isinstance(made, dict):
             self._app.keep_choices(self._serial, made)
+
+    def zoom(self, factor) -> bool:
+        """The window zoomed to factor, kept between ZOOM_RANGE's ends:
+        whether it could be (the page hides its zoom when not)."""
+        try:
+            factor = min(max(float(factor), ZOOM_RANGE[0]), ZOOM_RANGE[1])
+        except (TypeError, ValueError):
+            return False
+        return self._ui.zoom_report(factor)
 
     def save_document(self, name: str, data: str) -> str:
         """A document to download saved where asked, beside the report at
