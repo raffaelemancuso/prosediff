@@ -82,8 +82,11 @@ in a large box in a window of their own (the pencil button), or from a text
 file; in that window, prosediff's own prompts too, to edit (**Restore
 default** puts prosediff's back): for one file, the review's; for two
 versions, the assessment's and the AI-writing check's; **Other files** to
-send as context (a switch, the files separated by ";", and a button that
-adds several at once: PDF, Word, OpenDocument, Markdown or text); who its comments in the Word and OpenDocument documents are by
+send as context (a switch, and **Files…**, their list in a window of its
+own, sorted by **File** or **Folder** when a heading is clicked, with
+**Add…** for several at once: PDF, Word, OpenDocument, Markdown or text;
+a file analysed, one of the two compared, the one reviewed, or one in a
+folder or repository compared, is refused); who its comments in the Word and OpenDocument documents are by
 (**Author**, of its comments and tracked changes; empty: the AI and its model); whether it marks problems in the text
 (**Mark problems in the text**, on by default); whether it may
 edit the text (**Allow text edits**, on by default: its fixes as
@@ -93,13 +96,15 @@ while no AI is chosen, and the whole card unless the output is the HTML
 report.
 
 **Compare** (Ctrl+Enter) writes the output and opens it. The status line
-shows the current stage and how long it has taken. Meanwhile Compare
+shows the current stage and how long it has taken, and **Progress**,
+above it, logs each stage and what the AI does, a line each; drag the
+grip below the log to make it taller or shorter. Meanwhile Compare
 becomes **Cancel** (Esc), which stops everything, the AI included. A
 notification says when it is done.
 
-The window remembers its choices only when asked. **Save options** writes
+The window remembers its choices only when asked. **Options > Save options** writes
 them to `%APPDATA%\prosediff\gui.json` (elsewhere, under
-`$XDG_CONFIG_HOME` or `~/.config`). **Reset to defaults** puts every
+`$XDG_CONFIG_HOME` or `~/.config`). **Options > Reset to defaults** puts every
 option back, except what is compared and where the output goes. Of the
 moved-passage values, only those changed from the defaults are saved.
 

@@ -25,7 +25,7 @@ from prosediff.diff import (
 from prosediff.history import estimate, record, usually
 from prosediff.language import DEFAULT
 from prosediff.render import assess_comparison, write_output
-from prosediff.sources import FOLDER_FILES
+from prosediff.sources import FOLDER_FILES, SourceError
 
 
 class OutputError(ValueError):
@@ -142,6 +142,39 @@ class Result:
     saved: Path | None = None
 
 
+def analysed(mode: str, old: str, new: str = "") -> Callable[[str | Path], bool]:
+    """Whether a file is one of those analysed: the file reviewed or one of
+    the two compared ("files", "review"), or a file inside either folder
+    ("folders") or inside the repository ("git"). A context file may not be
+    one: the AI would be sent it twice, as what to assess and as what to
+    draw on."""
+    # comparing git versions, new is a ref, not a path
+    sides = [Path(p).resolve() for p in ((old,) if mode == "git" else (old, new)) if p]
+
+    def within(path: str | Path) -> bool:
+        p = Path(path).resolve()
+        if mode in ("files", "review"):
+            return p in sides
+        return any(p == s or s in p.parents for s in sides)
+
+    return within
+
+
+def check_context(run: Run) -> None:
+    """SourceError when a context file sent to the AI is one of the files
+    analysed (analysed)."""
+    if run.request is None or not run.request.files:
+        return
+    within = analysed(run.mode, run.old, run.new)
+    clash = [f for f in run.request.files if within(f)]
+    if clash:
+        names = ", ".join(Path(f).name for f in clash)
+        raise SourceError(
+            f"{names}: analysed, so not sent to the AI as a context file too; "
+            "take it out of the other files"
+        )
+
+
 def fixes_shown(run: Run, assessment: Assessment) -> tuple[Comparison, Assessment] | None:
     """A review's report as a diff of the file and the file as the AI's
     fixes leave it (review_diff), and the assessment to show with it: the
@@ -183,6 +216,8 @@ def execute(
     report (prosediff.saved); saved, answers kept so before, are used in
     place of asking the AI again."""
     reviewing = run.mode == "review"
+    if saved is None:
+        check_context(run)
     # the fingerprints of the files read, kept with the AI's answers, taken
     # now: a file edited while the AI thinks is not the one it read
     inputs = None

@@ -90,7 +90,10 @@ effort starred, as the window does. Three more settings:
   A PDF is read through its text layer (pypdfium2; a scanned PDF without
   one is refused, with a message), a Word or OpenDocument file as
   Markdown with its tracked changes accepted, anything else as text; in
-  all, up to 200,000 characters, the rest cut.
+  all, up to 200,000 characters, the rest cut. A file analysed (one of
+  the two compared, the one reviewed, or one in a folder or repository
+  compared) is refused as a context file: the run stops before anything
+  is read.
 
 **While it works**, the window's status line (and, in a terminal, the
 command line) says what the model is doing: thinking, writing the answer,

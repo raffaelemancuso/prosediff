@@ -24,6 +24,7 @@ import functools
 import json
 import multiprocessing
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -33,7 +34,7 @@ import webbrowser
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, font, messagebox
 from tkinter import ttk as tk_ttk
 
 import git
@@ -68,7 +69,7 @@ from prosediff.diff import (
 from prosediff.document import CHANGES as DOCX_CHANGES
 from prosediff.history import config_dir
 from prosediff.language import DEFAULT, DOCUMENT, GUESS, normalize_language
-from prosediff.pipeline import Run, execute, options_of, request_of
+from prosediff.pipeline import Run, analysed, execute, options_of, request_of
 from prosediff.render import (
     ALIGNMENTS,
     FORMATS,
@@ -256,6 +257,14 @@ PAD = {"padx": 6, "pady": 4}
 COMPARED = ("mode", "repo", "old", "new", "old_folder", "new_folder", "single")
 # The settings of a box of a number, as its error names them.
 NUMBER_NAMES = {"max_hidden": "Hidden lines", "assess_timeout": "The AI's timeout"}
+# The columns of the list of files sent to the AI as context, and their titles.
+FILE_COLUMNS = {"name": "File", "folder": "Folder"}
+
+
+def natural(text: str) -> list:
+    """A key that sorts text as people do: case aside, the numbers in it by
+    their value (table_A_2 before table_A_10)."""
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text.lower())]
 
 
 def prefillable(path: Path) -> bool:
@@ -1301,7 +1310,8 @@ class App:
         self.assess_send_files = self.setting("assess_send_files")
         self.assess_files = self.setting("assess_files")
         sending = toggle(card, "Other files", self.assess_send_files)
-        sending.grid(row=4, column=0, sticky="nw", **PAD)
+        # centred in its row, as the summary and the button beside it are
+        sending.grid(row=4, column=0, sticky="w", **PAD)
         hint(
             sending,
             "Also send the AI other files as context, to draw on, not to assess: a "
@@ -1325,6 +1335,8 @@ class App:
         self.files_button.grid(row=4, column=2, sticky="w", **PAD)
         hint(self.files_button, "The files to send, in a list of their own: add and remove them")
         self.files_window: tk.Toplevel | None = None
+        # how their list is sorted: (column, descending), None as added
+        self.files_sort: tuple[str, bool] | None = None
         self.files_list: ttk.Treeview | None = None
         self.show_files()
         self.assess_files.trace_add("write", lambda *_: self.show_files())
@@ -1501,8 +1513,9 @@ class App:
         listed = ttk.Treeview(
             frame, columns=("name", "folder"), show="headings", height=12, selectmode="extended"
         )
-        listed.heading("name", text="File", anchor="w")
-        listed.heading("folder", text="Folder", anchor="w")
+        # a heading clicked sorts the list by its column; again, the other way
+        for column in FILE_COLUMNS:
+            listed.heading(column, anchor="w", command=lambda c=column: self.sort_files(c))
         listed.column("name", width=220, stretch=False, anchor="w")
         listed.column("folder", width=460, anchor="w")
         listed.grid(row=0, column=0, sticky="nsew")
@@ -1546,10 +1559,31 @@ class App:
                 ("All", "*.*"),
             ],
         )
+        if not chosen:
+            return
+        # not those analysed: the AI would be sent them twice
+        within = self.analysed()
+        refused = [f for f in chosen if within(f)]
+        chosen = [f for f in chosen if not within(f)]
         if chosen:
             have = self.files_chosen()
             self.assess_files.set(";".join([*have, *(f for f in chosen if f not in have)]))
             self.assess_send_files.set(True)
+        if refused:
+            names = ", ".join(Path(f).name for f in refused)
+            self.complain(f"{names}: analysed, so not sent to the AI as a context file too.")
+
+    def analysed(self) -> Callable[[str | Path], bool]:
+        """Whether a file is one of those the tab shown analyses
+        (pipeline.analysed)."""
+        mode = self.mode.get()
+        old, new = {
+            "files": (self.old.get(), self.new.get()),
+            "review": (self.single.get(), ""),
+            "folders": (self.old_folder.get(), self.new_folder.get()),
+            "git": (self.repo.get(), ""),
+        }.get(mode, ("", ""))
+        return analysed(mode, old.strip(), new.strip())
 
     def files_chosen(self) -> list[str]:
         """The files to send, as kept: assess_files, separated by ";"."""
@@ -1566,10 +1600,28 @@ class App:
         )
         if self.files_list is None:
             return
+        # shown sorted as the headings were clicked; sent in the order added
+        column, descending = self.files_sort or (None, False)
+        if column is not None:
+            key = {
+                "name": lambda f: natural(Path(f).name),
+                "folder": lambda f: (natural(str(Path(f).parent)), natural(Path(f).name)),
+            }[column]
+            files = sorted(files, key=key, reverse=descending)
+        for c, title in FILE_COLUMNS.items():
+            arrow = (" ▼" if descending else " ▲") if c == column else ""
+            self.files_list.heading(c, text=title + arrow)
         self.files_list.delete(*self.files_list.get_children())
         for f in files:
             p = Path(f)
             self.files_list.insert("", "end", iid=f, values=(p.name, str(p.parent)))
+
+    def sort_files(self, column: str) -> None:
+        """The list of files sorted by column, the other way when it already
+        is."""
+        current, descending = self.files_sort or (None, False)
+        self.files_sort = (column, not descending if column == current else False)
+        self.show_files()
 
     def remove_files(self) -> None:
         """Take the files chosen in the list off it."""
@@ -1717,6 +1769,17 @@ class App:
         )
         self.progress_log.pack(fill="both", expand=True)
         self.progress_log.text.configure(state="disabled")
+        # a grip below the log: dragged, the log taller or shorter, a line at
+        # a time, the window with it
+        grip = ttk.Label(
+            self.progress_card, text="⋯", anchor="center", cursor="sb_v_double_arrow",
+            bootstyle="secondary",
+        )  # fmt: skip
+        grip.pack(fill="x")
+        hint(grip, "Drag to make the progress log taller or shorter")
+        grip.bind("<ButtonPress-1>", self.start_log_drag)
+        grip.bind("<B1-Motion>", self.drag_log)
+        self.log_drag: tuple[int, int] | None = None  # (pointer's y, lines) at the start
         self.status = tk.StringVar(value=READY)
         # the room the buttons leave, a long status cut off there (its whole
         # text is in the progress log): asking for its own width, it would
@@ -1743,30 +1806,7 @@ class App:
             wraplength=HINT_WIDTH,
             delay=HINT_DELAY_MS,
         )
-        reset = ttk.Button(
-            bottom,
-            text="Reset to defaults",
-            image=ttk.Icon("arrow-counterclockwise", size=16),
-            compound="left",
-            command=self.reset_options,
-            bootstyle="secondary-outline",
-        )
-        reset.pack(side="right", padx=(0, 8))
-        hint(
-            reset,
-            "Put every option back to its default: the cards and the output format; "
-            "what is compared and where the output goes stay",
-        )
-        save = ttk.Button(
-            bottom,
-            text="Save options",
-            image=ttk.Icon("floppy", size=16),
-            compound="left",
-            command=self.save_options,
-            bootstyle="secondary-outline",
-        )
-        save.pack(side="right", padx=(0, 8))
-        hint(save, f"Open the window with these choices next time ({settings_file()})")
+        # Save options and Reset to defaults: in the Options menu (build_menu)
         advanced = ttk.Button(
             bottom,
             text="Advanced settings",
@@ -2254,13 +2294,26 @@ class App:
     # files it read are unchanged.
 
     def build_menu(self) -> None:
-        """The menu bar: File, to open and save projects (Ctrl+O, Ctrl+S)."""
-        bar = tk.Menu(self.root)
+        """The menu bar: File, to open and save projects (Ctrl+O, Ctrl+S);
+        Options, to remember the options for next time or put them back to
+        their defaults."""
+        bar = tk.Menu(self.root, tearoff=False)
         menu = tk.Menu(bar, tearoff=False)
         menu.add_command(label="Open project…", accelerator="Ctrl+O", command=self.open_project)
         menu.add_command(label="Save project", accelerator="Ctrl+S", command=self.save_project)
         menu.add_command(label="Save project as…", command=lambda: self.save_project(ask=True))
         bar.add_cascade(label="File", menu=menu)
+        options = tk.Menu(bar, tearoff=False)
+        # the labels say what the buttons' tooltips said: a menu has none
+        options.add_command(
+            label="Save options (the window opens with them next time)",
+            command=self.save_options,
+        )
+        options.add_command(
+            label="Reset to defaults (what is compared and the output's place stay)",
+            command=self.reset_options,
+        )
+        bar.add_cascade(label="Options", menu=options)
         self.root.configure(menu=bar)
         self.root.bind("<Control-o>", lambda e: self.open_project())
         self.root.bind("<Control-s>", lambda e: self.save_project())
@@ -2457,11 +2510,33 @@ class App:
         self.status.set(stage)
         self.log(stage)
 
+    def start_log_drag(self, event: tk.Event) -> None:
+        self.log_drag = (event.y_root, int(self.progress_log.text.cget("height")))
+
+    def drag_log(self, event: tk.Event) -> None:
+        """The progress log as tall as the grip is dragged, in whole lines (3
+        at least), the window fitted to it: taller or shorter, though the
+        window otherwise keeps the largest size it was asked for."""
+        if self.log_drag is None:
+            return
+        y, lines = self.log_drag
+        text = self.progress_log.text
+        line_px = font.Font(font=text.cget("font")).metrics("linespace") or 16
+        wanted = max(3, lines + round((event.y_root - y) / line_px))
+        if wanted == int(text.cget("height")):
+            return
+        text.configure(height=wanted)
+        self.root.minsize(self.root.minsize()[0], 0)  # room to shrink
+        self.root.geometry("")  # the size the content asks for
+
     def log(self, line: str) -> None:
         """A line at the end of the progress log, with the time, scrolled to;
         the log shown once there is something in it."""
         if not self.progress_card.winfo_manager():
-            self.progress_card.pack(fill="both", expand=True, pady=(10, 0), before=self.bottom_bar)
+            # at the bottom, above the status line and the buttons, below the cards
+            self.progress_card.pack(
+                fill="both", expand=True, side="bottom", pady=(10, 0), after=self.bottom_bar
+            )
         box = self.progress_log.text
         box.configure(state="normal")
         box.insert("end", f"{time.strftime('%H:%M:%S')}  {line}\n")

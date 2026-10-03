@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("tkinter", reason="the GUI tests need a Python built with Tk")
 
 import tkinter as tk
+from tkinter import font
 from tkinter import ttk as tk_ttk
 
 from helpers import FIXED, NEW, assessment, pair, two_files, word_file
@@ -1310,3 +1311,98 @@ def test_a_project_saved_and_opened_again(root, tmp_path):
     answers.write_text(json.dumps(data), encoding="utf-8")
     again.keep_answers(again.collect(), SimpleNamespace(saved=str(answers)))
     assert again.project_report["assessment"]["markdown"] == "y"
+
+
+def test_the_files_analysed_are_not_context_files(root, tmp_path, monkeypatch):
+    """A file analysed (one of the two compared, the one reviewed, one in a
+    folder compared or in the repository) is not taken as a context file:
+    refused when added, said why, the others added; and a run with one
+    stops before anything is read."""
+    from prosediff.assess import AssessRequest
+    from prosediff.pipeline import Run, analysed, execute
+    from prosediff.sources import SourceError
+
+    old, new, guide = (tmp_path / n for n in ("a.md", "b.md", "guide.md"))
+    for f in (old, new, guide):
+        f.write_text("Text.\n", encoding="utf-8")
+    app = App(root, Settings(mode="files", old=str(old), new=str(new)))
+    picked = (str(new), str(guide))
+    monkeypatch.setattr(gui.filedialog, "askopenfilenames", lambda **kw: picked)
+    app.pick_files()
+    assert app.files_chosen() == [str(guide)]
+    assert root.shown == ["b.md: analysed, so not sent to the AI as a context file too."]
+    # by tab: the file reviewed, a folder's files, the repository's
+    assert analysed("review", str(old))(old) and not analysed("review", str(old))(new)
+    assert analysed("folders", str(tmp_path), "")(tmp_path / "sub" / "x.md")
+    assert analysed("git", str(tmp_path), "HEAD~2")(guide)
+    assert not analysed("git", str(tmp_path / "repo"), "HEAD")(guide)
+    run = Run(
+        "files",
+        str(old),
+        tmp_path / "r.html",
+        new=str(new),
+        request=AssessRequest("claude", files=(str(guide), str(old))),
+    )
+    with pytest.raises(SourceError, match=r"a\.md: analysed"):
+        execute(run)
+
+
+def test_the_context_files_sorted_by_their_columns(root, tmp_path):
+    """A heading clicked sorts the list of context files by its column, as
+    people sort (table_2 before table_10), again the other way, an arrow
+    saying which; the files are sent in the order they were added."""
+    files = [tmp_path / "b" / "table_10.docx", tmp_path / "a" / "table_2.docx"]
+    app = App(root, Settings(assess_send_files=True, assess_files=";".join(map(str, files))))
+    app.edit_files()
+    listed = app.files_list
+
+    def names():
+        return [listed.item(i, "values")[0] for i in listed.get_children()]
+
+    assert names() == ["table_10.docx", "table_2.docx"]  # as added
+    app.sort_files("name")
+    assert (
+        names() == ["table_2.docx", "table_10.docx"] and listed.heading("name")["text"] == "File ▲"
+    )
+    app.sort_files("name")
+    assert (
+        names() == ["table_10.docx", "table_2.docx"] and listed.heading("name")["text"] == "File ▼"
+    )
+    app.sort_files("folder")
+    assert names() == ["table_2.docx", "table_10.docx"] and listed.heading("name")["text"] == "File"
+    assert app.files_chosen() == list(map(str, files))
+
+
+def test_the_progress_shown_at_the_bottom(root):
+    """The progress log, shown once a run starts, sits below the cards,
+    above the status line and the buttons."""
+    app = App(root, Settings(mode="files"))
+    app.log("Starting…")
+    # (the test's window is hidden, so never laid out: its packing read)
+    order = app.bottom_bar.master.pack_slaves()
+    assert app.bottom_bar.pack_info()["side"] == app.progress_card.pack_info()["side"] == "bottom"
+    # packed from the bottom up: the buttons first, then the progress above them
+    assert order.index(app.progress_card) == order.index(app.bottom_bar) + 1
+    assert all(w.pack_info()["side"] == "top" for w in order[order.index(app.progress_card) + 1 :])
+
+
+def test_the_options_menu_and_the_progress_log_resized(root):
+    """Save options and Reset to defaults are in the Options menu, not
+    among the buttons; the grip below the progress log, dragged, makes it
+    taller or shorter, a line at a time, 3 lines at least."""
+    app = App(root, Settings(mode="files"))
+    bar = root.nametowidget(root["menu"])
+    labels = [bar.entrycget(i, "label") for i in range(bar.index("end") + 1)]
+    assert labels == ["File", "Options"]
+    options = root.nametowidget(bar.entrycget(1, "menu"))
+    items = [options.entrycget(i, "label") for i in range(options.index("end") + 1)]
+    assert items[0].startswith("Save options") and items[1].startswith("Reset to defaults")
+    texts = [w.cget("text") for w in app.bottom_bar.winfo_children() if "text" in w.configure()]
+    assert "Save options" not in texts and "Reset to defaults" not in texts
+    text = app.progress_log.text
+    line = font.Font(font=text.cget("font")).metrics("linespace")
+    app.start_log_drag(SimpleNamespace(y_root=100))
+    app.drag_log(SimpleNamespace(y_root=100 + 5 * line))
+    assert int(text.cget("height")) == 12
+    app.drag_log(SimpleNamespace(y_root=100 - 50 * line))
+    assert int(text.cget("height")) == 3
