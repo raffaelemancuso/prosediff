@@ -640,15 +640,17 @@ thead.print, .print-note { display: none; }
     <button type="button" data-ai-nav="-1" title="Previous problem (Shift+A)" aria-label="Previous problem">◀</button>
     <span class="ai-counter" aria-live="polite" title="Problems: those the AI marked in the text, ⚠ in the text and in the margin">⚠ {{ assessment.annotations | length | counted("problem") }}</span>
     <button type="button" data-ai-nav="1" title="Next problem (a)" aria-label="Next problem">▶</button></span>{% endif %}
-  {% if marks and ai_documents %}<span class="menu">
-    <button type="button" class="menu-button filter-button" aria-haspopup="true" aria-expanded="false" aria-controls="filter-menu" title="Filter: show only the problems in the download or left out of it, resolved or not, on their cards and in Review">Filter<span class="filter-count"></span><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+  {% if marks %}<span class="menu">
+    <button type="button" class="menu-button filter-button" aria-haspopup="true" aria-expanded="false" aria-controls="filter-menu" title="Filter: show only the problems with a fix or without{% if ai_documents %}, in the download or left out of it, resolved or not{% endif %}, on their cards and in Review">Filter<span class="filter-count"></span><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
     <div class="menu-panel" id="filter-menu" role="group" aria-label="Which problems are shown" hidden>
-      <label class="item"><span class="label">In the download</span><select class="filter-keep" aria-label="Show the problems in the download, left out, or both">
+      <label class="item"><span class="label">Fix</span><select class="filter-fix" aria-label="Show the problems that come with a fix (the passage rewritten), those without, or both">
+        <option value="">all</option><option value="yes">with a fix</option><option value="no">without</option></select></label>
+      {% if ai_documents %}<label class="item"><span class="label">In the download</span><select class="filter-keep" aria-label="Show the problems in the download, left out, or both">
         <option value="">all</option><option value="in">in it</option><option value="out">left out</option></select></label>
       <label class="item"><span class="label">Resolved</span><select class="filter-resolved" aria-label="Show the problems resolved, not resolved, or both">
-        <option value="">all</option><option value="yes">resolved</option><option value="no">not resolved</option></select></label>
-    </div></span>
-  <button type="button" class="resolve-applied" hidden title="Mark resolved, in the documents to download, the comments of the problems whose fix is already applied (the version with the AI's fixes has it)">✓ Resolve fixes applied</button>{% endif %}
+        <option value="">all</option><option value="yes">resolved</option><option value="no">not resolved</option></select></label>{% endif %}
+    </div></span>{% endif %}
+  {% if marks and ai_documents %}<button type="button" class="resolve-applied" hidden title="Mark resolved, in the documents to download, the comments of the problems whose fix is already applied (the version with the AI's fixes has it)">✓ Resolve fixes applied</button>{% endif %}
   {% if marks or c.comments or (alt and alt.comments) %}<button type="button" class="margin-button" data-toggle="margin" aria-pressed="true" title="Margin: the cards of the comments and the problems beside the text; off, the two versions take its width (g)">Margin</button>{% endif %}
   <button type="button" class="review-button" data-review aria-pressed="false" title="Review: the changes, the comments and the problems listed, to go through one by one (r)">Review</button>
   {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
@@ -1908,13 +1910,16 @@ thead.print, .print-note { display: none; }
     return !!fixedInDocuments[k] || fixApplied(aiNotes[k]);
   }
   // The Filter menu: the problems shown, on their cards, their badges and in
-  // Review's list, are those in the download or left out of it, resolved or
+  // Review's list, are those with a fix (a replacement, the passage
+  // rewritten) or without, in the download or left out of it, resolved or
   // not, as it says; a problem that stops matching (a box clicked) goes at
   // once. Previous and next skip the others.
   function matches(k) {
+    var fixWanted = (document.querySelector(".filter-fix") || {}).value || "";
     var keepWanted = (document.querySelector(".filter-keep") || {}).value || "";
     var resolvedWanted = (document.querySelector(".filter-resolved") || {}).value || "";
-    return (!keepWanted || (keepWanted === "in") === !leftOut[k]) &&
+    return (!fixWanted || (fixWanted === "yes") === !!aiNotes[k].replacement) &&
+      (!keepWanted || (keepWanted === "in") === !leftOut[k]) &&
       (!resolvedWanted || (resolvedWanted === "yes") === !!resolvedNotes[k]);
   }
   function applyFilter() {

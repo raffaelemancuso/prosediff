@@ -91,8 +91,10 @@ remembers the views, the spacing and the column widths.
   on the problem's line in Review mode's list.
   **✓ Resolve fixes applied** in the top bar marks resolved the comments
   of the problems whose fix the version with the AI's fixes holds.
-- **Filter** in the top bar shows only the problems in the download or
-  left out of it, resolved or not: the others lose their card and their
+- **Filter** in the top bar shows only the problems that come with a fix
+  (the passage rewritten) or without, and, when there are documents to
+  download, those in the download or left out of it, resolved or not: the
+  others lose their card and their
   badge and leave Review's list, and the problems' ◀ ▶ skip them. A
   problem that stops matching, a box clicked, goes at once.
 - **A fix already applied:** in the report of one file's fixes, a

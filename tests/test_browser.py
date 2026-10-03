@@ -1129,6 +1129,31 @@ def test_the_problems_filtered_and_the_fixes_applied_resolved(browser, tmp_path)
     page.context.close()
 
 
+def test_the_problems_filtered_by_whether_they_come_with_a_fix(browser, tmp_path):
+    """The Filter menu shows the problems that come with a fix (the passage
+    rewritten), or those without; in a report with no documents to
+    download (two Markdown files), it is the menu's one filter."""
+    old, new = tmp_path / "old.md", tmp_path / "new.md"
+    old.write_text("We find an effect.\n\nRobustness checks confirm it.\n", encoding="utf-8")
+    new.write_text(
+        "We find a large and significant effect.\n\nRobustness checks confirm every result.\n",
+        encoding="utf-8",
+    )
+    c = compare_paths(str(old), str(new), Options())
+    page = open_report(browser, tmp_path, c, assessment=assessment([FIXED, ADVICE]))
+    menu = page.locator("#filter-menu")
+    assert menu.locator("select").count() == 1  # no download: no In the download, Resolved
+    fixed = page.locator(".card.problem", has_text="Nothing supports")
+    advice = page.locator(".card.problem", has_text="Which checks?")
+    page.click(".toolbar .filter-button")
+    menu.locator(".filter-fix").select_option("yes")
+    assert fixed.is_visible() and not advice.is_visible()
+    menu.locator(".filter-fix").select_option("no")
+    assert advice.is_visible() and not fixed.is_visible()
+    assert page.locator(".filter-count").inner_text().strip() == "· 1 of 2"
+    page.context.close()
+
+
 @pytest.mark.parametrize("fmt", ["docx", "odt"])
 def test_a_problems_comment_marked_resolved_in_the_download(browser, tmp_path, fmt):
     """Its card's Resolved box marks the problem's comment resolved in the
