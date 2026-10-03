@@ -43,7 +43,7 @@ from lxml import etree
 from prosediff.assess import REACH, TYPOGRAPHIC, Annotation, Assessment
 from prosediff.comments import ANY_PLACEHOLDER
 from prosediff.diff import Comparison, FileDiff, word_ops
-from prosediff.document import spaced
+from prosediff.document import STRONG, spaced
 from prosediff.hyphenate import SOFT_HYPHEN
 from prosediff.redline import (
     ODF,
@@ -495,7 +495,9 @@ class OdtNotes:
         self, place: Place, paragraphs: list[str], bold: tuple[str, ...] = ()
     ) -> str | None:
         """A comment on a place (an office:annotation and its end), its
-        paragraphs of text; its name, None when the place is not in the
+        paragraphs of text (the start of each that begins with one of bold,
+        a text:span of a bold automatic style, as LibreOffice saves a
+        comment's bold words); its name, None when the place is not in the
         document."""
         red, lines = self.red, self.lines
         if not red.new_paragraphs[place.j1] or not red.new_paragraphs[place.j2]:
@@ -508,7 +510,13 @@ class OdtNotes:
         etree.SubElement(note, odf("dc:date")).text = red.date.isoformat()
         for text in paragraphs:
             p = etree.SubElement(note, odf("text:p"))
-            p.text = text
+            start = next((b for b in bold if text.startswith(b)), "")
+            if start:
+                span = etree.SubElement(p, odf("text:span"))
+                span.set(odf("text:style-name"), red.styles.name(frozenset({STRONG})))
+                span.text, span.tail = start, text[len(start) :] or None
+            else:
+                p.text = text
         end = etree.Element(odf("office:annotation-end"))
         end.set(odf("office:name"), name)
         # the end first: putting the start in first would move it

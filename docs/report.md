@@ -98,7 +98,7 @@ remembers the views, the spacing and the column widths.
 - **A fix already applied:** in the report of one file's fixes, a
   problem whose fix the version on the right holds has a green card that
   says so, its **Resolved** box ticked from the start; in the documents, its comment starts with
-  "✓ Fix already applied" (in bold in Word) and ends saying that the
+  "✓ Fix already applied" in bold and ends saying that the
   tracked change on the passage is the fix: accept it to keep it, reject
   it to undo it.
 - **Highlights off** removes the colour of changed words and lines; the

@@ -24,6 +24,7 @@ from helpers import (
     pair,
     revisions,
 )
+from lxml import etree
 
 from prosediff.aidocs import (
     FIX_APPLIED,
@@ -38,6 +39,39 @@ from prosediff.assess import Annotation, Assessment
 from prosediff.diff import Options, compare_paths
 from prosediff.render import render
 from prosediff.word import read_docx
+
+TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+STYLE_NS = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+FO_NS = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+
+
+def bold_in_comments(path: Path, fmt: str) -> list[str]:
+    """The words in bold in a document's comments, in order: in Word, the
+    runs with w:b; in OpenDocument, the text:spans of an office:annotation
+    whose automatic style says fo:font-weight bold."""
+    if fmt == "docx":
+        root = etree.fromstring(zipfile.ZipFile(path).read("word/comments.xml"))
+        return [
+            "".join(t.text or "" for t in r.iter(f"{W}t"))
+            for r in root.iter(f"{W}r")
+            if r.find(f"{W}rPr/{W}b") is not None
+        ]
+    root = etree.fromstring(zipfile.ZipFile(path).read("content.xml"))
+    bold = {
+        s.get(f"{{{STYLE_NS}}}name")
+        for s in root.iter(f"{{{STYLE_NS}}}style")
+        if any(
+            p.get(f"{{{FO_NS}}}font-weight") == "bold"
+            for p in s.iter(f"{{{STYLE_NS}}}text-properties")
+        )
+    }
+    return [
+        span.text
+        for note in root.iter("{urn:oasis:names:tc:opendocument:xmlns:office:1.0}annotation")
+        for span in note.iter(f"{{{TEXT_NS}}}span")
+        if span.get(f"{{{TEXT_NS}}}style-name") in bold
+    ]
+
 
 MISSING = Annotation("new", "words nowhere in it", "", "Not there.", "", "none")
 OLD_SIDE = Annotation("old", "Limitations are discussed", "", "Removed.", "Keep it.")
@@ -121,6 +155,8 @@ def test_the_two_documents_with_the_ais_comments_and_fixes(tmp_path, fmt):
     )
     assert fixed_note in texts
     assert "Which checks?\nProposed: Name them." in texts
+    # in bold: the heading of the fix applied, and "Proposed:"
+    assert bold_in_comments(out, fmt) == [FIX_APPLIED, "Proposed: ", "Proposed: "]
     if fmt == "docx":
         authors = {r.get(W + "author") for r in revisions(out)}
         assert authors == {"Claude Code (opus)"}
