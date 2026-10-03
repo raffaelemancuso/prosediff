@@ -107,7 +107,8 @@ In the window:
    **Git repository**, or **One file** for the AI to review alone.
 2. Optionally, pick an **AI** (Claude Code, Codex, Ollama or an API model),
    its model and effort.
-3. Click **Compare** (Ctrl+Enter). The report opens in the browser.
+3. Click **Compare** (Ctrl+Enter). The report opens in a window of its own,
+   where the choices made of the AI's problems are kept in the project.
 
 ![The prosediff window: a git repository with base and target commits chosen from lists, the comparison options in one card, the output, and the AI assessment card with its AI, model and effort](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
 
@@ -134,7 +135,7 @@ and git: see [Command line](https://github.com/raffaelemancuso/prosediff/blob/ma
 uv run pytest                            # the tests
 uv run playwright install chromium       # once, for the browser tests
 uv run ruff check && uv run ruff format --check
-uv run --with pillow python docs/make_screenshots.py --assess claude   # the README screenshots
+uv run python docs/make_screenshots.py --assess claude   # the README screenshots
 uv run --with pillow python docs/make_icon.py          # the window icons, from docs/logo.svg
 ```
 

@@ -2,8 +2,10 @@
 
 [Back to the README](../README.md).
 
-`prosediff-gui` opens a window to choose what to compare. It follows the
-system's light or dark mode on Windows and macOS, and is light elsewhere.
+`prosediff-gui` opens a window to choose what to compare, its Open screen;
+each report it makes opens in a window of its own. Both are web views of
+the system's (Edge WebView2 on Windows, WebKit on macOS; on Linux, Qt's,
+installed with prosediff), and follow its light or dark mode.
 
 - `prosediff-gui REPOSITORY` opens it with a git repository filled in (or
   the repository a folder belongs to).
@@ -16,8 +18,8 @@ system's light or dark mode on Windows and macOS, and is light elsewhere.
   files, or two folders.
 - `prosediff-gui NAME.prosediff` opens a project (see below).
 
-Any other arguments show an error box, and the program exits once it is
-dismissed.
+Any other arguments show an error window, and the program exits once it
+is closed.
 
 To have it at hand, install it once:
 
@@ -51,7 +53,8 @@ The segmented button at the top chooses what is compared:
   and AI cards are left out, the run's own settings used; the report is
   written over the old one unless **Save to** says otherwise.
 
-The Files and Folders views have a button to swap the two.
+The Files and Folders views have a button to swap the two. A file
+dropped on a field puts its path in it.
 
 The **Comparison** card holds the options that change what is found; each
 field has a tooltip. They are: Word and OpenDocument tracked changes; the
@@ -63,8 +66,8 @@ and their replies, are neither shown nor sent to the AI); and "Compare by"
 hold is greyed out: Both for a diff, Sentences for a tracked-changes
 document. It gives way to Paragraphs until the output can hold it again.
 
-**Advanced settings**, in the bottom bar, opens the rest in a separate
-window (Close or Escape hides it): context lines, line alignment, hidden
+**Advanced settings**, in the bottom bar, opens the rest in a dialog over
+the window (Close or Escape closes it): context lines, line alignment, hidden
 lines, moved passages, comments without text, moved paragraphs and
 sentences, the `--passage-*` settings, text encoding, the Markdown filter
 and the AI timeout. [cli.md](cli.md) explains each. A negative number of
@@ -77,12 +80,13 @@ versions, into the temporary folder. A file you choose stays.
 
 Under **AI assessment** (see [AI assessment](ai_assessment.md)): the
 **AI**, its **Model** and **Effort**, listed as the AI reports them (any
-name can be typed); what it **Reads**; your **Instructions**, typed, written
-in a large box in a window of their own (the pencil button), or from a text
-file; in that window, prosediff's own prompts too, to edit (**Restore
+name can be typed, and the button beside each lists them all); what it
+**Reads**; your **Instructions**, typed, written in a large box in a dialog
+of their own (the pencil button), or from a text file; in that dialog,
+prosediff's own prompts too, to edit (**Restore
 default** puts prosediff's back): for one file, the review's; for two
 versions, the assessment's and the AI-writing check's; **Other files** to
-send as context (a switch, and **Files…**, their list in a window of its
+send as context (a switch, and **Files…**, their list in a dialog of its
 own, sorted by **File** or **Folder** when a heading is clicked, with
 **Add…** for several at once: PDF, Word, OpenDocument, Markdown or text;
 a file analysed, one of the two compared, the one reviewed, or one in a
@@ -95,12 +99,19 @@ whether the prompt is saved in the report. The switches are greyed out
 while no AI is chosen, and the whole card unless the output is the HTML
 report.
 
-**Compare** (Ctrl+Enter) writes the output and opens it. The status line
-shows the current stage and how long it has taken, and **Progress**,
-above it, logs each stage and what the AI does, a line each; drag the
-grip below the log to make it taller or shorter. Meanwhile Compare
-becomes **Cancel** (Esc), which stops everything, the AI included. A
-notification says when it is done.
+**Compare** (Ctrl+Enter) writes the output and opens it: the HTML report
+in its window (the same one for the next report), a diff or a document of
+tracked changes in the program that opens it. The status line shows the
+current stage and how long it has taken, and **Progress**, above it, logs
+each stage and what the AI does, a line each; drag the log's corner to
+make it taller or shorter. Meanwhile Compare becomes **Cancel** (Esc),
+which stops everything, the AI included. A notification says when it is
+done. With **Preview before sending**, the report without the assessment
+opens first, and the Open screen asks whether to send it to the AI.
+
+In a report's window, the documents to download (**With AI fixes**,
+**Tracked changes**) are saved where a dialog says, beside the report at
+first, rather than in the Downloads folder.
 
 The window remembers its choices only when asked. **Options > Save options** writes
 them to `%APPDATA%\prosediff\gui.json` (elsewhere, under
@@ -119,6 +130,16 @@ also keeps the AI's answers of the last report it assessed in the window,
 with the checksum (SHA-256) of every file the AI read: the files compared
 and the context files, taken as the run began.
 
+It keeps, too, the choices made in that report's window: which problems
+are **In the download**, which **Resolved**, which fixes undone (**Undo
+fix**). Made in the report of the project open, they are written into the
+project as they are made, nothing else of it changed: settings changed in
+the window since stay unsaved until Save project. Made in a report the
+project does not hold yet (one made since it was saved), they are kept
+until **Save project**, which saves them with that report's answers. A
+report opened as a file, in a browser, keeps its choices in the browser
+instead, for that report on that computer.
+
 **Open project…** (Ctrl+O, or `prosediff-gui NAME.prosediff`) shows all
 those settings again, and the window's title names the project. When the
 project holds a report, its **Rebuild** tab is set to it: **Rebuild**
@@ -127,4 +148,5 @@ made as, unless Save to says otherwise (`prosediff --rebuild
 NAME.prosediff` does the same). It is refused if any file the AI read,
 input or context file, changed since or is gone: the AI's marks would not
 fit the new text, so the AI must be asked again. A git repository's
-commits do not change and are not checked.
+commits do not change and are not checked. The report made again opens
+with the choices the project keeps.

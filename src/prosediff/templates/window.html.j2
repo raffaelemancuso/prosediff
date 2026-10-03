@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prosediff</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+  --panel: #f6f8fa; --field: #ffffff; --link: #0969da; --accent: #0969da;
+  --accent-fg: #ffffff; --danger: #cf222e; --add: #1a7f37; --warn: #9a6700;
+  --shadow: 0 8px 24px #8c959f33;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --border: #30363d;
+    --panel: #161b22; --field: #0d1117; --link: #4493f8; --accent: #1f6feb;
+    --accent-fg: #ffffff; --danger: #da3633; --add: #3fb950; --warn: #d29922;
+    --shadow: 0 8px 24px #01040966;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 14px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  display: flex; flex-direction: column; }
+main { flex: 1; overflow: auto; padding: 14px 16px 8px; }
+h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor;
+  stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+svg.i.solid { fill: currentColor; stroke: none; }
+
+/* The cards, a row a field: its label, the field, its buttons. */
+.card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 8px;
+  margin-bottom: 10px; background: var(--bg); }
+.rows { display: grid; grid-template-columns: max-content 1fr auto; gap: 6px 10px;
+  align-items: center; }
+.rows > .label { white-space: nowrap; }
+.rows > .wide { grid-column: 2 / 4; }
+.rows > .full { grid-column: 1 / 4; }
+.note { color: var(--muted); font-size: 13px; }
+.buttons { display: flex; gap: 6px; }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+.columns > div { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px;
+  align-items: center; align-content: start; }
+.columns > div > .switch { grid-column: 1 / 3; }
+@media (max-width: 720px) { .columns { grid-template-columns: 1fr; } }
+
+/* Fields. */
+input[type=text], input[type=number], select, textarea {
+  font: inherit; color: var(--fg); background: var(--field); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 8px; min-width: 0; width: 100%; }
+input[type=number] { width: 8em; }
+select { width: auto; min-width: 9em; }
+input:disabled, select:disabled, textarea:disabled, button:disabled { opacity: .5; cursor: default; }
+textarea { resize: vertical; font-family: inherit; }
+textarea[readonly] { background: var(--panel); }
+label.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  user-select: none; }
+label.switch:has(input:disabled) { opacity: .5; cursor: default; }
+label.switch input { appearance: none; width: 30px; height: 17px; border-radius: 9px;
+  background: var(--border); position: relative; margin: 0; flex: none; cursor: inherit; }
+label.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px;
+  height: 13px; border-radius: 50%; background: #fff; }
+/* sliding once the page shows the settings, not into them */
+body.ready label.switch input { transition: background .15s; }
+body.ready label.switch input::after { transition: left .15s; }
+label.switch input:checked { background: var(--accent); }
+label.switch input:checked::after { left: 15px; }
+@media (prefers-reduced-motion: reduce) {
+  body.ready label.switch input, body.ready label.switch input::after { transition: none; }
+}
+.switches { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+
+/* A drop-down list one can also type into (combo): the field, and a
+   button that shows every choice. */
+.combo { position: relative; display: flex; min-width: 0; }
+.combo input { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.combo > button { border: 1px solid var(--border); border-left: 0; border-radius: 0 6px 6px 0;
+  background: var(--panel); color: var(--fg); padding: 0 6px; cursor: pointer; }
+.combo.short { width: 12em; }
+.combo .menu { position: absolute; z-index: 20; top: 100%; left: 0; right: 0; margin: 2px 0 0;
+  padding: 4px 0; list-style: none; max-height: 18em; overflow: auto; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); min-width: 12em; }
+.combo .menu li { padding: 3px 10px; cursor: pointer; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.combo .menu li:hover, .combo .menu li.at { background: var(--panel); }
+
+/* Buttons: plain, with an icon only, a segmented choice, the main one. */
+button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer; display: inline-flex;
+  align-items: center; gap: 6px; white-space: nowrap; }
+button:hover:not(:disabled) { background: var(--panel); }
+button.icon { padding: 4px 6px; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+  padding: 6px 16px; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+button.primary.danger { background: var(--danger); border-color: var(--danger); }
+button.link { border: 0; background: none; color: var(--link); padding: 0; }
+.seg { display: inline-flex; flex-wrap: wrap; }
+.seg label { position: relative; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border);
+  margin-left: -1px; padding: 4px 10px; cursor: pointer; background: var(--bg);
+  white-space: nowrap; }
+.seg label:first-child span { border-radius: 6px 0 0 6px; margin-left: 0; }
+.seg label:last-child span { border-radius: 0 6px 6px 0; }
+.seg input:checked + span { background: var(--accent); color: var(--accent-fg);
+  border-color: var(--accent); position: relative; z-index: 1; }
+.seg input:focus-visible + span { outline: 2px solid var(--link); outline-offset: 1px; z-index: 2; }
+.seg input:disabled + span { opacity: .45; cursor: default; }
+.seg.modes { margin-bottom: 12px; }
+.seg.modes span { padding: 6px 14px; }
+
+/* The bottom: the progress log, the preview's question, the status line and
+   the buttons. */
+footer { border-top: 1px solid var(--border); background: var(--panel); padding: 8px 16px; }
+.bar { display: flex; align-items: center; gap: 8px; }
+.status { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+#progress { margin-bottom: 8px; }
+#progress h2 { margin-bottom: 4px; }
+#log { margin: 0; height: 8.5em; min-height: 3em; max-height: 60vh; overflow: auto;
+  resize: vertical; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+#preview { display: flex; gap: 12px; align-items: center; border: 1px solid var(--accent);
+  border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; background: var(--bg); }
+#preview p { margin: 0; flex: 1; }
+
+/* Dialogs. */
+dialog { border: 1px solid var(--border); border-radius: 10px; background: var(--bg);
+  color: var(--fg); padding: 16px 18px; box-shadow: var(--shadow); max-width: min(92vw, 860px); }
+dialog::backdrop { background: #0006; }
+dialog h2 { text-transform: none; letter-spacing: 0; font-size: 15px; color: var(--fg); }
+dialog .card { margin-bottom: 8px; }
+dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+#advanced .passages { display: grid; grid-template-columns: max-content auto max-content auto;
+  gap: 6px 10px; align-items: center; }
+#files table { border-collapse: collapse; width: 100%; }
+#files .list { max-height: 50vh; overflow: auto; border: 1px solid var(--border);
+  border-radius: 6px; min-height: 8em; }
+#files th { text-align: left; position: sticky; top: 0; background: var(--panel); }
+#files th button { border: 0; background: none; font-weight: 600; padding: 4px 8px; width: 100%; }
+#files td { padding: 3px 8px; border-top: 1px solid var(--border); }
+#files tr.chosen td { background: var(--panel); }
+#files .layout { display: grid; grid-template-columns: 1fr auto; gap: 10px; min-width: 640px; }
+#files .layout .buttons { flex-direction: column; }
+#instructions .box { margin-bottom: 10px; }
+#instructions .head { display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 4px; gap: 12px; }
+#instructions textarea { width: min(80ch, 84vw); }
+#alert p { white-space: pre-wrap; margin: 0; max-width: 60ch; }
+#alert h2.error { color: var(--danger); }
+#alert h2.warning { color: var(--warn); }
+#toast { position: fixed; right: 16px; bottom: 64px; max-width: 420px; padding: 10px 14px;
+  border-radius: 8px; background: var(--bg); border: 1px solid var(--add); box-shadow: var(--shadow);
+  white-space: pre-wrap; z-index: 50; }
+#toast::before { content: "✓ "; color: var(--add); font-weight: 700; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 3.5h4.3l1.5 1.5h7.2v7.5h-13z"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 16 16"><path d="M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5"/></symbol>
+  <symbol id="i-save" viewBox="0 0 16 16"><path d="M2.5 2.5h9l2 2v9h-11z M5 2.5v3.5h5.5V2.5 M5 13.5V9.5h6v4"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.5 2.5l3 3-8 8h-3v-3z M9 4l3 3"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 16 16"><path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0"/><circle cx="10.5" cy="4" r="1.5"/><circle cx="5.5" cy="8" r="1.5"/><circle cx="12.5" cy="12" r="1.5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 16 16"><path d="M4.5 2.8v10.4L13 8z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></symbol>
+  <symbol id="i-files" viewBox="0 0 16 16"><path d="M5.5 1.5h6l2 2v8h-8z M3.5 4.5v10h7"/></symbol>
+  <symbol id="i-file" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z M9.5 1.5v3h3 M5.5 8h5 M5.5 10.5h5"/></symbol>
+  <symbol id="i-git" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 16 16"><path d="M13 7A5 5 0 0 0 3.5 5M3 9a5 5 0 0 0 9.5 2M3.5 2v3h3M12.5 14v-3h-3"/></symbol>
+</svg>
+
+<main>
+  <div class="seg modes" role="radiogroup" aria-label="What to compare">
+    <label title="Two versions in a git repository: commits, the index, the working tree."><input type="radio" name="mode" value="git" data-field="mode"><span><svg class="i"><use href="#i-git"/></svg>Git repository</span></label>
+    <label title="Two files: Word, OpenDocument, Markdown, text."><input type="radio" name="mode" value="files" data-field="mode"><span><svg class="i"><use href="#i-files"/></svg>Files</span></label>
+    <label title="Two folders, file by file."><input type="radio" name="mode" value="folders" data-field="mode"><span><svg class="i"><use href="#i-folder"/></svg>Folders</span></label>
+    <label title="One file alone, reviewed by an AI: nothing compared."><input type="radio" name="mode" value="review" data-field="mode"><span><svg class="i"><use href="#i-file"/></svg>One file</span></label>
+    <label title="A report made again from the AI's answers saved beside it."><input type="radio" name="mode" value="rebuild" data-field="mode"><span><svg class="i"><use href="#i-repeat"/></svg>Rebuild</span></label>
+  </div>
+
+  <section class="card" data-id="card:source">
+    <h2 data-text="source">Versions</h2>
+    <div class="rows" data-id="side:git">
+      <label class="label" for="f-repo">Repository</label>
+      <input type="text" id="f-repo" data-field="repo" title="The repository, or a folder inside it.">
+      <button class="icon" type="button" data-act="pick" data-arg="repo" title="Choose the repository"><svg class="i"><use href="#i-folder"/></svg></button>
+      <label class="label" for="f-base">Base (older)</label>
+      <div class="combo wide"><input type="text" id="f-base" data-field="base" data-list="base" title="A commit (hash, date, author, subject) or any ref git knows: HEAD~15, a tag."></div>
+      <label class="label" for="f-target">Target (newer)</label>
+      <div class="combo wide"><input type="text" id="f-target" data-field="target" data-list="target" title="The working tree, the index, a commit or any ref git knows."></div>
+      <label class="label" for="f-paths">Only these paths</label>
+      <input type="text" class="wide" id="f-paths" data-field="paths" title="Optional: files or folders of the repository, separated by ;">
+      <span></span>
+      <label class="switch wide"><input type="checkbox" data-field="untracked">Include untracked files</label>
+    </div>
+    <div class="rows" data-id="side:files">
+      <label class="label" for="f-old">Old</label>
+      <input type="text" id="f-old" data-field="old">
+      <div class="buttons">
+        <button class="icon" type="button" data-act="pick" data-arg="old" title="Choose the old file"><svg class="i"><use href="#i-folder"/></svg></button>
+        <button class="icon" type="button" data-act="swap" data-arg="files" title="Swap the old and the new file"><svg class="i"><use href="#i-swap"/></svg></button>
+      </div>
+      <label class="label" for="f-new">New</label>
+      <input type="text" id="f-new" data-field="new">
+      <div class="buttons">
+        <button class="icon" type="button" data-act="pick" data-arg="new" title="Choose the new file"><svg class="i"><use href="#i-folder"/></svg></button>
+      </div>
+      <span></span>
+      <span class="note wide">Any two files: Word, OpenDocument, Markdown, text, whatever their names.</span>
+    </div>
+    <div class="rows" data-id="side:folders">
+      <label class="label" for="f-old-folder">Old</label>
+      <input type="text" id="f-old-folder" data-field="old_folder">
+      <div class="buttons">
+        <button class="icon" type="button" data-act="pick" data-arg="old_folder" title="Choose the old folder"><svg class="i"><use href="#i-folder"/></svg></button>
+        <button class="icon" type="button" data-act="swap" data-arg="folders" title="Swap the old and the new folder"><svg class="i"><use href="#i-swap"/></svg></button>
+      </div>
+      <label class="label" for="f-new-folder">New</label>
+      <input type="text" id="f-new-folder" data-field="new_folder">
+      <div class="buttons">
+        <button class="icon" type="button" data-act="pick" data-arg="new_folder" title="Choose the new folder"><svg class="i"><use href="#i-folder"/></svg></button>
+      </div>
+      <label class="label" for="f-include">Only</label>
+      <input type="text" class="wide" id="f-include" data-field="include" title="The files compared: patterns separated by |, matched against each file's name (its path within the folder for a pattern with a /); empty: every file.">
+      <span></span>
+      <label class="switch wide" title="Compare only the files found at the same path in both folders: those only in one (added, deleted or renamed) are left out."><input type="checkbox" data-field="common_only">Only the files in both folders</label>
+    </div>
+    <div class="rows" data-id="side:review">
+      <label class="label" for="f-single">File</label>
+      <input type="text" id="f-single" data-field="single">
+      <button class="icon" type="button" data-act="pick" data-arg="single" title="Choose the file to review"><svg class="i"><use href="#i-folder"/></svg></button>
+      <span></span>
+      <span class="note wide">One file alone, reviewed whole by the AI chosen below: nothing compared. A Word or OpenDocument file comes back with the AI's comments and fixes.</span>
+    </div>
+    <div class="rows" data-id="side:rebuild">
+      <label class="label" for="f-rebuild">Saved answers</label>
+      <input type="text" id="f-rebuild" data-field="rebuild_file" title="The NAME.ai.json prosediff saves beside every report the AI assessed, or a project (NAME.prosediff) that holds a report. Refused when a file the AI read, context files included, changed since.">
+      <button class="icon" type="button" data-act="pick" data-arg="rebuild_file" title="Choose the AI's saved answers (.ai.json or .prosediff)"><svg class="i"><use href="#i-folder"/></svg></button>
+      <span></span>
+      <span class="note wide">The report made again as this prosediff writes it, from the AI's answers kept beside it: the files compared again as then, the AI not asked again.</span>
+    </div>
+  </section>
+
+  <section class="card" data-id="card:compared">
+    <h2>Comparison</h2>
+    <div class="columns">
+      <div>
+        <label for="f-docx" title="Word and OpenDocument tracked changes: accept them all, reject them all, or show them, as Word does.">Tracked changes</label>
+        <select id="f-docx" data-field="docx_changes" title="Word and OpenDocument tracked changes: accept them all, reject them all, or show them, as Word does.">
+          {% for value, label in docx_changes %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+        <label for="f-language" title="Splits sentences and hyphenates lines. default: the language Word and OpenDocument files are marked with, else guessed; document: only that; guess: guessed from each file's text; or a code such as it.">Language</label>
+        <div class="combo short"><input type="text" id="f-language" data-field="language" data-options="{{ languages | join('|') }}" title="Splits sentences and hyphenates lines. default: the language Word and OpenDocument files are marked with, else guessed; document: only that; guess: guessed from each file's text; or a code such as it."></div>
+        <span data-id="row:split" title="How prose is compared: paragraph by paragraph, sentence by sentence (a sentence moved between paragraphs is recognised), or both, in one HTML report whose toolbar switches between the two.">Compare by</span>
+        <div class="seg" data-id="row:split" role="radiogroup" aria-label="Compare by">
+          <label><input type="radio" name="split" value="paragraph" data-field="split"><span>Paragraphs</span></label>
+          <label><input type="radio" name="split" value="sentence" data-field="split"><span>Sentences</span></label>
+          <label><input type="radio" name="split" value="both" data-field="split"><span>Both</span></label>
+        </div>
+      </div>
+      <div>
+        <label for="f-comments" data-tip="comments_tip">Comments</label>
+        <select id="f-comments" data-field="comments" data-list="comments" data-tip="comments_tip"></select>
+        <label class="switch" data-id="ignore_whitespace" title="Lines that differ only in spacing are the same, as git diff -w."><input type="checkbox" data-field="ignore_whitespace">Ignore whitespace</label>
+        <label class="switch" title="Leave out the comments of Word and OpenDocument files marked resolved, and the replies to them: not shown in the report, and not sent to the AI."><input type="checkbox" data-field="skip_resolved">Skip resolved comments</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" data-id="card:output">
+    <h2>Output</h2>
+    <div class="rows">
+      <span class="label" data-id="row:format">Format</span>
+      <div class="seg wide" data-id="row:format" role="radiogroup" aria-label="Format">
+        <label title="Side by side, in a window: words, moves, comments."><input type="radio" name="output_format" value="html" data-field="output_format"><span>HTML report</span></label>
+        <label title="A .diff, as git diff writes it; a patch for text files."><input type="radio" name="output_format" value="diff" data-field="output_format"><span>Unified diff</span></label>
+        <label title="A .wdiff: the words changed in each line, [-old-]{+new+}."><input type="radio" name="output_format" value="wdiff" data-field="output_format"><span>Word diff</span></label>
+        <label title="Two Word documents compared into a copy of the new one, everything in it kept, each change since the old one a tracked change to accept or reject in Word. Two Word documents only (greyed out for other files); paragraph by paragraph."><input type="radio" name="output_format" value="docx" data-field="output_format"><span>Word, tracked</span></label>
+        <label title="Two OpenDocument texts compared into a copy of the new one, the same way, for LibreOffice Writer. Two OpenDocument texts only (greyed out for other files)."><input type="radio" name="output_format" value="odt" data-field="output_format"><span>OpenDocument, tracked</span></label>
+      </div>
+      <label class="label" for="f-output">Save to</label>
+      <input type="text" id="f-output" data-field="output" title="By default next to the new file (OLD_vs_NEW.html), or into the new folder (prosediff.html), following them as they change; comparing git versions, a new file in the temporary folder. A file chosen here stays.">
+      <div class="buttons">
+        <button class="icon" type="button" data-act="pick_output" title="Choose where to save it"><svg class="i"><use href="#i-save"/></svg></button>
+        <label class="switch"><input type="checkbox" data-field="open_page">Open when done</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" data-id="card:ai">
+    <h2>AI assessment</h2>
+    <div class="rows">
+      <label class="label" for="f-ai">AI</label>
+      <div class="buttons wide" style="align-items:center; flex-wrap: wrap">
+        <div class="combo short"><input type="text" id="f-ai" data-field="assess_ai" data-list="assess_ai" title="Have an AI assess the value of the changes as a whole: a verdict, what changed, what improved and the problems to fix, at the top of the HTML report (the HTML report only). claude: Claude Code, on your Claude login; codex: ChatGPT through Codex, on your ChatGPT login (log in once with prosediff --login-codex); ollama: a local model, nothing leaving this computer; or another provider any-llm reaches (openai, anthropic, gemini, ...), its API key in the environment."></div>
+        <label for="f-model" style="margin-left:6px">Model</label>
+        <div class="combo" style="width:16em"><input type="text" id="f-model" data-field="assess_model" data-list="assess_model" title="The model that assesses, among those the AI reports, its own default first; or any name typed."></div>
+        <label for="f-effort" style="margin-left:6px">Effort</label>
+        <div class="combo" style="width:8em"><input type="text" id="f-effort" data-field="assess_effort" data-list="assess_effort" title="How hard the model thinks, among the levels it reports it supports; default, or empty: its own. More effort, a closer reading, but slower and costlier."></div>
+      </div>
+      <span class="label" data-id="row:reads" title="What the model is sent, besides the instructions.">Reads</span>
+      <div class="seg wide" data-id="row:reads" role="radiogroup" aria-label="What the model reads">
+        <label title="The changes (a word diff: the old wording beside the new) and the whole new version, for the model to check them against the rest of the document: citations, cross-references, terms. The old version needs no sending: its unchanged paragraphs are in the new one, the rest in the changes. More to read, a better check."><input type="radio" name="assess_context" value="document" data-field="assess_context"><span>Changes + new version</span></label>
+        <label title="The changes alone (a word diff of the changed paragraphs): less to read, but nothing of the text around them."><input type="radio" name="assess_context" value="changes" data-field="assess_context"><span>Changes only</span></label>
+      </div>
+      <label class="label" for="f-instructions">Instructions</label>
+      <input type="text" id="f-instructions" data-field="assess_instructions" title="Your own instructions, added to the prompt: the journal, what a co-author asked for, what to look at (e.g. &quot;the journal is Research Policy; check that the introduction was cut by a fifth&quot;); or a text file holding them.">
+      <div class="buttons">
+        <button class="icon" type="button" data-id="write_instructions" data-dialog="instructions" title="Write the instructions in a large box, and see or edit prosediff's own prompt"><svg class="i"><use href="#i-pencil"/></svg></button>
+        <button class="icon" type="button" data-id="pick_instructions" data-act="pick" data-arg="assess_instructions" title="Choose a text file holding the instructions"><svg class="i"><use href="#i-folder"/></svg></button>
+      </div>
+      <label class="label" for="f-author">Author</label>
+      <input type="text" class="wide" id="f-author" data-field="assess_author" style="max-width: 22em" title="The author of what the AI adds to the Word and OpenDocument documents to download: its comments and its tracked changes, the name Word and LibreOffice show beside each (Review, Track Changes). Not the author of the document. Empty: the AI and its model, e.g. &quot;Claude Code (claude-opus-5-5)&quot;.">
+      <label class="switch label" title="Also send the AI other files as context, to draw on, not to assess: a journal's guidelines, a reviewer's report, a cited paper (PDF, Word, OpenDocument, Markdown or text)."><input type="checkbox" data-field="assess_send_files">Other files</label>
+      <span class="note" data-text="files_summary"></span>
+      <button type="button" data-id="edit_files" data-dialog="files" title="The files to send, in a list of their own: add and remove them"><svg class="i"><use href="#i-files"/></svg>Files…</button>
+      <span></span>
+      <div class="switches wide">
+        <label class="switch" data-id="assess_preview" title="First write the report without the assessment and open it, then ask whether to send the changes to the AI: to check what it will read before it reads it. No: the report stays as it is, unassessed."><input type="checkbox" data-field="assess_preview">Preview before sending</label>
+        <label class="switch" title="Have the AI mark each problem in the text, from its first words to its last, with what is wrong and the change it proposes: a numbered badge before each in the HTML report, its passage highlighted when clicked, and a card in the margin beside it."><input type="checkbox" data-field="assess_annotate">Mark problems in the text</label>
+        <label class="switch" title="Also ask the AI, apart, whether the text the changes added (one file: the file) reads as written by an AI: a second assessment, its verdict (likely, possibly or unlikely) in the report's top bar. An indication, not a proof: careful writers show the same signs, and writers in a second language are often taken for an AI wrongly. One file has no earlier version to weigh the text against: a weaker judgement still."><input type="checkbox" data-field="assess_ai_writing">Check for AI writing</label>
+        <label class="switch" title="Let the AI edit the text: each fix it proposes is a rewording of the passage, a tracked change in the documents to download and, reviewing one file, the report a diff of the file and the file with the fixes. Off: it only marks the problems and says what to do; the text is left as it is. Needs &quot;Mark problems in the text&quot;."><input type="checkbox" data-field="assess_edits">Allow text edits</label>
+        <label class="switch" title="Also put the exact text the AI was sent (its system prompt and its message) in the HTML report, in a closed panel at its end: to see what it read."><input type="checkbox" data-field="assess_save_prompt">Save AI prompt</label>
+        <label class="switch" title="Comparing a Word document with another (or an OpenDocument text with another), put in the HTML report the documents to download from the AI assessment: the new version with the AI's fixes as tracked changes, to accept or reject, its own (the co-authors') kept; and, when it has none, the tracked changes with the AI's comments. Review mode chooses which problems they hold. They make the report larger: about 2.7 times the document's size. Needs &quot;Mark problems in the text&quot;."><input type="checkbox" data-field="assess_documents">Documents to download</label>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <section id="progress" hidden>
+    <h2>Progress</h2>
+    <pre id="log" tabindex="0" aria-live="polite" title="Drag the corner to make the log taller or shorter"></pre>
+  </section>
+  <section id="preview" hidden aria-live="assertive">
+    <p data-text="preview"></p>
+    <button type="button" class="primary" data-act="preview" data-arg="true">Send to the AI</button>
+    <button type="button" data-act="preview" data-arg="false">Don't send</button>
+  </section>
+  <div class="bar">
+    <span class="spinner" id="spinner" hidden></span>
+    <span class="status" data-text="status" data-tip="status" role="status"></span>
+    <button type="button" data-dialog="advanced" title="The settings few need to change: how the report shows the changes, moved passages, the encoding of text files. They apply to the next comparison as they are when it starts."><svg class="i"><use href="#i-sliders"/></svg>Advanced settings</button>
+    <button type="button" class="primary" id="run" data-act="run" data-tip="run_tip"><svg class="i solid"><use href="#i-play"/></svg><span data-text="run">Compare</span></button>
+  </div>
+</footer>
+
+<dialog id="advanced" aria-labelledby="advanced-title">
+  <h2 id="advanced-title">Advanced settings</h2>
+  <section class="card">
+    <h2>Report</h2>
+    <div class="columns">
+      <div>
+        <label for="f-context" title="Unchanged lines shown around each change. auto: none in Markdown files and Word documents, whose lines are paragraphs; 3 in the others.">Context lines</label>
+        <div class="combo short"><input type="text" id="f-context" data-field="context_lines" data-options="auto|0|1|2|3|5|10|20|50" title="Unchanged lines shown around each change. auto: none in Markdown files and Word documents, whose lines are paragraphs; 3 in the others."></div>
+        <label for="f-align" title="How long lines that wrap are aligned in the HTML report. left: ragged on the right; justify: on both sides, hyphenated.">Wrapped lines</label>
+        <select id="f-align" data-field="align">{% for a in alignments %}<option>{{ a }}</option>{% endfor %}</select>
+        <label for="f-hidden" title="The unchanged lines embedded in the HTML report per gap, for it to reveal; longer gaps are left out. Default: {{ '{:,}'.format(max_hidden) }}.">Hidden lines</label>
+        <input type="number" id="f-hidden" data-field="max_hidden" min="0" step="100" title="The unchanged lines embedded in the HTML report per gap, for it to reveal; longer gaps are left out. Default: {{ '{:,}'.format(max_hidden) }}.">
+      </div>
+      <div>
+        <label class="switch" title="Also follow the passages moved within a paragraph or between two: words removed in one place and added in another, as alike as the moved paragraphs (sentences) must be, are shown as moved, not as a deletion and an unrelated insertion."><input type="checkbox" data-field="move_passages">Moved passages</label>
+        <label class="switch" title="Show every line of each changed file."><input type="checkbox" data-field="full">Whole files</label>
+        <label class="switch" title="Show the comments that have no text too (with markers only)."><input type="checkbox" data-field="empty_comments">Comments without text</label>
+      </div>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Moved paragraphs and sentences</h2>
+    <div class="columns"><div>
+      {% for m in moves %}
+      {% set tip = "How alike an edited " ~ m.what[:-1] ~ " must be to where it reappears to count as moved (1: only unchanged), and how that is measured. token-sort: the words in common, whatever their order; token-set: the words both share against the rest of each (one inside a longer one scores high). Default: " ~ m.default ~ (" (lines of files other than prose too)." if not m.sentences else ".") %}
+      <label for="f-{{ m.prefix }}sim" title="{{ tip }}">Moved {{ m.what }}</label>
+      <div class="buttons" title="{{ tip }}">
+        <input type="number" id="f-{{ m.prefix }}sim" data-field="{{ m.prefix }}move_similarity" min="0.05" max="1" step="0.05" style="width:6em">
+        <select data-field="{{ m.prefix }}move_algorithm" aria-label="How {{ m.what }} are compared">{% for a in algorithms %}<option>{{ a }}</option>{% endfor %}</select>
+      </div>
+      {% endfor %}
+    </div></div>
+  </section>
+  <section class="card">
+    <h2>Moved passages: telling them from chance likeness</h2>
+    <div class="passages">
+      {% for p in passages %}
+      <label for="f-{{ p.name }}" title="{{ p.tip }}">{{ p.label }}</label>
+      <input type="number" id="f-{{ p.name }}" data-field="{{ p.name }}" min="{{ p.low }}" {% if p.share %}max="1" step="0.05"{% else %}step="1"{% endif %} title="{{ p.tip }}">
+      {% endfor %}
+    </div>
+  </section>
+  <section class="card">
+    <h2>Reading files</h2>
+    <div class="columns"><div>
+      <label for="f-encoding" title="Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed; or a codec such as cp1252 (Windows, Western European).">Text encoding</label>
+      <div class="combo short"><input type="text" id="f-encoding" data-field="encoding" data-options="{{ encodings | join('|') }}" title="Of text and Markdown files. auto: UTF-8, unless a file is not; then guessed; or a codec such as cp1252 (Windows, Western European)."></div>
+      <label for="f-filter" title="A shell command both versions of every Markdown file are piped through before they are compared (not Word or OpenDocument files). Empty: none.">Markdown filter</label>
+      <input type="text" id="f-filter" data-field="md_filter" title="A shell command both versions of every Markdown file are piped through before they are compared (not Word or OpenDocument files). Empty: none.">
+    </div></div>
+  </section>
+  <section class="card">
+    <h2>AI assessment</h2>
+    <div class="columns"><div>
+      <label for="f-timeout" title="Give up on the AI's assessment after this long. Default: {{ '{:,}'.format(assess_timeout|int) }}.">Timeout (seconds)</label>
+      <input type="number" id="f-timeout" data-field="assess_timeout" min="1" step="60" title="Give up on the AI's assessment after this long. Default: {{ '{:,}'.format(assess_timeout|int) }}.">
+    </div></div>
+  </section>
+  <div class="end"><button type="button" data-close>Close</button></div>
+</dialog>
+
+<dialog id="files" aria-labelledby="files-title">
+  <h2 id="files-title">Files to send the AI</h2>
+  <div class="layout">
+    <div class="list">
+      <table>
+        <thead><tr>
+          <th><button type="button" data-act="sort_files" data-arg="name">File</button></th>
+          <th><button type="button" data-act="sort_files" data-arg="folder">Folder</button></th>
+        </tr></thead>
+        <tbody id="files-rows"></tbody>
+      </table>
+    </div>
+    <div class="buttons">
+      <button type="button" data-act="pick_files" title="Add files to send (several at once)">Add…</button>
+      <button type="button" id="files-remove" title="Remove the files chosen in the list (Delete)">Remove</button>
+    </div>
+  </div>
+  <div class="end"><button type="button" data-close>Close</button></div>
+</dialog>
+
+<dialog id="instructions" aria-labelledby="instructions-title">
+  <h2 id="instructions-title">Instructions for the AI</h2>
+  <div id="instruction-boxes"></div>
+  <div class="end">
+    <button type="button" data-close>Cancel</button>
+    <button type="button" class="primary" id="instructions-ok">OK</button>
+  </div>
+</dialog>
+
+<dialog id="alert" aria-labelledby="alert-title">
+  <h2 id="alert-title">prosediff</h2>
+  <p id="alert-text"></p>
+  <div class="end"><button type="button" class="primary" data-close autofocus>OK</button></div>
+</dialog>
+
+<div id="toast" role="status" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  // The page shows what Python's App says (render), and sends it each
+  // field changed (set) and each button pressed (act), one call after
+  // the other: a click never overtakes the change before it.
+  var queue = Promise.resolve(), view = null;
+  function api() { return window.pywebview.api; }
+  function call(name, args) {
+    queue = queue.then(function () {
+      return api()[name].apply(api(), args || []);
+    }).then(function (v) {
+      if (v && v.values) render(v);
+      return v;
+    }).catch(function (e) {
+      showAlert("error", String((e && e.message) || e));
+    });
+    return queue;
+  }
+  function set(name, value) { return call("set", [name, value]); }
+  function act(action, args) { return call("act", [action, args || []]); }
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  // The choices of a combo: those App lists (data-list), or fixed ones
+  // (data-options).
+  function choicesOf(input) {
+    if (input.dataset.list) return (view && view.lists[input.dataset.list]) || [];
+    return input.dataset.options ? input.dataset.options.split("|") : [];
+  }
+
+  function render(v) {
+    view = v;
+    all("select[data-list]").forEach(function (s) {
+      var want = v.lists[s.dataset.list] || [];
+      var have = all("option", s).map(function (o) { return o.value; });
+      if (have.join("\n") === want.join("\n")) return;
+      s.textContent = "";
+      want.forEach(function (w) { s.appendChild(el("option", null, w)); });
+    });
+    all("[data-field]").forEach(function (f) {
+      var name = f.dataset.field, value = v.values[name];
+      if (value === undefined) return;
+      if (f.type === "checkbox") f.checked = !!value;
+      else if (f.type === "radio") f.checked = f.value === String(value);
+      else if (f.value !== String(value)) f.value = String(value);
+      var key = f.type === "radio" ? name + ":" + f.value : name;
+      f.disabled = v.disabled.indexOf(key) >= 0;
+      var drop = f.parentNode.classList.contains("combo") && f.parentNode.querySelector(":scope > button");
+      if (drop) drop.disabled = f.disabled;
+    });
+    all("[data-id]").forEach(function (e) {
+      e.hidden = v.hidden.indexOf(e.dataset.id) >= 0;
+      if (e.tagName === "BUTTON") e.disabled = v.disabled.indexOf(e.dataset.id) >= 0;
+    });
+    all("[data-text]").forEach(function (e) { e.textContent = v.text[e.dataset.text] || ""; });
+    all("[data-tip]").forEach(function (e) { e.title = v.text[e.dataset.tip] || ""; });
+    var run = $("#run");
+    run.classList.toggle("danger", v.running);
+    $("use", run).setAttribute("href", v.running ? "#i-stop" : "#i-play");
+    $("#spinner").hidden = !v.running;
+    $("#preview").hidden = !v.text.preview;
+    if (v.log) $("#progress").hidden = false;
+    document.title = v.text.title;
+    renderFiles(v.files);
+    if (!document.body.classList.contains("ready")) {
+      void document.body.offsetHeight;  // the first values laid out, then the slides on
+      document.body.classList.add("ready");
+    }
+  }
+
+  // Each field changed, sent as it is.
+  document.addEventListener("change", function (e) {
+    var f = e.target;
+    if (!f.dataset || !f.dataset.field) return;
+    if (f.type === "radio" && !f.checked) return;
+    set(f.dataset.field, f.type === "checkbox" ? f.checked : f.value);
+  });
+  // Enter in a field sends it at once (the repository listed).
+  document.addEventListener("keydown", function (e) {
+    var f = e.target;
+    if (e.key === "Enter" && !e.ctrlKey && f.dataset && f.dataset.field && f.type === "text") {
+      e.preventDefault();
+      closeMenus();
+      set(f.dataset.field, f.value);
+    }
+  });
+
+  // The combos: their button shows every choice; a choice clicked is the
+  // field's value. The arrow keys move through the list, Enter picks.
+  function closeMenus() { all(".combo .menu").forEach(function (m) { m.remove(); }); }
+  function openMenu(input) {
+    closeMenus();
+    var list = choicesOf(input);
+    if (!list.length) return;
+    var menu = el("ul", "menu");
+    menu.setAttribute("role", "listbox");
+    list.forEach(function (choice) {
+      var li = el("li", choice === input.value ? "at" : null, choice);
+      li.setAttribute("role", "option");
+      li.title = choice;
+      li.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+        input.value = choice;
+        closeMenus();
+        set(input.dataset.field, choice);
+      });
+      menu.appendChild(li);
+    });
+    input.parentNode.appendChild(menu);
+    var at = $(".at", menu);
+    if (at) at.scrollIntoView({ block: "nearest" });
+  }
+  all(".combo").forEach(function (combo) {
+    var input = $("input", combo), drop = el("button");
+    drop.type = "button";
+    drop.tabIndex = -1;
+    drop.setAttribute("aria-label", "Show the choices");
+    drop.textContent = "▾";
+    combo.appendChild(drop);
+    drop.addEventListener("click", function () {
+      if ($(".menu", combo)) closeMenus(); else { openMenu(input); input.focus(); }
+    });
+    input.addEventListener("keydown", function (e) {
+      var menu = $(".menu", combo);
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !menu) {
+        e.preventDefault();
+        openMenu(input);
+        return;
+      }
+      if (!menu) return;
+      var items = all("li", menu), at = items.indexOf($(".at", menu));
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        at = Math.max(0, Math.min(items.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)));
+        items.forEach(function (li, k) { li.classList.toggle("at", k === at); });
+        items[at].scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter" && at >= 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        input.value = items[at].textContent;
+        closeMenus();
+        set(input.dataset.field, input.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenus();
+      }
+    });
+    input.addEventListener("blur", function () { setTimeout(closeMenus, 150); });
+  });
+
+  // The buttons: an action of App's (data-act, its argument data-arg), or
+  // a dialog of the page's (data-dialog).
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("button");
+    if (!b || b.disabled) return;
+    if (b.dataset.act) {
+      var arg = b.dataset.arg;
+      act(b.dataset.act, arg === undefined ? [] : [arg === "true" ? true : arg === "false" ? false : arg]);
+    } else if (b.dataset.dialog) {
+      openDialog(b.dataset.dialog);
+    } else if (b.hasAttribute("data-close")) {
+      b.closest("dialog").close();
+    }
+  });
+  function openDialog(name) {
+    if (name === "instructions") return openInstructions();
+    $("#" + name).showModal();
+  }
+  // The keys: Ctrl+Enter runs, Escape cancels the run (a dialog open, it
+  // closes); Ctrl+O opens a project, Ctrl+S saves it (Ctrl+Shift+S as).
+  document.addEventListener("keydown", function (e) {
+    var key = e.key.toLowerCase();
+    if (e.ctrlKey && key === "enter") { e.preventDefault(); act("run"); }
+    else if (e.ctrlKey && key === "o") { e.preventDefault(); act("open_project"); }
+    else if (e.ctrlKey && key === "s") { e.preventDefault(); act("save_project", [e.shiftKey]); }
+    else if (key === "escape" && !$("dialog[open]") && !$(".combo .menu") && view && view.running) {
+      act("cancel");
+    }
+  });
+
+  // The files sent to the AI, in their dialog: a row each, chosen by a
+  // click (Ctrl or Shift for more), removed with Remove or Delete.
+  var chosenFiles = {};
+  function renderFiles(files) {
+    var body = $("#files-rows");
+    body.textContent = "";
+    files.rows.forEach(function (row) {
+      var tr = el("tr", chosenFiles[row[0]] ? "chosen" : null);
+      tr.dataset.path = row[0];
+      tr.setAttribute("aria-selected", chosenFiles[row[0]] ? "true" : "false");
+      tr.appendChild(el("td", null, row[1]));
+      tr.appendChild(el("td", "note", row[2]));
+      body.appendChild(tr);
+    });
+    all("#files th button").forEach(function (b) {
+      var on = files.sort && files.sort[0] === b.dataset.arg;
+      b.textContent = (b.dataset.arg === "name" ? "File" : "Folder") +
+        (on ? (files.sort[1] ? " ▼" : " ▲") : "");
+    });
+  }
+  $("#files-rows").addEventListener("click", function (e) {
+    var tr = e.target.closest("tr");
+    if (!tr) return;
+    if (!(e.ctrlKey || e.shiftKey)) chosenFiles = {};
+    chosenFiles[tr.dataset.path] = !chosenFiles[tr.dataset.path];
+    renderFiles(view.files);
+  });
+  function removeFiles() {
+    var gone = Object.keys(chosenFiles).filter(function (k) { return chosenFiles[k]; });
+    chosenFiles = {};
+    if (gone.length) act("remove_files", [gone]);
+  }
+  $("#files-remove").addEventListener("click", removeFiles);
+  $("#files").addEventListener("keydown", function (e) { if (e.key === "Delete") removeFiles(); });
+
+  // prosediff's prompts and the instructions, in large boxes (App.instructions):
+  // OK keeps them, Cancel or Escape leaves them as they were.
+  function openInstructions() {
+    queue = queue.then(function () { return api().instructions(); }).then(function (boxes) {
+      var holder = $("#instruction-boxes");
+      holder.textContent = "";
+      boxes.forEach(function (box) {
+        var wrap = el("div", "box"), head = el("div", "head");
+        var label = el("label", null, box.label), text = el("textarea");
+        text.id = "box-" + box.field;
+        label.htmlFor = text.id;
+        text.dataset.box = box.field;
+        text.rows = box.default ? 10 : 5;
+        text.value = box.text;
+        text.readOnly = box.readonly;
+        head.appendChild(label);
+        if (box.default && !box.readonly) {
+          var reset = el("button", "link", "Restore default");
+          reset.type = "button";
+          reset.title = "Keep its ## Verdict section: the report reads it. prosediff still adds, after it, the rules for Word documents and for marking problems in the text.";
+          reset.addEventListener("click", function () { text.value = box.default; });
+          head.appendChild(reset);
+        }
+        wrap.appendChild(head);
+        wrap.appendChild(text);
+        holder.appendChild(wrap);
+      });
+      $("#instructions").showModal();
+      var last = all("textarea:not([readonly])", holder).pop();
+      if (last) last.focus();
+    });
+  }
+  $("#instructions-ok").addEventListener("click", function () {
+    var texts = {};
+    all("#instruction-boxes textarea:not([readonly])").forEach(function (t) { texts[t.dataset.box] = t.value; });
+    $("#instructions").close();
+    act("set_instructions", [texts]);
+  });
+
+  // What App says on its own: a line of the progress log, an error, a
+  // notification that a run is done.
+  function log(line) {
+    var box = $("#log"), end = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+    $("#progress").hidden = false;
+    box.appendChild(document.createTextNode(line + "\n"));
+    if (end) box.scrollTop = box.scrollHeight;
+  }
+  function clearLog() { $("#log").textContent = ""; }
+  var alerts = [];
+  function showAlert(kind, text) {
+    alerts.push([kind, text]);
+    if (!$("#alert").open) nextAlert();
+  }
+  function nextAlert() {
+    var next = alerts.shift();
+    if (!next) return;
+    var title = $("#alert-title");
+    title.className = next[0];
+    title.textContent = next[0] === "warning" ? "⚠ prosediff" : next[0] === "error" ? "✕ prosediff" : "prosediff";
+    $("#alert-text").textContent = next[1];
+    $("#alert").showModal();
+  }
+  $("#alert").addEventListener("close", nextAlert);
+  var toastTimer = null;
+  function toast(text) {
+    var t = $("#toast");
+    t.textContent = text;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 4000);
+  }
+
+  // A file dropped on a field: its path in it.
+  document.addEventListener("dragover", function (e) { e.preventDefault(); });
+  document.addEventListener("drop", function (e) {
+    e.preventDefault();
+    var f = e.target.closest && e.target.closest("input[type=text][data-field]");
+    var file = e.dataTransfer && e.dataTransfer.files[0];
+    var path = file && (file.pywebviewFullPath || file.path);
+    if (f && path && !f.disabled) set(f.dataset.field, path);
+  });
+
+  window.prosediff = { render: render, log: log, clearLog: clearLog, alert: showAlert, toast: toast };
+  function start() {
+    call("view");
+    queue = queue.then(function () { return api().log(); }).then(function (lines) {
+      clearLog();
+      (lines || []).forEach(log);
+    });
+  }
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.view) start();
+  else window.addEventListener("pywebviewready", start);
+})();
+</script>
+</body>
+</html>

@@ -197,29 +197,58 @@ def current(data: object, path: Path) -> None:
         )
 
 
-def save_project(path: str | Path, settings: dict, report: dict | None) -> None:
-    """Write a project: settings (the window's, as gui.Settings holds them)
-    and report (answers, or None). OSError when it cannot be written."""
+def save_project(
+    path: str | Path, settings: dict, report: dict | None, choices: dict | None = None
+) -> None:
+    """Write a project: settings (the window's, as gui.Settings holds them),
+    report (answers, or None), and the choices made in that report's page
+    (which problems are in the documents to download, resolved, their fix
+    undone; None: none made). OSError when it cannot be written."""
     data = {
         "kind": PROJECT_KIND,
         "prosediff": package_version(),
         "saved": datetime.now().isoformat(timespec="seconds"),
         "settings": settings,
         "report": report,
+        "choices": choices if report else None,
     }
-    Path(path).write_text(
-        json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n"
-    )
+    _write(Path(path), data)
 
 
-def load_project(path: str | Path) -> tuple[dict, dict | None]:
-    """A project's settings and report (None when it holds none).
-    SavedError for a file that is not a project."""
-    path = Path(path)
+def _write(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
+
+
+def _project(path: Path) -> dict:
+    """A project as saved; SavedError for a file that is not one."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         raise SavedError(f"{path.name}: not a prosediff project ({e})") from e
     if not isinstance(data, dict) or data.get("kind") != PROJECT_KIND:
         raise SavedError(f"{path.name}: not a prosediff project")
+    return data
+
+
+def load_project(path: str | Path) -> tuple[dict, dict | None]:
+    """A project's settings and report (None when it holds none).
+    SavedError for a file that is not a project."""
+    data = _project(Path(path))
     return data.get("settings") or {}, data.get("report")
+
+
+def project_choices(path: str | Path) -> dict | None:
+    """The choices made in a project's report (save_project); None when it
+    holds none. SavedError for a file that is not a project."""
+    choices = _project(Path(path)).get("choices")
+    return choices if isinstance(choices, dict) else None
+
+
+def save_choices(path: str | Path, choices: dict) -> None:
+    """The choices made in a project's report written into it, the rest as
+    it was saved: settings changed in the window since are not saved with
+    them. SavedError for a file that is not a project, OSError when it
+    cannot be written."""
+    data = _project(Path(path))
+    data["choices"] = choices
+    _write(Path(path), data)

@@ -1960,6 +1960,7 @@ thead.print, .print-note { display: none; }
     });
     countIncluded();
     applyFilter();
+    choicesChanged();
   }
   // The problems whose comments are marked resolved in the documents: at
   // first, those whose fix is applied.
@@ -1980,6 +1981,7 @@ thead.print, .print-note { display: none; }
       b.checked = on;
     });
     applyFilter();
+    choicesChanged();
   }
   // The problems whose fix is already applied: in the documents, those with
   // tracked changes of their own (the version with the AI's fixes); in the
@@ -2019,6 +2021,7 @@ thead.print, .print-note { display: none; }
       showFix(b, on);
     });
     applyFilter();
+    choicesChanged();
   }
   // The words of a range with their formatting (headings, emphasis), without
   // what is not text (NOT_TEXT) and its change marks unwrapped: the original
@@ -2337,6 +2340,11 @@ thead.print, .print-note { display: none; }
       }
       bytes = zipOf(files, spec.fmt === "odt");
     }
+    // in prosediff's window, saved where the window asks (beside the file)
+    if (IN_APP) {
+      app(function (api) { api.save_document(spec.name, base64Of(bytes)); });
+      return;
+    }
     var type = spec.fmt === "docx"
       ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       : "application/vnd.oasis.opendocument.text";
@@ -2351,6 +2359,70 @@ thead.print, .print-note { display: none; }
     var b = e.target.closest(".ai-download");
     if (b) download(Number(b.dataset.document));
   });
+  function base64Of(bytes) {
+    var text = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(text);
+  }
+
+  // The choices made of the problems (in the download, resolved, fix
+  // undone), kept from one visit to the next: opened in prosediff's window,
+  // by the window, in its project; opened as a file, by the browser, for
+  // this report. A problem is known by its words and what is wrong, not its
+  // number, which the AI may give another. The page is in prosediff's
+  // window (IN_APP) once the window has given it its functions (pywebview,
+  // after the page has loaded).
+  var IN_APP = false;
+  var restoringChoices = false, choicesTimer = null;
+  function appApi() {
+    var api = window.pywebview && window.pywebview.api;
+    return api && api.choices ? api : null;
+  }
+  function app(f) { var api = appApi(); if (api) f(api); }
+  function noteKey(note) { return [note.start, note.end, note.problem].join("␟"); }
+  // This report, for the browser: a hash of its problems.
+  function reportId() {
+    var data = document.getElementById("ai-notes-data"), h = 0x811c9dc5;
+    var text = document.title + (data ? data.textContent : "");
+    for (var i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+    return (h >>> 0).toString(36);
+  }
+  function choicesNow() {
+    var made = { left_out: [], resolved: [], undone: [] };
+    aiNotes.forEach(function (note, k) {
+      if (leftOut[k]) made.left_out.push(noteKey(note));
+      if (resolvedNotes[k]) made.resolved.push(noteKey(note));
+      if (unfixed[k]) made.undone.push(noteKey(note));
+    });
+    return made;
+  }
+  // A choice made: kept, a moment later (several at once kept once).
+  function choicesChanged() {
+    if (restoringChoices || !aiNotes.length) return;
+    clearTimeout(choicesTimer);
+    choicesTimer = setTimeout(function () {
+      var made = choicesNow();
+      if (IN_APP) app(function (api) { api.save_choices(made); });
+      else store("choices-" + reportId(), JSON.stringify(made));
+    }, 200);
+  }
+  function restoreChoices(made) {
+    if (!made || typeof made !== "object") return;
+    var has = function (list, key) { return Array.isArray(list) && list.indexOf(key) >= 0; };
+    restoringChoices = true;
+    try {
+      aiNotes.forEach(function (note, k) {
+        var key = noteKey(note), id = String(k);
+        if (has(made.undone, key) !== !!unfixed[k] && hasFix(id)) setFix(id, !has(made.undone, key));
+        if (has(made.left_out, key) !== !!leftOut[k]) keep(id, !has(made.left_out, key));
+        if (has(made.resolved, key) !== !!resolvedNotes[k]) resolve(id, has(made.resolved, key));
+      });
+    } finally {
+      restoringChoices = false;
+    }
+  }
 
   // Review mode (r, or Review in the top bar): down the left, what there is
   // to review, the assessment, the changes, the comments and the problems;
@@ -2926,6 +2998,20 @@ thead.print, .print-note { display: none; }
     e.clipboardData.setData("text/plain", text.replace(/\u00ad/g, ""));
     e.preventDefault();
   });
+
+  // The choices made at the last visit (choicesChanged), made again: the
+  // browser's at once; in prosediff's window, the window's once it is there.
+  function inApp() {
+    var api = appApi();
+    if (!api || IN_APP) return;
+    IN_APP = true;
+    if (aiNotes.length) api.choices().then(restoreChoices);
+  }
+  if (aiNotes.length && !appApi()) {
+    try { restoreChoices(JSON.parse(stored("choices-" + reportId()))); } catch (e) {}
+  }
+  inApp();
+  window.addEventListener("pywebviewready", inApp);
 })();
 </script>
 </body>

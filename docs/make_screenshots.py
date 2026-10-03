@@ -1,11 +1,11 @@
 """Remake the README screenshots from a demo repository.
 
-    uv run --with pillow python docs/make_screenshots.py [--assess AI]
+    uv run python docs/make_screenshots.py [--assess AI]
 
-The page is photographed by Playwright's Chromium (uv run playwright
-install chromium, once); the window by Pillow, which needs a desktop: the window
-shows on screen for a moment. The demo text, a short one on free fall, was
-written for it, and so were its revision, authors and comments.
+The report and the window's Open screen, both pages, are photographed by
+Playwright's Chromium (uv run playwright install chromium, once). The demo
+text, a short one on free fall, was written for it, and so were its
+revision, authors and comments.
 With --assess (e.g. claude), the AI named really assesses the demo's changes,
 once, its assessment kept in screenshot_assessment.json and used again, the AI
 not asked, until the demo text changes (or with --reassess): the report
@@ -18,23 +18,19 @@ are.
 """
 
 import argparse
-import ctypes
 import hashlib
 import json
 import sys
 import tempfile
-import time
-import tkinter as tk
 from dataclasses import asdict
 from pathlib import Path
 
 import git
-from PIL import ImageGrab
 from playwright.sync_api import sync_playwright
 
 from prosediff import compare, render
 from prosediff.assess import Annotation, Assessment, AssessRequest
-from prosediff.gui import App, Settings
+from prosediff.gui import App, Settings, WindowApi, page_html
 from prosediff.render import assess_comparison
 
 DOCS = Path(__file__).parent
@@ -210,30 +206,47 @@ def shoot_assessment(page_file: Path, out: Path, marks: Path) -> bool:
 
 
 def shoot_window(repo: Path, out: Path) -> None:
-    if sys.platform == "win32":  # pixel coordinates, whatever the display scaling
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    root = tk.Tk()
+    """The window's Open screen, its page in Playwright's Chromium with the
+    App it shows behind it (as pywebview's window has it): the repository
+    shown at SHOWN_PATH, the model lists as the AI reports them."""
+
+    class Ui:  # nothing to show but the page itself
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
     app = App(
-        root,
+        Ui(),
         Settings(
             repo=str(repo), output="", align="justify", assess="claude/opus", assess_effort="high"
         ),
     )
-    app.repo.set(SHOWN_PATH)
-    # the model lists as the AI reports them, not "Loading…": at most 30 s
-    waited = time.monotonic()
-    while app.asking and time.monotonic() - waited < 30:
-        root.update()
-        time.sleep(0.05)
-    root.update()
-    root.lift()
-    root.attributes("-topmost", True)
-    root.update()
-    root.after(700, root.quit)
-    root.mainloop()
-    x, y = root.winfo_rootx(), root.winfo_rooty()
-    ImageGrab.grab((x, y, x + root.winfo_width(), y + root.winfo_height())).save(out)
-    root.destroy()
+    app.settle(30)  # not "Loading…": at most 30 s
+    app.values["repo"] = SHOWN_PATH
+    bridge = WindowApi(app, Ui())
+    with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
+        html = Path(tmp) / "window.html"
+        html.write_text(page_html(), encoding="utf-8")
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 940, "height": 900}, device_scale_factor=1)
+        page.expose_function(
+            "__call",
+            lambda name, args: json.loads(json.dumps(getattr(bridge, name)(*args), default=str)),
+        )
+        page.add_init_script(
+            "window.pywebview = {api: {}};"
+            '["view", "set", "act", "instructions", "log"].forEach(n =>'
+            " window.pywebview.api[n] = (...a) => window.__call(n, a));"
+        )
+        page.goto(html.as_uri())
+        page.wait_for_function("document.body.classList.contains('ready')")
+        # as tall as the screen's content, the whole of it in view
+        height = page.evaluate(
+            "document.querySelector('main').scrollHeight"
+            " + document.querySelector('footer').offsetHeight"
+        )
+        page.set_viewport_size({"width": 940, "height": height})
+        page.screenshot(path=str(out))
+        browser.close()
 
 
 if __name__ == "__main__":
@@ -244,7 +257,6 @@ if __name__ == "__main__":
     )
     args = ap.parse_args()
     written = [DOCS / "screenshot_page.png", DOCS / "screenshot_window.png"]
-    # a helper process of the window may still hold the demo folder: left behind
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         repo, _ = demo_repo(Path(tmp) / "physics")
         page_file = report(repo, args.assess, args.reassess)  # one for every shot

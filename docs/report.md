@@ -111,6 +111,12 @@ remembers the views, the spacing and the column widths.
   the passage loses its change marks, and the documents to download
   leave the fix out, its comment kept and saying it was undone;
   **↷ Redo fix** makes it again.
+- **These choices are kept** (In the download, Resolved, a fix undone):
+  in prosediff's window, in the project open (see
+  [Projects](window.md#projects)); in a browser, by the browser, for
+  that report, shown again when it is opened again. A problem is known by
+  its words and what is wrong, so a report made again from the same
+  answers finds its choices.
 - **Highlights off** removes the colour of changed words and lines; the
   gutters stay tinted and signed.
 - **Formatted** hides Markdown syntax and shows emphasis, headings, links
