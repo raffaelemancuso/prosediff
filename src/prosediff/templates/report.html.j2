@@ -2020,14 +2020,19 @@ thead.print, .print-note { display: none; }
     });
     applyFilter();
   }
-  // The text of a range without what is not text (NOT_TEXT), soft hyphens
-  // and all: the original words put back for a fix undone.
-  function rangeText(range) {
+  // The words of a range with their formatting (headings, emphasis), without
+  // what is not text (NOT_TEXT) and its change marks unwrapped: the original
+  // words put back for a fix undone.
+  function rangeWords(range) {
     var bits = range.cloneContents();
     Array.prototype.forEach.call(bits.querySelectorAll(NOT_TEXT), function (e) {
       e.parentNode.removeChild(e);
     });
-    return bits.textContent.replace(/\u00ad/g, "");
+    Array.prototype.forEach.call(bits.querySelectorAll("del, ins"), function (e) {
+      while (e.firstChild) e.parentNode.insertBefore(e.firstChild, e);
+      e.parentNode.removeChild(e);
+    });
+    return bits;
   }
   // The page's side of setFix: the first time, the fix's words wrapped
   // (.fix-out), the original words put beside them hidden (.fix-orig), the
@@ -2037,9 +2042,10 @@ thead.print, .print-note { display: none; }
     var note = aiNotes[k];
     if (!fixApplied(note) || !note.fixRanges || !note.fixRanges.length) return;
     if (!note.fixSpans) {
-      var original = note.ranges && note.ranges[0] ? rangeText(note.ranges[0]) : "";
+      var original = note.ranges && note.ranges[0] ? rangeWords(note.ranges[0]) : null;
       note.fixSpans = note.fixRanges.map(function (r) {
-        var out = el("span", "fix-out"), orig = el("span", "fix-orig", original);
+        var out = el("span", "fix-out"), orig = el("span", "fix-orig");
+        if (original) orig.appendChild(original.cloneNode(true));
         out.appendChild(r.extractContents());
         r.insertNode(out);
         orig.hidden = true;

@@ -1281,3 +1281,26 @@ def test_a_fix_shown_highlighted_and_undone(browser, tmp_path, fmt):
     save_document(page).save_as(redone)
     assert "We find a small and significant effect." in lines(redone, "accept-all")
     page.context.close()
+
+
+def test_a_fix_undone_keeps_the_original_formatting(browser, tmp_path):
+    """A fix undone puts back the original words as the original shows them,
+    a heading still a heading, without the original's change marks."""
+    from prosediff.assess import Annotation
+    from prosediff.pipeline import Run, fixes_shown
+
+    path = pair(tmp_path, "docx")[1]
+    title = Annotation(
+        "new", "Introduction", "and aims", "Vague.", "Say which.", "Introduction and goals"
+    )
+    comparison, shown = fixes_shown(
+        Run("review", str(path), tmp_path / "out.html"), assessment([title])
+    )
+    page = open_report(browser, tmp_path, comparison, assessment=shown)
+    right = page.locator("td.code.right", has_text="Introduction").first
+    page.locator(".card.problem .fix-toggle").click()
+    put_back = right.locator(".fix-orig")
+    assert put_back.inner_text().replace("\xad", "") == "Introduction and aims"
+    assert put_back.locator(".s-h1").count() > 0
+    assert put_back.locator("del, ins, .ai-mark").count() == 0
+    page.context.close()
