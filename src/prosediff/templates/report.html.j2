@@ -94,6 +94,19 @@ td.notes { position: relative; border-left: 1px solid var(--border); padding: 0;
 .card.problem.applied { border-color: color-mix(in srgb, var(--add) 55%, var(--border));
   background: color-mix(in srgb, var(--ins-line) 45%, var(--bg)); }
 .card .applied-note { display: block; margin-top: 4px; color: var(--add); font-size: 13px; }
+/* a problem that comes with a fix: its tag, its words, its button */
+.card .fix-chip { font-size: 11px; font-weight: 600; color: var(--add);
+  border: 1px solid color-mix(in srgb, var(--add) 50%, transparent); border-radius: 8px;
+  padding: 0 6px; }
+.card .fix-text { color: var(--muted); }
+.card .foot .fix-toggle { margin-left: auto; padding: 1px 8px; font: inherit; font-size: 12px;
+  color: var(--link); background: none; border: 1px solid var(--border); border-radius: 4px;
+  cursor: pointer; }
+.card .foot .fix-toggle:hover { background: var(--panel); }
+.card.problem.unfixed .applied-note { color: var(--muted); }
+/* a fix undone: the original words in its place, the passage's marks plain */
+.fix-out[hidden], .fix-orig[hidden] { display: none; }
+.fix-undone del, .fix-undone ins { background: none; }
 .card .keep input:disabled + span, .card .keep:has(input:disabled) { opacity: .5; cursor: default; }
 .card.active { border-color: var(--current); box-shadow: 0 0 0 2px var(--current); }
 .card .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
@@ -1262,7 +1275,8 @@ thead.print, .print-note { display: none; }
   // Not the document's text: what screen readers and paper alone get, and
   // the marks put in it (a comment's marker and the end of its words, a
   // problem's badge).
-  var NOT_TEXT = ".sr, .print-note, .comment, .comment-end, .sign, .ai-mark";
+  // (.fix-orig: the original words put back beside a fix undone, setFix)
+  var NOT_TEXT = ".sr, .print-note, .comment, .comment-end, .sign, .ai-mark, .fix-orig";
   // The ranges, their start and end kept, without what is not text between
   // them (NOT_TEXT): a comment anchored to words a problem was also marked
   // on highlights those words, not the problem's badge before them.
@@ -1325,7 +1339,9 @@ thead.print, .print-note { display: none; }
   function pinNote(mark) {
     var note = aiNotes[Number(mark.dataset.note)];
     var range = note && note.ranges[note.marks.indexOf(mark)];
-    pin(mark, range ? [range] : [], null);
+    // its fix's words too, in the version with the AI's fixes (searchFixes)
+    var fixes = (note && note.fixRanges) || [];
+    pin(mark, range ? [range].concat(fixes) : fixes, null);
   }
   function pinMark(mark) {
     if (!mark) return;
@@ -1352,7 +1368,7 @@ thead.print, .print-note { display: none; }
   // match whatever the hyphenation, the spacing, straight or curly quotes,
   // and the comment markers among them. aiOrder: the notes' indices in
   // reading order; each note's num, its number in that order.
-  var aiNotes = [], aiOrder = [], findAgain = function () {};
+  var aiNotes = [], aiOrder = [], findAgain = function () {}, searchFixes = function () {};
   // a review shown as the file beside the file with the AI's fixes: a
   // problem marked on the original's side has its fix applied
   var FIXES_SHOWN = {{ c.reviewed | tojson }};
@@ -1458,6 +1474,31 @@ thead.print, .print-note { display: none; }
         var note = aiNotes[k];
         if (note.marks && ranges.length === note.marks.length) note.ranges = ranges;
       });
+      searchFixes();
+    };
+    // In a review beside the file with the AI's fixes, each fix applied (a
+    // problem marked on the original's side, with a replacement): its words
+    // in the version on the right, highlighted with the passage when the
+    // problem is pinned (fixRanges).
+    searchFixes = function () {
+      if (!FIXES_SHOWN) return;
+      var roots = document.querySelectorAll(".split");
+      if (!roots.length) roots = [document];
+      aiNotes.forEach(function (note) { note.fixRanges = []; });
+      Array.prototype.forEach.call(roots, function (root) {
+        VERSIONS.forEach(function (skip) {
+          var right = sideText(root, "right", skip);
+          aiNotes.forEach(function (note) {
+            if (note.side !== "old" || !note.replacement) return;
+            var range = rangeOf(right, { start: note.replacement });
+            if (!range) return;
+            var same = note.fixRanges.some(function (r) {
+              return r.startContainer === range.startContainer && r.startOffset === range.startOffset;
+            });
+            if (!same) note.fixRanges.push(range);
+          });
+        });
+      });
     };
     // Numbered in reading order: by where each passage starts in the text,
     // row by row, the old side of a row before its new; those found
@@ -1486,6 +1527,7 @@ thead.print, .print-note { display: none; }
         return mark;
       });
     });
+    searchFixes();  // once the badges are in: they are no text
   })();
   // A problem's badge in the view shown; null when its words were not
   // found there.
@@ -1577,6 +1619,32 @@ thead.print, .print-note { display: none; }
   function fixApplied(note) {
     return !!(FIXES_SHOWN && note.side === "old" && note.replacement);
   }
+  // The problems whose fix is undone (setFix), by index: the page shows the
+  // original words in its place, and the documents leave it out.
+  var unfixed = {};
+  // Whether problem k has a fix to make or undo: applied on the page
+  // (fixApplied), or a tracked change of its own in a document to download.
+  var docFixes = null;
+  function hasFix(k) {
+    if (docFixes === null) {
+      docFixes = {};
+      document.querySelectorAll("script.ai-document").forEach(function (holder) {
+        var notes = JSON.parse(holder.dataset.spec).notes || {};
+        Object.keys(notes).forEach(function (n) {
+          if (notes[n].changes && notes[n].changes.length) docFixes[n] = true;
+        });
+      });
+    }
+    return !!docFixes[k] || fixApplied(aiNotes[k]);
+  }
+  // A fix's button: what clicking it does.
+  function showFix(button, made) {
+    button.textContent = made ? "↶ Undo fix" : "↷ Redo fix";
+    button.title = made
+      ? "Undo the fix: the original words back on the page, and the fix left out of the documents to download (the comment stays)"
+      : "Make the fix again, on the page and in the documents to download";
+    button.setAttribute("aria-pressed", made ? "false" : "true");
+  }
   function card(m) {
     var c = el("article", "card"), head = el("div", "head"), button = el("button", "go");
     var body = el("div", "body"), applied = null, foot = null;
@@ -1591,10 +1659,21 @@ thead.print, .print-note { display: none; }
       // applied, which the card says itself
       button.appendChild(el("span", "when",
         note.side === "old" && !FIXES_SHOWN ? "AI, old version" : "AI"));
+      // a problem that comes with a fix (the passage rewritten) says so
+      if (note.replacement) button.appendChild(el("span", "fix-chip", "Fix"));
       if (document.querySelector("script.ai-document")) {
         foot = el("div", "foot");
         foot.appendChild(keepBox(m.dataset.note, note));
         foot.appendChild(resolveBox(m.dataset.note, note));
+      }
+      // its fix made or undone, on the page and in the documents (setFix)
+      if (hasFix(m.dataset.note)) {
+        foot = foot || el("div", "foot");
+        var undo = el("button", "fix-toggle");
+        undo.type = "button";
+        undo.dataset.note = m.dataset.note;
+        foot.appendChild(undo);
+        showFix(undo, !unfixed[m.dataset.note]);
       }
       if (fixApplied(note)) {
         c.classList.add("applied");
@@ -1607,6 +1686,12 @@ thead.print, .print-note { display: none; }
         s.appendChild(el("b", null, "Proposed: "));
         s.appendChild(document.createTextNode(note.solution));
         body.appendChild(s);
+      }
+      if (note.replacement) {
+        var f = el("span", "line fix-text");
+        f.appendChild(el("b", null, "Fix: "));
+        f.appendChild(document.createTextNode("“" + note.replacement + "”"));
+        body.appendChild(f);
       }
     } else {
       var status = m.classList.contains("new") ? "new" : m.classList.contains("removed") ? "removed" : "";
@@ -1907,8 +1992,79 @@ thead.print, .print-note { display: none; }
     });
   });
   function fixDone(k) {
-    return !!fixedInDocuments[k] || fixApplied(aiNotes[k]);
+    return (!!fixedInDocuments[k] || fixApplied(aiNotes[k])) && !unfixed[k];
   }
+  // A problem's fix made (on) or undone: on the page, in a review beside
+  // the file with the AI's fixes, the version on the right shows its words
+  // or the original's in their place, and the passage on the left loses its
+  // change marks while undone; in the documents to download, its tracked
+  // change kept or left out (download). Its cards and buttons say which.
+  function setFix(k, on) {
+    if (on) delete unfixed[k]; else unfixed[k] = true;
+    pageFix(k, on);
+    var made = "✓ Fix already applied: the version with AI fixes has it.";
+    var undone = "↶ Fix undone: the version on the right shows the original words, " +
+      "and the documents to download leave the fix out.";
+    document.querySelectorAll('.card.problem[data-note="' + k + '"]').forEach(function (c) {
+      var note = c.querySelector(".applied-note");
+      if (note) {
+        c.classList.toggle("applied", on);
+        c.classList.toggle("unfixed", !on);
+        note.textContent = on ? made : undone;
+      } else {
+        c.classList.toggle("unfixed", !on);
+      }
+    });
+    document.querySelectorAll('.fix-toggle[data-note="' + k + '"]').forEach(function (b) {
+      showFix(b, on);
+    });
+    applyFilter();
+  }
+  // The text of a range without what is not text (NOT_TEXT), soft hyphens
+  // and all: the original words put back for a fix undone.
+  function rangeText(range) {
+    var bits = range.cloneContents();
+    Array.prototype.forEach.call(bits.querySelectorAll(NOT_TEXT), function (e) {
+      e.parentNode.removeChild(e);
+    });
+    return bits.textContent.replace(/\u00ad/g, "");
+  }
+  // The page's side of setFix: the first time, the fix's words wrapped
+  // (.fix-out), the original words put beside them hidden (.fix-orig), the
+  // passage on the left wrapped (.fix-src), and the passages found again
+  // where the wrapping moved them; then which shows.
+  function pageFix(k, on) {
+    var note = aiNotes[k];
+    if (!fixApplied(note) || !note.fixRanges || !note.fixRanges.length) return;
+    if (!note.fixSpans) {
+      var original = note.ranges && note.ranges[0] ? rangeText(note.ranges[0]) : "";
+      note.fixSpans = note.fixRanges.map(function (r) {
+        var out = el("span", "fix-out"), orig = el("span", "fix-orig", original);
+        out.appendChild(r.extractContents());
+        r.insertNode(out);
+        orig.hidden = true;
+        out.parentNode.insertBefore(orig, out.nextSibling);
+        return { out: out, orig: orig };
+      });
+      note.srcSpans = (note.ranges || []).map(function (r) {
+        var src = el("span", "fix-src");
+        src.appendChild(r.extractContents());
+        r.insertNode(src);
+        return src;
+      });
+      findAgain();
+    }
+    note.fixSpans.forEach(function (p) {
+      p.out.hidden = !on;
+      p.orig.hidden = on;
+    });
+    note.srcSpans.forEach(function (s) { s.classList.toggle("fix-undone", !on); });
+    document.dispatchEvent(new Event("prosediff-layout"));  // rows' heights may change
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest(".fix-toggle");
+    if (b) setFix(b.dataset.note, !!unfixed[b.dataset.note]);
+  });
   // The Filter menu: the problems shown, on their cards, their badges and in
   // Review's list, are those with a fix (a replacement, the passage
   // rewritten) or without, in the download or left out of it, resolved or
@@ -2094,6 +2250,47 @@ thead.print, .print-note { display: none; }
     changes.forEach(function (id) { if (regions[id] && !stacked[id]) remove(regions[id]); });
     files["content.xml"] = bytesOfXml(doc);
   }
+  // The comments of the problems whose fix is undone (setFix): their first
+  // line ("✓ Fix already applied") and their last (what to do with the
+  // tracked change) say it is undone instead; their paragraphs kept, Word
+  // marking a comment resolved by its last one's (resolveWord).
+  var UNDONE_HEAD = "↶ Fix undone";
+  var UNDONE_LAST = "The AI's fix was undone in the report: this document leaves it out.";
+  var FIX_HEAD = "✓ Fix already applied", FIX_LAST = "The tracked change on this passage is this fix";
+  function unfixWord(files, ids) {
+    if (!files["word/comments.xml"]) return;
+    var notes = xmlOf(files["word/comments.xml"]);
+    each(notes, W_NS, "comment", W_NS, "id", ids, function (c) {
+      var ps = Array.prototype.slice.call(c.getElementsByTagNameNS(W_NS, "p"));
+      ps.forEach(function (p) {
+        var text = p.textContent;
+        var put = text.indexOf(FIX_HEAD) === 0 ? UNDONE_HEAD
+          : text.indexOf(FIX_LAST) === 0 ? UNDONE_LAST : null;
+        if (put === null) return;
+        // its runs of text taken out (a run marking the comment stays), one put in
+        Array.prototype.slice.call(p.getElementsByTagNameNS(W_NS, "r")).forEach(function (r) {
+          if (r.getElementsByTagNameNS(W_NS, "t").length) remove(r);
+        });
+        var r = notes.createElementNS(W_NS, "w:r"), t = notes.createElementNS(W_NS, "w:t");
+        t.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
+        t.textContent = put;
+        r.appendChild(t);
+        p.appendChild(r);
+      });
+    });
+    files["word/comments.xml"] = bytesOfXml(notes);
+  }
+  function unfixOdt(files, ids) {
+    var doc = xmlOf(files["content.xml"]);
+    each(doc, OFFICE_NS, "annotation", OFFICE_NS, "name", ids, function (a) {
+      Array.prototype.forEach.call(a.getElementsByTagNameNS(TEXT_NS, "p"), function (p) {
+        var text = p.textContent;
+        if (text.indexOf(FIX_HEAD) === 0) p.textContent = UNDONE_HEAD;
+        else if (text.indexOf(FIX_LAST) === 0) p.textContent = UNDONE_LAST;
+      });
+    });
+    files["content.xml"] = bytesOfXml(doc);
+  }
   function zipOf(files, odt) {
     var out = {};
     // an OpenDocument's mimetype first, stored as it is
@@ -2107,10 +2304,15 @@ thead.print, .print-note { display: none; }
     var holder = aiDocuments[k], spec = JSON.parse(holder.dataset.spec);
     var raw = atob(holder.textContent.trim()), bytes = new Uint8Array(raw.length);
     for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-    var comments = [], changes = [], resolved = [];
+    var comments = [], changes = [], resolved = [], unfixedComments = [];
     Object.keys(spec.notes).forEach(function (note) {
       if (!leftOut[note]) {
         if (resolvedNotes[note]) resolved = resolved.concat(spec.notes[note].comments);
+        // its fix undone: its changes rejected, its comment kept, said so
+        if (unfixed[note] && spec.notes[note].changes.length) {
+          changes = changes.concat(spec.notes[note].changes);
+          unfixedComments = unfixedComments.concat(spec.notes[note].comments);
+        }
         return;
       }
       comments = comments.concat(spec.notes[note].comments);
@@ -2120,9 +2322,11 @@ thead.print, .print-note { display: none; }
       var files = fflate.unzipSync(bytes);
       if (spec.fmt === "docx") {
         leaveOutWord(files, comments, changes);
+        if (unfixedComments.length) unfixWord(files, unfixedComments);
         if (resolved.length) resolveWord(files, resolved);
       } else {
         leaveOutOdt(files, comments, changes);
+        if (unfixedComments.length) unfixOdt(files, unfixedComments);
         if (resolved.length) resolveOdt(files, resolved);
       }
       bytes = zipOf(files, spec.fmt === "odt");

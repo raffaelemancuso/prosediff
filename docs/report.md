@@ -103,6 +103,14 @@ remembers the views, the spacing and the column widths.
   "✓ Fix already applied" in bold and ends saying that the
   tracked change on the passage is the fix: accept it to keep it, reject
   it to undo it.
+- **A problem that comes with a fix** (the AI rewrote the passage) has a
+  **Fix** tag on its card and the words it puts in (**Fix:** "…").
+  Pinned, in the report of one file's fixes, its fix's words in the
+  version on the right are highlighted with the passage. **↶ Undo fix**
+  undoes it: the version on the right shows the original words again,
+  the passage loses its change marks, and the documents to download
+  leave the fix out, its comment kept and saying it was undone;
+  **↷ Redo fix** makes it again.
 - **Highlights off** removes the colour of changed words and lines; the
   gutters stay tinted and signed.
 - **Formatted** hides Markdown syntax and shows emphasis, headings, links

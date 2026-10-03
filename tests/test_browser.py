@@ -1235,3 +1235,49 @@ def test_a_fix_applied_shown_on_its_card(browser, tmp_path):
     extended = zipfile.ZipFile(out).read("word/commentsExtended.xml").decode()
     assert extended.count('w15:done="1"') == 1
     page.context.close()
+
+
+@pytest.mark.parametrize("fmt", ["docx", "odt"])
+def test_a_fix_shown_highlighted_and_undone(browser, tmp_path, fmt):
+    """A problem that comes with a fix says so on its card, with the words
+    it puts in; pinned, its fix's words in the version with the AI's fixes
+    are highlighted too. Its button undoes the fix: the original words back
+    on the right, the card saying so, and the document downloaded without
+    the fix, its comment saying it was undone (its resolved mark kept);
+    again, the fix is back."""
+    from prosediff.diff import review_file
+    from prosediff.pipeline import Run, fixes_shown
+
+    path = pair(tmp_path, fmt)[1]
+    a = assessment([FIXED, ADVICE])
+    comparison, shown = fixes_shown(Run("review", str(path), tmp_path / "out.html"), a)
+    single = review_file(path, Options())
+    page = open_report(browser, tmp_path, comparison, assessment=shown, documents_of=(single, a))
+    fixed = page.locator(".card.problem", has_text="Nothing supports")
+    other = page.locator(".card.problem", has_text="Which checks?")
+    assert fixed.locator(".fix-chip").inner_text() == "Fix"
+    assert "Fix: “a small and significant effect.”" in fixed.inner_text()
+    assert other.locator(".fix-chip").count() == 0 and other.locator(".fix-toggle").count() == 0
+    fixed.locator(".chip").click()
+    lit = page.evaluate("[...CSS.highlights.get('pin')].map(r => r.toString())")
+    lit = [t.replace("\xad", "") for t in lit]
+    assert "a large and significant effect." in lit and "a small and significant effect." in lit
+    right = page.locator("td.code.right", has_text="significant effect").first
+    button = fixed.locator(".fix-toggle")
+    assert button.inner_text() == "↶ Undo fix"
+    button.click()
+    assert "a large and significant effect." in right.inner_text().replace("\xad", "")
+    assert "small" not in right.inner_text()
+    assert "Fix undone" in fixed.inner_text() and button.inner_text() == "↷ Redo fix"
+    undone = tmp_path / f"undone.{fmt}"
+    save_document(page).save_as(undone)
+    assert "We find a large and significant effect." in lines(undone, "accept-all")
+    texts = [t for t in comments_of(undone, fmt) if "Nothing supports" in t]
+    assert len(texts) == 1 and texts[0].startswith("↶ Fix undone")
+    assert "this document leaves it out" in texts[0]
+    button.click()
+    assert "small" in right.inner_text() and button.inner_text() == "↶ Undo fix"
+    redone = tmp_path / f"redone.{fmt}"
+    save_document(page).save_as(redone)
+    assert "We find a small and significant effect." in lines(redone, "accept-all")
+    page.context.close()
