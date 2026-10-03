@@ -187,7 +187,9 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
 /* the problems the Filter menu leaves out: no card, no badge */
 .ai-mark.filtered, .card.problem[hidden], #review-list .with-check[hidden] { display: none !important; }
 .toolbar .menu-panel select { font: inherit; color: var(--fg); background: var(--bg);
-  border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px;
+  /* one width, so the Filter menu's two line up under each other */
+  width: 9.5em; flex-shrink: 0; }
 .toolbar .resolve-applied[hidden] { display: none; }
 .toolbar .filter-count { color: var(--current); font-weight: 600; }
 #review-list .with-check { display: flex; align-items: center; }
