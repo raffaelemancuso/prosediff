@@ -183,6 +183,13 @@ def execute(
     report (prosediff.saved); saved, answers kept so before, are used in
     place of asking the AI again."""
     reviewing = run.mode == "review"
+    # the fingerprints of the files read, kept with the AI's answers, taken
+    # now: a file edited while the AI thinks is not the one it read
+    inputs = None
+    if run.request is not None and run.fmt == "html" and saved is None:
+        from prosediff.saved import fingerprints
+
+        inputs = fingerprints(run)
     if reviewing:
         progress("Reading the file…")
         comparison, sentences, split = review_file(run.old, run.options), None, "paragraph"
@@ -284,5 +291,5 @@ def execute(
         from prosediff.saved import save  # it reads Run from here
 
         with contextlib.suppress(OSError):  # the report stands without it
-            kept = save(run, path, assessment, writing)
+            kept = save(run, path, assessment, writing, inputs)
     return Result(path, comparison, assessment, writing, kept)

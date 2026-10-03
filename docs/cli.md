@@ -56,7 +56,7 @@ or named by `GIT_PYTHON_GIT_EXECUTABLE`.
 | `--assess-effort LEVEL`    | how hard the model thinks: a level it supports (see `--list-models`; e.g. `low`, `high`, `max`). Default: the model's own |
 | `--assess-context document\|changes` | what the model reads: the changes and the whole new version (`document`, default), or the changes only |
 | `--assess-instructions TEXT` | your own instructions added to the prompt, or a text file holding them |
-| `--rebuild FILE` | no AI asked: the HTML report made again from the AI's answers saved beside an earlier one (`NAME.ai.json`), the files compared again as then; `-o` to write it elsewhere than over that report |
+| `--rebuild FILE` | no AI asked: the HTML report made again from the AI's answers saved beside an earlier one (`NAME.ai.json`), or a project holding them (`NAME.prosediff`), the files compared again as then, and refused if a file the AI read, context files included, changed since (its SHA-256 checksum, kept in the answers, another) or is gone; `-o` to write it elsewhere than over that report |
 | `--assess-file FILE` | another file sent to the AI as context, to draw on, not to assess (PDF, Word, OpenDocument, Markdown or text); repeat it for several |
 | `--assess-prompt TEXT` | a prompt in place of prosediff's own for the assessment (or the review of one file), or a text file holding it; keep its `## Verdict` section |
 | `--assess-writing-prompt TEXT` | the same for `--assess-ai-writing` |

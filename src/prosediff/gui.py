@@ -18,6 +18,7 @@ system is set (Windows' app mode, macOS's appearance), the title bar too on
 Windows; switches for the yes-or-no options, Bootstrap icons on the buttons.
 """
 
+import contextlib
 import ctypes
 import functools
 import json
@@ -238,7 +239,9 @@ class Settings:
 
 READY = "Choose what to compare, then Compare."
 REVIEW_READY = "Choose the file, and the AI to review it, then Review."
-REBUILD_READY = "Choose the AI's answers saved beside a report (.ai.json), then Rebuild."
+REBUILD_READY = (
+    "Choose the AI's answers saved beside a report (.ai.json), or a project, then Rebuild."
+)
 # The tooltips: their width in pixels, and how long the pointer must rest.
 HINT_WIDTH = 360
 HINT_DELAY_MS = 400
@@ -333,13 +336,23 @@ CHOICES = {
 
 
 def load_settings(path: Path | None = None) -> Settings:
-    """The choices saved (Save options), or the defaults; a value that is
-    no choice the window offers any more gives way to its default."""
+    """The choices saved (Save options), or the defaults."""
     try:
         data = json.loads((path or settings_file()).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return Settings()
+    return settings_of(data)
+
+
+def settings_of(data: dict) -> Settings:
+    """Settings from their saved values (Save options, or a project): the
+    defaults for those missing (saved by another prosediff) or not of a
+    Settings; a value that is no choice the window offers any more gives
+    way to its default."""
+    try:
         known = Settings.__dataclass_fields__
         s = Settings(**{k: v for k, v in data.items() if k in known})
-    except (OSError, ValueError, TypeError):
+    except (TypeError, AttributeError):
         return Settings()
     d = Settings()
     return replace(
@@ -466,6 +479,8 @@ class JobResult:
     reviewed: str = ""
     # why the AI-writing assessment failed ("": it did not, or was not asked)
     writing_error: str = ""
+    # where the AI's answers were kept (NAME.ai.json), for a project; "": none
+    saved: str = ""
 
 
 # How long a preview waits for the window to say whether the AI assesses;
@@ -484,15 +499,35 @@ JOB_ERRORS = (
 )
 
 
+def project_settings(path: Path) -> tuple[Settings, dict | None]:
+    """A project's settings, and the AI's answers it holds (None: none); its
+    Rebuild tab set to it when it holds them. SavedError for a file that is
+    not a project (prosediff.saved)."""
+    from prosediff.saved import load_project
+
+    values, report = load_project(path)
+    s = settings_of(values)
+    if report:
+        s = replace(s, rebuild_file=str(Path(path).resolve()))
+    return s, report
+
+
+def reopen(root: tk.Tk | tk.Toplevel, s: Settings, project: tuple[Path, dict | None]) -> "App":
+    """The window made again in root, with s and the project open: what the
+    last one held (its frames, its side windows) gone first."""
+    for child in root.winfo_children():
+        child.destroy()
+    root.unbind("<Configure>")
+    return App(root, s, project)
+
+
 def rebuild_run(s: Settings, messages):
-    """The run kept with the answers s names, and the answers (prosediff.saved),
-    its warnings sent as stages; written where Save to says, else over the
-    report they were saved beside."""
+    """The run kept with the answers s names, and the answers (prosediff.saved:
+    SavedError when the files compared changed since); written where Save to
+    says, else over the report they were saved beside."""
     from prosediff.saved import load
 
-    run, assessment, writing, warnings = load(s.rebuild_file.strip())
-    for warning in warnings:
-        messages.put(("stage", f"Warning: {warning}"))
+    run, assessment, writing = load(s.rebuild_file.strip())
     if s.output.strip():
         run = replace(run, output=Path(with_format(s.output.strip(), "html")))
     return run, (assessment, writing)
@@ -538,6 +573,7 @@ def run_job(s: Settings, messages, replies) -> None:
         done.assessment,
         c.repo_name if c.single else "",
         (done.writing.error or "") if done.writing is not None else "",
+        str(done.saved) if done.saved else "",
     )
     messages.put(("done", result))
 
@@ -575,10 +611,19 @@ def sides(s: Settings) -> tuple[str, str]:
 class App:
     """The window."""
 
-    def __init__(self, root: tk.Tk | tk.Toplevel, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        root: tk.Tk | tk.Toplevel,
+        settings: Settings | None = None,
+        project: tuple[Path, dict | None] | None = None,
+    ) -> None:
         self.root = root
         use_theme(root)
         self.s = settings or load_settings()
+        # the project open (NAME.prosediff), and the answers of the last report
+        # the AI assessed, for Save project to keep (prosediff.saved)
+        self.project_path: Path | None = project[0] if project else None
+        self.project_report: dict | None = project[1] if project else None
         # the widget variable of each setting shown as it is, by its name in
         # Settings (setting): collect reads them, reset_options resets them
         self.vars: dict[str, tk.Variable] = {}
@@ -593,6 +638,7 @@ class App:
         self.live = ""
         root.title("prosediff: compare two versions")
         root.minsize(780, 0)
+        self.build_menu()
         # The window takes the size its content asks for, but never shrinks
         # back: a status line that gets shorter (6 minutes 59 seconds, then 7
         # minutes) must not make it jump. Each size it grows to becomes its
@@ -753,10 +799,15 @@ class App:
         ttk.Label(side, text="Saved answers").grid(row=0, column=0, sticky="w", **PAD)
         entry = ttk.Entry(side, textvariable=self.rebuild_file)
         entry.grid(row=0, column=1, sticky="ew", **PAD)
-        hint(entry, "The NAME.ai.json prosediff saves beside every report the AI assessed.")
-        browse(side, self.pick_saved, "Choose the AI's saved answers (.ai.json)").grid(
-            row=0, column=2, **PAD
+        hint(
+            entry,
+            "The NAME.ai.json prosediff saves beside every report the AI assessed, or a "
+            "project (NAME.prosediff) that holds a report. Refused when a file the AI read, "
+            "context files included, changed since.",
         )
+        browse(
+            side, self.pick_saved, "Choose the AI's saved answers (.ai.json or .prosediff)"
+        ).grid(row=0, column=2, **PAD)
         ttk.Label(
             side,
             text="The report made again as this prosediff writes it, from the AI's answers "
@@ -768,7 +819,10 @@ class App:
         chosen = filedialog.askopenfilename(
             parent=self.root,
             title="The AI's saved answers",
-            filetypes=[("Saved answers", "*.ai.json"), ("All", "*.*")],
+            filetypes=[
+                ("Saved answers or project", "*.ai.json *.prosediff"),
+                ("All", "*.*"),
+            ],
         )
         if chosen:
             self.rebuild_file.set(chosen)
@@ -1664,7 +1718,11 @@ class App:
         self.progress_log.pack(fill="both", expand=True)
         self.progress_log.text.configure(state="disabled")
         self.status = tk.StringVar(value=READY)
-        ttk.Label(bottom, textvariable=self.status, bootstyle="secondary").pack(side="left")
+        # the room the buttons leave, a long status cut off there (its whole
+        # text is in the progress log): asking for its own width, it would
+        # widen the window for good (keep_largest_size)
+        status = ttk.Label(bottom, textvariable=self.status, bootstyle="secondary", width=1)
+        status.pack(side="left", fill="x", expand=True, padx=(0, 12))
         self.compare_icon = ttk.Icon("play-fill", size=16, color="white")
         self.cancel_icon = ttk.Icon("stop-fill", size=16, color="white")
         self.button = ttk.Button(
@@ -1769,15 +1827,7 @@ class App:
                 card.pack_forget()
             elif not card.winfo_manager():
                 card.pack(fill="x", pady=(10, 0), after=after)
-        # one file is reviewed, not compared
-        what = (
-            "rebuild a report"
-            if rebuild
-            else "review one file"
-            if self.reviewing()
-            else "compare two versions"
-        )
-        self.root.title(f"prosediff: {what}")
+        self.show_title()  # one file is reviewed, not compared
         self.source_card.configure(
             text="Saved report" if rebuild else "File" if self.reviewing() else "Versions"
         )
@@ -1868,11 +1918,18 @@ class App:
         mode = self.mode.get()
         if mode == "rebuild":  # over the report the answers were saved beside
             saved = self.rebuild_file.get().strip()
-            return (
-                str(Path(saved[: -len(".ai.json")] + ".html").resolve())
-                if saved.endswith(".ai.json")
-                else ""
-            )
+            if saved.endswith(".ai.json"):
+                return str(Path(saved[: -len(".ai.json")] + ".html").resolve())
+            # a project: over the report its answers were saved with
+            if saved.endswith(".prosediff"):
+                from prosediff.saved import SavedError, load_project
+
+                try:
+                    report = load_project(saved)[1] or {}
+                except SavedError:
+                    return ""
+                return str(report.get("run", {}).get("output") or "")
+            return ""
         old, new = {
             "review": (self.single, self.single),
             "folders": (self.old_folder, self.new_folder),
@@ -2189,6 +2246,107 @@ class App:
         else:
             self.status.set(f"Options not saved: {path} cannot be written")
 
+    # Projects ------------------------------------------------------------------
+    # A project (NAME.prosediff, prosediff.saved) keeps every setting, what is
+    # compared and the context files sent to the AI included, and the AI's
+    # answers of the last report made with them: opened, the window shows them
+    # all again, and the Rebuild tab makes that report again, as long as the
+    # files it read are unchanged.
+
+    def build_menu(self) -> None:
+        """The menu bar: File, to open and save projects (Ctrl+O, Ctrl+S)."""
+        bar = tk.Menu(self.root)
+        menu = tk.Menu(bar, tearoff=False)
+        menu.add_command(label="Open project…", accelerator="Ctrl+O", command=self.open_project)
+        menu.add_command(label="Save project", accelerator="Ctrl+S", command=self.save_project)
+        menu.add_command(label="Save project as…", command=lambda: self.save_project(ask=True))
+        bar.add_cascade(label="File", menu=menu)
+        self.root.configure(menu=bar)
+        self.root.bind("<Control-o>", lambda e: self.open_project())
+        self.root.bind("<Control-s>", lambda e: self.save_project())
+
+    def save_project(self, ask: bool = False) -> None:
+        """Save the settings shown, and the AI's answers of the last report,
+        in the project open, or (ask, or none open) in a file chosen."""
+        from prosediff.saved import PROJECT_SUFFIX, save_project
+
+        try:
+            s = self.collect()
+        except ValueError as e:
+            self.complain(str(e))
+            return
+        path = self.project_path
+        if ask or path is None:
+            sides = [s.single, s.new, s.old, s.new_folder, s.repo]
+            near = next((Path(p) for p in sides if p.strip()), None)
+            chosen = filedialog.asksaveasfilename(
+                title="Save project",
+                defaultextension=PROJECT_SUFFIX,
+                filetypes=[("prosediff project", f"*{PROJECT_SUFFIX}"), ("All files", "*.*")],
+                initialdir=str(near.parent if near and near.is_file() else near or Path.home()),
+                initialfile=(near.stem if near and near.is_file() else "project") + PROJECT_SUFFIX,
+            )
+            if not chosen:
+                return
+            path = Path(chosen)
+        try:
+            save_project(path, asdict(s), self.project_report)
+        except OSError as e:
+            self.complain(f"The project was not saved: {e}")
+            return
+        self.project_path = path.resolve()
+        self.show_title()
+        kept = " with the last report's AI answers" if self.project_report else ""
+        self.status.set(f"Project saved{kept}: {path}")
+
+    def open_project(self, path: str | Path | None = None) -> None:
+        """Open a project: the window made again with its settings, its
+        Rebuild tab set to it when it holds a report."""
+        if self.job is not None:
+            self.complain("Wait for the run to end, or cancel it, before opening a project.")
+            return
+        from prosediff.saved import PROJECT_SUFFIX, SavedError
+
+        if path is None:
+            path = filedialog.askopenfilename(
+                title="Open project",
+                filetypes=[("prosediff project", f"*{PROJECT_SUFFIX}"), ("All files", "*.*")],
+            )
+            if not path:
+                return
+        try:
+            s, report = project_settings(Path(path))
+        except SavedError as e:
+            self.complain(str(e))
+            return
+        reopen(self.root, s, (Path(path).resolve(), report))
+
+    def keep_answers(self, s: Settings, result: JobResult) -> None:
+        """The AI's answers of the report just made, for Save project: those
+        it kept (NAME.ai.json); a report made again, those it was made from
+        (a project's own stay)."""
+        from prosediff.saved import SavedError, answers
+
+        source = result.saved or (s.rebuild_file.strip() if s.mode == "rebuild" else "")
+        if not source:
+            return
+        # a project made again from is no NAME.ai.json: its answers are those kept
+        with contextlib.suppress(SavedError):
+            self.project_report = answers(source)
+
+    def show_title(self) -> None:
+        """The window's title: what it does, and the project open."""
+        rebuild = self.mode.get() == "rebuild"
+        what = (
+            "rebuild a report"
+            if rebuild
+            else "review one file"
+            if self.reviewing()
+            else "compare two versions"
+        )
+        project = f" · {self.project_path.name}" if self.project_path else ""
+        self.root.title(f"prosediff: {what}{project}")
+
     def reset_options(self) -> None:
         """Every option to its default (what is compared and where the output
         goes stay as they are); nothing is saved until asked."""
@@ -2223,7 +2381,7 @@ class App:
             self.complain(str(e))
             return
         if s.mode == "rebuild" and not s.rebuild_file.strip():
-            self.complain("Choose the AI's saved answers (.ai.json).")
+            self.complain("Choose the AI's saved answers (.ai.json), or a project (.prosediff).")
             return
         if s.mode == "review" and not s.assess:
             self.complain("Choose an AI, under AI assessment, to review the file.")
@@ -2368,6 +2526,7 @@ class App:
             return
         result: JobResult = value
         path, assessment = result.path, result.assessment
+        self.keep_answers(s, result)
         summary = (
             f"{result.reviewed} reviewed"
             if result.reviewed
@@ -2710,14 +2869,25 @@ def set_icon(root: tk.Tk) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """prosediff-gui [REPOSITORY | FILE | OLD NEW]: the window, prefilled from
-    the arguments when they are a git repository, Markdown, Word or OpenDocument files, or
-    two folders; one file fills in the One file tab, to review it alone, and
-    one JSON file (NAME.ai.json) the Rebuild tab.
+    """prosediff-gui [REPOSITORY | FILE | OLD NEW | PROJECT]: the window,
+    prefilled from the arguments when they are a git repository, Markdown,
+    Word or OpenDocument files, or two folders; one file fills in the One
+    file tab, to review it alone, one JSON file (NAME.ai.json) the Rebuild
+    tab, and a project (NAME.prosediff) opens it.
     Arguments that are none of these are reported in an error box, with the
     arguments received, and the program exits once it is dismissed."""
+    from prosediff.saved import PROJECT_SUFFIX, SavedError
+
     args = sys.argv[1:] if argv is None else argv
-    settings, note = settings_from_args(args, load_settings())
+    project = None
+    if len(args) == 1 and Path(args[0]).suffix.lower() == PROJECT_SUFFIX:
+        try:
+            settings, report = project_settings(Path(args[0]))
+            project, note = (Path(args[0]).resolve(), report), ""
+        except SavedError as e:
+            settings, note = load_settings(), str(e)
+    else:
+        settings, note = settings_from_args(args, load_settings())
     invisible_console()
     own_taskbar_button()
     root = tk.Tk()
@@ -2726,12 +2896,13 @@ def main(argv: list[str] | None = None) -> None:
         root.withdraw()  # the error box alone, no empty window behind it
         messagebox.showerror(
             "prosediff",
-            f"{note}\n\n{received(args)}\n\nUsage: prosediff-gui [REPOSITORY | FILE | OLD NEW]",
+            f"{note}\n\n{received(args)}\n\n"
+            "Usage: prosediff-gui [REPOSITORY | FILE | OLD NEW | PROJECT.prosediff]",
             parent=root,
         )
         root.destroy()
         sys.exit(2)
-    App(root, settings)
+    App(root, settings, project)
     root.mainloop()
 
 

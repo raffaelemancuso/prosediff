@@ -515,6 +515,21 @@ def test_ai_model_and_effort_as_the_ai_reports(root):
     assert again.assess_spec() == "" and again.collect().assess_context == "document"
 
 
+def test_a_long_status_does_not_widen_the_window(root, tmp_path):
+    """A long status line (a warning with a path) is cut off in the room the
+    buttons leave: the window does not grow to fit it, and keeps no wider
+    minimum once it is gone."""
+    app = App(root, Settings(mode="files"))
+    root.update_idletasks()
+    width = root.winfo_reqwidth()
+    app.status.set("Warning: " + "C:\\a\\very\\long\\path\\" * 20 + "paper.docx changed")
+    root.update_idletasks()
+    # the test's window is hidden, so Tk sends it no <Configure>: called as Tk would
+    app.keep_largest_size(SimpleNamespace(widget=root))
+    assert root.winfo_reqwidth() <= width
+    assert root.minsize()[0] <= max(width, 780)
+
+
 def test_window_loads_a_repository(root, history):
     b, shas = history
     app = App(root, Settings(repo=str(b.path)))
@@ -1221,24 +1236,6 @@ def test_the_window_greys_out_the_files_while_not_sending_them(root):
     assert app.files_window is None and app.files_list is None
 
 
-def test_the_window_never_shrinks_when_the_status_gets_shorter(root):
-    """A longer status raises the window's minimum to the width it asks
-    for; a shorter one leaves it there. (The test's window is hidden, so
-    Tk sends it no <Configure>: the handler is called as Tk would.)"""
-    app = App(root, Settings(mode="files"))
-    root.update()
-    shown = SimpleNamespace(widget=root)
-    app.status.set("Asking claude to assess the changes… " + "x" * 200)
-    root.update()
-    wide = root.winfo_reqwidth()
-    app.keep_largest_size(shown)
-    assert root.minsize()[0] == wide > 780
-    app.status.set("Ready.")
-    root.update()
-    app.keep_largest_size(shown)
-    assert root.winfo_reqwidth() < wide and root.minsize()[0] == wide
-
-
 def test_the_rebuild_tab(root, tmp_path):
     """Rebuilding a report from saved answers: no comparison options, no AI
     card, its button Rebuild, the report by default over the one the
@@ -1270,3 +1267,45 @@ def test_the_progress_log(root):
     assert app.progress_card.winfo_manager() == "pack"
     assert "Asking claude to assess the changes…" in text
     assert "  The claim is unsupported." in text and re.search(r"^\d\d:\d\d:\d\d  ", text, re.M)
+
+
+def test_a_project_saved_and_opened_again(root, tmp_path):
+    """Save project keeps every setting shown, what is compared and the
+    context files included, and the AI's answers of the last report;
+    opened, the window is made again with them all, its title naming the
+    project, its Rebuild tab set to it, the report over the one the answers
+    were saved with."""
+    from prosediff.gui import project_settings, reopen
+
+    old, new, guide = (tmp_path / n for n in ("a.md", "b.md", "guide.md"))
+    for f in (old, new, guide):
+        f.write_text("Text.\n", encoding="utf-8")
+    shown = Settings(
+        mode="files",
+        old=str(old),
+        new=str(new),
+        assess_send_files=True,
+        assess_files=str(guide),
+        split="sentence",
+    )
+    app = App(root, shown)
+    report = {"run": {"output": str(tmp_path / "a_vs_b.html")}, "assessment": {"markdown": "x"}}
+    app.project_report = report
+    app.project_path = tmp_path / "paper.prosediff"
+    app.save_project()
+    assert app.status.get().startswith("Project saved with the last report's AI answers")
+    assert "paper.prosediff" in root.title()
+    s, kept = project_settings(app.project_path)
+    assert (s.old, s.new, s.assess_files, s.split) == (str(old), str(new), str(guide), "sentence")
+    assert kept == report and s.rebuild_file == str(app.project_path.resolve())
+    again = reopen(root, s, (app.project_path, kept))
+    assert again.collect().assess_files == str(guide) and again.project_report == report
+    assert again.mode.get() == "files" and "paper.prosediff" in root.title()
+    again.mode.set("rebuild")
+    again.show_mode()
+    assert again.sides_page() == str(tmp_path / "a_vs_b.html")
+    # a run's answers kept for the next Save project
+    answers = tmp_path / "r.ai.json"
+    answers.write_text(json.dumps({"run": {}, "assessment": {"markdown": "y"}}), encoding="utf-8")
+    again.keep_answers(again.collect(), SimpleNamespace(saved=str(answers)))
+    assert again.project_report["assessment"]["markdown"] == "y"

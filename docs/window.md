@@ -14,6 +14,7 @@ system's light or dark mode on Windows and macOS, and is light elsewhere.
   again.
 - `prosediff-gui OLD NEW` opens it with two Markdown, Word or OpenDocument
   files, or two folders.
+- `prosediff-gui NAME.prosediff` opens a project (see below).
 
 Any other arguments show an error box, and the program exits once it is
 dismissed.
@@ -101,3 +102,24 @@ them to `%APPDATA%\prosediff\gui.json` (elsewhere, under
 `$XDG_CONFIG_HOME` or `~/.config`). **Reset to defaults** puts every
 option back, except what is compared and where the output goes. Of the
 moved-passage values, only those changed from the defaults are saved.
+
+## Projects
+
+The **File** menu saves and opens projects (`NAME.prosediff`, a JSON
+file). **Save project** (Ctrl+S; **Save project as…** for another file)
+keeps every setting shown: what is compared (the repository, the files,
+the folders, the file reviewed), the other files sent to the AI as
+context, the comparison and output options, the AI and its prompts. It
+also keeps the AI's answers of the last report it assessed in the window,
+with the checksum (SHA-256) of every file the AI read: the files compared
+and the context files, taken as the run began.
+
+**Open project…** (Ctrl+O, or `prosediff-gui NAME.prosediff`) shows all
+those settings again, and the window's title names the project. When the
+project holds a report, its **Rebuild** tab is set to it: **Rebuild**
+makes that report again without asking the AI, over the report it was
+made as, unless Save to says otherwise (`prosediff --rebuild
+NAME.prosediff` does the same). It is refused if any file the AI read,
+input or context file, changed since or is gone: the AI's marks would not
+fit the new text, so the AI must be asked again. A git repository's
+commits do not change and are not checked.

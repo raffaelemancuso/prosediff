@@ -30,8 +30,8 @@ it until clicked again; the top bar's ◀ ⚠ ▶
 ## The AI's problems in Word and LibreOffice documents
 
 When two Word documents (or two OpenDocument texts) are compared and the
-AI marked problems, **Documents** in the top bar opens a drawer that
-offers two documents to download, made from the new version:
+AI marked problems, the top bar has a button for each of two documents
+to download, made from the new version, which saves it at once:
 
 - **The changes, tracked, with the AI's comments**: the
   [tracked-changes document](how_it_works.md#tracked-changes), each
@@ -108,8 +108,14 @@ everything the AI answered (and, for the record, the text it was sent).
 `prosediff --rebuild NAME.ai.json` (in the window, the **Rebuild** tab)
 makes the report again from it, as the prosediff installed then writes
 reports, without asking the AI a second time: the files are compared
-again, so they must still be where they were; one that changed since is
-warned of, since the AI's marks may no longer fit it.
+again, so they must still be where they were, and as they were: the
+answers hold the SHA-256 checksum of each file the AI read, taken as the
+run began (the files compared, the files of two folders, and the other
+files sent as context), and if one changed since or is gone, the report
+is not made again, since the AI's marks would not fit the new text. Ask
+the AI again instead. A [project](window.md#projects) (`NAME.prosediff`)
+holds these answers too, with all the window's settings, and is made
+again the same way.
 
 **Privacy.** The AI is sent the word diff of the changed paragraphs
 (comments included, except those marked resolved, unless

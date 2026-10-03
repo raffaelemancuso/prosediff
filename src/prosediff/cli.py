@@ -129,8 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--rebuild",
         action="store_true",
         help="no AI asked: the HTML report made again from the AI's answers kept beside an "
-        "earlier one (FILE, its NAME.ai.json, written with every report the AI assessed), "
-        "the files compared again as then; -o to write it elsewhere than over that report",
+        "earlier one (FILE, its NAME.ai.json, written with every report the AI assessed, or "
+        "a project NAME.prosediff that holds them), the files compared again as then; "
+        "refused when a file the AI read (context files included) changed since; -o to "
+        "write it elsewhere than over that report",
     )
     modes.add_argument(
         "--review",
@@ -701,13 +703,11 @@ def _from_saved(args: argparse.Namespace) -> int:
     from prosediff.saved import SavedError, load
 
     try:
-        run, assessment, writing, warnings = load(args.repo)
-    except SavedError as e:
+        run, assessment, writing = load(args.repo)
+    except SavedError as e:  # not saved answers, or the files changed since
         return _fail(str(e))
     if args.output:
         run = replace(run, output=Path(args.output))
-    for warning in warnings:
-        print(f"{PROG}: warning: {warning}", file=sys.stderr)
     try:
         done = execute(run, _say, saved=(assessment, writing))
     except (OutputError, FilterError, SourceError) as e:
