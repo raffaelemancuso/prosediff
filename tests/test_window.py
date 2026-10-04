@@ -182,7 +182,16 @@ def test_the_ai_chosen_from_its_list_lists_its_models(browser, tmp_path):
     assert page.input_value("#f-model") == "gemma3:270m"
     assert not page.is_disabled("#f-model")
     page.click("#f-model + button")
+    # it stays open, though the focus left the AI's field for the model's
+    page.wait_for_timeout(300)
     assert page.locator(".combo .menu li").all_inner_texts() == ["gemma3:270m", "qwen3:8b"]
+    # the cursor in the field, its button opens a menu that stays open too
+    page.click("#f-model + button")
+    assert not page.locator(".combo .menu").count()
+    page.click("#f-model")
+    page.click("#f-model + button")
+    page.wait_for_timeout(300)
+    assert page.locator(".combo .menu").is_visible()
 
 
 def test_the_instructions_written_in_a_dialog(browser, tmp_path):
@@ -203,14 +212,16 @@ def test_the_instructions_written_in_a_dialog(browser, tmp_path):
 
 def test_the_files_sent_to_the_ai_listed_and_removed(browser, tmp_path):
     """The files sent to the AI, in their dialog: sorted by a heading
-    clicked, one chosen and removed."""
+    clicked, one chosen and removed, the choice moved on to the next, then
+    every one removed at once."""
     a, b = tmp_path / "b" / "appendix.docx", tmp_path / "a" / "guidelines.pdf"
+    c = tmp_path / "c" / "table.docx"
     s = gui.Settings(mode="files", assess="claude", assess_send_files=True)
-    s.assess_files = f"{a};{b}"
+    s.assess_files = f"{a};{b};{c}"
     app = gui.App(Ui(), s)
     app.settle()
     page = open_screen(browser, tmp_path, app)
-    assert page.inner_text("[data-text=files_summary]") == "2 files: appendix.docx, guidelines.pdf"
+    assert page.inner_text("[data-text=files_summary]").startswith("3 files: appendix.docx")
     page.click("[data-id=edit_files]")
     page.click("#files th button[data-arg=folder]")
     page.wait_for_function(
@@ -219,10 +230,43 @@ def test_the_files_sent_to_the_ai_listed_and_removed(browser, tmp_path):
     assert page.locator("#files-rows tr td:first-child").all_inner_texts() == [
         "guidelines.pdf",
         "appendix.docx",
+        "table.docx",
     ]
     page.click("#files-rows tr:has-text('appendix.docx')")
     page.click("#files-remove")
+    until(page, app, lambda a: a.files_chosen() == [str(b), str(c)])
+    page.wait_for_function("document.querySelectorAll('#files-rows tr').length === 2")
+    assert page.locator("#files-rows tr.chosen").all_inner_texts() == [
+        "table.docx\t" + str(c.parent)
+    ]
+    page.keyboard.press("Delete")  # the last row gone, the one before it chosen
     until(page, app, lambda a: a.files_chosen() == [str(b)])
+    page.wait_for_function("document.querySelectorAll('#files-rows tr.chosen').length === 1")
+    page.click("#files-remove")
+    until(page, app, lambda a: a.files_chosen() == [])
+    page.wait_for_function("document.querySelector('#files-clear').disabled")
+    app.add_files([str(a), str(b)])
+    refresh(page, app)
+    page.click("#files-clear")
+    until(page, app, lambda a: a.files_chosen() == [])
+    # the dialog resized by its sides: its bottom dragged down, the list
+    # taller; its left side dragged left, wider, the right side where it was
+    dialog, files = page.locator("#files"), page.locator("#files .list")
+
+    def drag(x, y, dx, dy):
+        page.mouse.move(x, y)
+        page.mouse.down()
+        page.mouse.move(x + dx, y + dy, steps=3)
+        page.mouse.up()
+
+    d, short = dialog.bounding_box(), files.bounding_box()["height"]
+    drag(d["x"] + d["width"] / 2, d["y"] + d["height"] - 3, 0, 40)
+    assert abs(files.bounding_box()["height"] - short - 40) < 2
+    d = dialog.bounding_box()
+    drag(d["x"] + 3, d["y"] + d["height"] / 2, -30, 0)
+    e = dialog.bounding_box()
+    assert abs(e["width"] - d["width"] - 30) < 2
+    assert abs(e["x"] + e["width"] - d["x"] - d["width"]) < 2
 
 
 def test_what_app_says_is_shown(browser, tmp_path):
@@ -241,6 +285,26 @@ def test_what_app_says_is_shown(browser, tmp_path):
     assert not page.is_visible("#alert")
     page.evaluate("prosediff.toast('1 file changed')")
     assert page.is_visible("#toast")
+
+
+def test_the_log_made_taller_from_its_top(browser, tmp_path):
+    """The progress log's top edge, dragged up, makes it taller, the
+    window's bottom where it was; Down on it, shorter."""
+    page = open_screen(browser, tmp_path, gui.App(Ui(), gui.Settings(mode="files")))
+    page.evaluate("prosediff.log('12:00:00  Comparing…')")
+    log, grip = page.locator("#log"), page.locator("#log-grip")
+    start = log.bounding_box()
+    before, bottom = start["height"], start["y"] + start["height"]
+    g = grip.bounding_box()
+    page.mouse.move(g["x"] + g["width"] / 2, g["y"] + g["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(g["x"] + g["width"] / 2, g["y"] + g["height"] / 2 - 60)
+    page.mouse.up()
+    box = log.bounding_box()
+    assert abs(box["height"] - before - 60) < 2 and abs(box["y"] + box["height"] - bottom) < 2
+    grip.focus()
+    page.keyboard.press("ArrowDown")
+    assert abs(log.bounding_box()["height"] - before - 40) < 2
 
 
 # The choices made in a report ------------------------------------------------

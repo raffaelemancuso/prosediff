@@ -10,9 +10,15 @@ rem A batch file always runs in a console, however briefly. For no console at
 rem all, start prosediff-gui.exe itself: install it once with
 rem     uv tool install --editable C:\path\to\prosediff
 rem and double-click it, pin it, make a shortcut to it, or drop files on it.
-rem This script uses it when it is installed, and otherwise runs the window
-rem from the project (the folder above this script) with uvw, uv's launcher
-rem without a console window.
+rem This script starts the project's own prosediff-gui.exe (in its .venv,
+rem made by uv sync; the project is the folder above this script), which
+rem runs the project's code as it is; else the one installed; else the window from the project
+rem with uvw, uv's launcher without a console window.
+
+if exist "%~dp0..\.venv\Scripts\prosediff-gui.exe" (
+    start "" "%~dp0..\.venv\Scripts\prosediff-gui.exe" %*
+    exit /b 0
+)
 
 where prosediff-gui >nul 2>nul
 if not errorlevel 1 (

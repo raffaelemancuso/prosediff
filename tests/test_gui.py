@@ -21,6 +21,7 @@ from prosediff.assess import (
     SYSTEM_REVIEW,
     SYSTEM_WRITING,
     SYSTEM_WRITING_REVIEW,
+    Annotation,
     AssessError,
     Assessment,
     ModelInfo,
@@ -373,9 +374,13 @@ def test_the_preview_is_asked_about_on_the_open_screen(screen, tmp_path):
     app.preview(page)
     assert "page.html" in app.view()["text"]["preview"]
     assert screen.reports == [(page, None)]  # a preview's choices are not kept
+    app.show_preview()  # Show the report: open again
+    assert screen.reports == [(page, None), (page, None)]
     app.answer_preview(True)
     app.job = None  # no process to watch
     assert app.replies.get_nowait() is True and app.view()["text"]["preview"] == ""
+    app.show_preview()  # answered: nothing to show
+    assert len(screen.reports) == 2
 
 
 def test_a_comparison_runs_apart_and_can_be_cancelled(screen, tmp_path):
@@ -483,7 +488,8 @@ def test_ai_model_and_effort_as_the_ai_reports(screen):
     assert app.collect().assess_annotate is True
     app.set("assess_ai", "claude")
     app.settle()
-    assert not any(off(app, s) for s in gui.AI_SWITCHES)
+    # all but what waits on another switch: AI-written passages, on the question of AI writing
+    assert [s for s in gui.AI_SWITCHES if off(app, s)] == ["assess_mark_ai_writing"]
     assert lists()["assess_model"] == ["default", "opus", "haiku"]
     assert app.values["assess_model"] == "default" and app.assess_spec() == "claude"
     # Claude says no default effort: "default", its own, shown, not an empty box
@@ -609,7 +615,7 @@ def test_the_ai_card_is_greyed_out_but_for_the_html_report(screen, monkeypatch):
     assert app.collect().assess == "codex/gpt-5.5"  # kept for when HTML is back
     app.set("output_format", "html")
     assert not off(app, "assess_ai")
-    assert not any(off(app, s) for s in gui.AI_SWITCHES)
+    assert [s for s in gui.AI_SWITCHES if off(app, s)] == ["assess_mark_ai_writing"]
 
 
 def test_format_renames_the_output(screen):
@@ -657,6 +663,20 @@ def test_mode_switch(screen):
     app.set("mode", "folders")
     assert not gone(app, "side:folders") and gone(app, "side:files")
     assert app.collect().mode == "folders"
+
+
+def test_review_to_files_carries_the_file(screen):
+    """From One file to Files, the file reviewed becomes the old version;
+    not when it is already the new one."""
+    app = App(screen, Settings(mode="review", single="draft.docx", old="before.docx"))
+    app.set("mode", "files")
+    assert app.values["old"] == "draft.docx"
+    app = App(screen, Settings(mode="review", single="draft.docx", old="a.docx", new="draft.docx"))
+    app.set("mode", "files")
+    assert app.values["old"] == "a.docx"
+    app = App(screen, Settings(mode="folders", single="draft.docx"))
+    app.set("mode", "files")
+    assert app.values["old"] == ""
 
 
 def test_comments_choice(screen, tmp_path):
@@ -843,6 +863,35 @@ def test_documents_to_download(tmp_path, monkeypatch, screen):
     app.set("assess_annotate", True)
     app.set("assess_documents", False)
     assert app.collect().assess_documents is False
+
+
+def test_ai_written_passages_marked(tmp_path, monkeypatch, screen):
+    """Mark AI-written passages: the AI-writing assessment asked to mark
+    them, shown in the report with the problems; greyed out, and not asked,
+    while Check for AI writing is off."""
+    old, new = pair(tmp_path, "docx")
+    asked = []
+
+    def assess(c, request, kind="value", **kw):
+        asked.append((kind, request.mark_writing))
+        if kind == "value":
+            return assessment([FIXED])
+        mark = Annotation("new", FIXED.start, FIXED.start, "Stock wording.")
+        return Assessment("claude", "## Verdict\n**Likely**", kind="writing", annotations=[mark])
+
+    monkeypatch.setattr(pipeline, "assess_comparison", assess)
+    s = Settings(mode="files", old=str(old), new=str(new), assess="claude", assess_preview=False,
+                 assess_ai_writing=True, assess_mark_ai_writing=True)  # fmt: skip
+    html = execute(run_of(s)).path.read_text(encoding="utf-8")
+    assert asked == [("value", True), ("writing", True)]
+    assert "Reads as written by an AI: Stock wording." in html
+    app = App(screen, Settings(mode="files"))
+    app.settle()
+    app.set("assess_ai", "claude")
+    app.settle()
+    assert off(app, "assess_mark_ai_writing")
+    app.set("assess_ai_writing", True)
+    assert not off(app, "assess_mark_ai_writing")
 
 
 def test_one_file_reviewed(screen, tmp_path, monkeypatch):

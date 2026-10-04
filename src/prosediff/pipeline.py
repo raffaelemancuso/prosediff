@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
-from prosediff.assess import Assessment, AssessRequest
+from prosediff.assess import Assessment, AssessRequest, marked_writing
 from prosediff.diff import (
     AUTO_ENCODING,
     CONTEXT,
@@ -88,6 +88,8 @@ def request_of(src: object) -> AssessRequest | None:
         writing_system=src.assess_writing_prompt or "",
         edits=src.assess_edits,
         files=files_of(src),
+        # only with the question of AI writing asked
+        mark_writing=src.assess_ai_writing and src.assess_mark_ai_writing,
     )
 
 
@@ -308,8 +310,12 @@ def execute(
         and (shown := fixes_shown(run, assessment))
     ):
         # the documents to download made of the file and the assessment as they are
-        write = partial(writer, shown[0], documents_of=(comparison, assessment))
+        write = partial(
+            writer, shown[0], documents_of=(comparison, marked_writing(assessment, writing))
+        )
         assessment_shown = shown[1]
+    # the passages marked as AI-written shown with the problems
+    assessment_shown = marked_writing(assessment_shown, writing)
     progress(
         "Writing the report…"
         if run.fmt == "html"

@@ -66,6 +66,7 @@ or named by `GIT_PYTHON_GIT_EXECUTABLE`.
 | `--assess-documents`, `--no-assess-documents` | offer Word or OpenDocument files with the AI's comments and fixes for download (default: on; see [details](ai_assessment.md#the-ais-problems-in-word-and-libreoffice-documents)) |
 | `--assess-save-prompt`     | also include the exact prompt sent to the model in the report (off by default) |
 | `--assess-ai-writing`      | also ask whether the added text (with `--review`, the file) reads as AI-written (off by default); an indication, not proof |
+| `--assess-mark-ai-writing` | with `--assess-ai-writing`, that same assessment also marks each passage that reads as AI-written, shown with the problems and as comments in the documents: comparing, only text the changes added; with `--review`, any passage |
 | `--assess-timeout SECONDS` | give up on the assessment after this long (default 900); the report is still written |
 | `--list-models AI`         | list the models an AI offers (`claude`, `codex`, `ollama`, or any provider any-llm reaches), default first, with the efforts each supports |
 | `--login-codex`            | log in to ChatGPT in the browser for `--assess codex` (once) |

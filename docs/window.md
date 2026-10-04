@@ -47,7 +47,8 @@ The segmented button at the top chooses what is compared:
 - **One file**: a file reviewed whole by the AI (see
   [Reviewing one file](ai_assessment.md#reviewing-one-file)). Compare
   becomes **Review**, the output is `NAME_review.html` next to the file,
-  and the options only a comparison has are left out.
+  and the options only a comparison has are left out. Going from it to
+  **Files**, the file reviewed becomes the old version.
 - **Rebuild**: a report made again from the AI's answers saved beside it
   (`NAME.ai.json`), without asking the AI (`--rebuild`): the Comparison
   and AI cards are left out, the run's own settings used; the report is
@@ -87,14 +88,20 @@ prosediff's own prompts too, to edit (**Restore
 default** puts prosediff's back): for one file, the review's; for two
 versions, the assessment's and the AI-writing check's; **Other files** to
 send as context (a switch, and **Files…**, their list in a dialog of its
-own, sorted by **File** or **Folder** when a heading is clicked, with
+own, resized by dragging its sides or corners, sorted by **File** or
+**Folder** when a heading is clicked, with
 **Add…** for several at once: PDF, Word, OpenDocument, Markdown or text;
+**Remove** (Delete) for those chosen, the next one chosen after them, and
+**Remove all**;
 a file analysed, one of the two compared, the one reviewed, or one in a
 folder or repository compared, is refused); who its comments in the Word and OpenDocument documents are by
 (**Author**, of its comments and tracked changes; empty: the AI and its model); whether it marks problems in the text
 (**Mark problems in the text**, on by default); whether it may
 edit the text (**Allow text edits**, on by default: its fixes as
 rewordings, tracked changes in the documents); and
+whether it also marks the passages that read as AI-written (**Mark
+AI-written passages**, asked with **Check for AI writing** and greyed out
+without it: comparing, only text the changes added; one file, any passage);
 whether the prompt is saved in the report. The switches are greyed out
 while no AI is chosen, and the whole card unless the output is the HTML
 report.
@@ -103,11 +110,12 @@ report.
 in its window (the same one for the next report), a diff or a document of
 tracked changes in the program that opens it. The status line shows the
 current stage and how long it has taken, and **Progress**, above it, logs
-each stage and what the AI does, a line each; drag the log's corner to
-make it taller or shorter. Meanwhile Compare becomes **Cancel** (Esc),
+each stage and what the AI does, a line each; drag its top edge (or, on
+it, Up and Down) to make it taller or shorter. Meanwhile Compare becomes **Cancel** (Esc),
 which stops everything, the AI included. A notification says when it is
 done. With **Preview before sending**, the report without the assessment
-opens first, and the Open screen asks whether to send it to the AI.
+opens first, and the Open screen asks whether to send it to the AI;
+**Show the report** opens it again, its window closed or behind another.
 
 In a report's window, the documents to download (**With AI fixes**,
 **Tracked changes**) are saved where a dialog says, beside the report at

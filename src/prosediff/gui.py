@@ -235,6 +235,9 @@ class Settings:
     # whether the AI is also asked, apart, if the new text reads as written by
     # an AI
     assess_ai_writing: bool = False
+    # whether that assessment also marks the passages that read so (comparing,
+    # only new text): off while it is not asked
+    assess_mark_ai_writing: bool = False
     # whether the report holds the documents made of the problems the AI
     # marked in a Word document or an OpenDocument text (prosediff.aidocs)
     assess_documents: bool = True
@@ -629,6 +632,7 @@ AI_SWITCHES = (
     "assess_preview",
     "assess_annotate",
     "assess_ai_writing",
+    "assess_mark_ai_writing",
     "assess_edits",
     "assess_save_prompt",
     "assess_documents",
@@ -725,6 +729,7 @@ class App:
         self.job_settings: Settings | None = None
         self.stage, self.stage_started, self.live = "", 0.0, ""
         self.preview_text = ""
+        self.preview_path: Path | None = None
         self.log_lines: list[str] = []
         # the reports opened, numbered: the last one's choices are kept (keep_choices)
         self.report_serial = 0
@@ -815,6 +820,8 @@ class App:
             on = active
             if name == "assess_documents":  # made of the problems marked in the text
                 on = on and v["assess_annotate"]
+            if name == "assess_mark_ai_writing":  # marked as that assessment is asked
+                on = on and v["assess_ai_writing"]
             if name in CHANGES_ONLY:
                 on = on and not review
             if not on:
@@ -890,6 +897,8 @@ class App:
         if value == old and name != "repo":
             return
         self.values[name] = value
+        if name == "mode" and old == "review" and value == "files":
+            self.carry_single()
         if name in ("mode", *SIDES):
             self.follow_sides()
         if name == "mode":
@@ -903,6 +912,13 @@ class App:
             self.update_models()
         elif name == "assess_model":
             self.update_efforts()
+
+    def carry_single(self) -> None:
+        """From One file to Files: the file reviewed becomes the old version,
+        for its revision to be compared with it; not when it is the new one."""
+        single = str(self.values["single"]).strip()
+        if single and single != str(self.values["new"]).strip():
+            self.values["old"] = single
 
     def show_mode(self) -> None:
         """What a mode asks for: the status it starts from, an HTML report
@@ -1803,7 +1819,14 @@ class App:
             f"AI assesses {it} and the report is written again with its assessment. "
             "Don't send: the report stays as it is."
         )
+        self.preview_path = path
         self.ui.open_report(path, None)
+
+    @locked
+    def show_preview(self) -> None:
+        """The preview open again, its window closed or out of sight."""
+        if self.preview_text and self.preview_path is not None:
+            self.ui.open_report(self.preview_path, None)
 
     @locked
     def answer_preview(self, send: bool) -> None:
@@ -2049,6 +2072,7 @@ class WindowApi:
             "run": lambda: app.cancel() if app.job is not None else app.run(),
             "cancel": app.cancel,
             "preview": app.answer_preview,
+            "show_preview": app.show_preview,
             "swap": app.swap,
             "pick": app.pick,
             "pick_output": app.pick_output,

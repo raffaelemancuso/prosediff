@@ -3,6 +3,8 @@ and the report and file it goes to. A fake backend stands in for the
 models, so no test needs one, but for one with a real local model."""
 
 import socket
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from helpers import ANSWER, fake, two_files
@@ -332,6 +334,7 @@ def test_cli_assess_writes_the_report(tmp_path, monkeypatch, capsys):
         (["--assess", "ollama"], "--assess: 'ollama': give the model too"),
         (["--assess-effort", "high"], "go with --assess"),
         (["--assess-ai-writing"], "go with --assess"),
+        (["--assess", "claude", "--assess-mark-ai-writing"], "goes with --assess-ai-writing"),
     ],
 )
 def test_cli_refuses_what_makes_no_sense(tmp_path, capsys, args, message):
@@ -443,3 +446,54 @@ def test_the_ai_is_asked_apart_whether_the_new_text_reads_as_ai_written(tmp_path
     assert 'data-drawer="writing"' in html and '<aside class="drawer" id="writing"' in html
     assert '<span class="verdict verdict-possibly">Possibly</span>' in html
     assert "an indication, not a proof" in html
+
+
+def test_the_ai_written_passages_marked_in_the_same_assessment(tmp_path, monkeypatch):
+    """Asked to, the AI-writing assessment also marks the passages that read
+    as written by an AI, in the same answer: comparing, those of the new
+    text, any passage of a file reviewed alone; each on the new side, no
+    fix. Shown after the problems, saying what it is, in the report and the
+    documents alike (marked_writing); not without the question asked."""
+    from prosediff.assess import (
+        AI_WRITTEN,
+        ANNOTATE_WRITING,
+        ANNOTATE_WRITING_REVIEW,
+        marked_writing,
+    )
+    from prosediff.pipeline import request_of
+
+    marks = (
+        '\n\n```json\n[{"side": "old", "start": "One pivotal line.", "end": "One pivotal line.", '
+        '"problem": "Stock wording.", "solution": "Rewrite it.", "replacement": "One line."}]\n```'
+    )
+    runner = fake("## Verdict\n**Possibly**: stock phrases." + marks)
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    old, new = two_files(tmp_path, "One line.\n", "One pivotal line.\n")
+    c = compare_paths(old, new)
+    writing = assess_comparison(c, AssessRequest("claude", mark_writing=True), kind="writing")
+    assert runner.asked[0][1] == SYSTEM_WRITING + ANNOTATE_WRITING
+    assert writing.annotations == [
+        Annotation("new", "One pivotal line.", "One pivotal line.", "Stock wording.")
+    ]
+    assert "```" not in writing.markdown
+    review = review_file(new)
+    assess_comparison(review, AssessRequest("claude", mark_writing=True), kind="writing")
+    assert runner.asked[-1][1] == SYSTEM_WRITING_REVIEW + ANNOTATE_WRITING_REVIEW
+    # with the problems, after them
+    a = Assessment("claude", ANSWER, annotations=[Annotation("new", "One", "line.", "Vague.")])
+    shown = marked_writing(a, writing)
+    assert [n.problem for n in shown.annotations] == ["Vague.", AI_WRITTEN + "Stock wording."]
+    assert marked_writing(a, replace(writing, error="timed out")) is a
+    assert marked_writing(None, writing) is None
+    html = render(c, assessment=shown, writing=writing)
+    assert "Reads as written by an AI: Stock wording." in html
+    # asked only with the question of AI writing
+    args = SimpleNamespace(
+        assess="claude", assess_effort="", assess_context="document", assess_instructions="",
+        assess_timeout=60, assess_save_prompt=False, assess_annotate=True, assess_author="",
+        assess_prompt="", assess_writing_prompt="", assess_edits=True, assess_files=(),
+        assess_ai_writing=False, assess_mark_ai_writing=True,
+    )  # fmt: skip
+    assert not request_of(args).mark_writing
+    args.assess_ai_writing = True
+    assert request_of(args).mark_writing

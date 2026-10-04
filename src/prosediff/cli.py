@@ -457,6 +457,13 @@ def build_parser() -> argparse.ArgumentParser:
         "HTML report's top bar; an indication, not a proof",
     )
     ai_group.add_argument(
+        "--assess-mark-ai-writing",
+        action="store_true",
+        help="with --assess-ai-writing, have that same assessment also mark each passage "
+        "that reads as written by an AI, as the problems are marked: comparing, only text "
+        "the changes added; reviewing one file, any passage of it",
+    )
+    ai_group.add_argument(
         "--assess-save-prompt",
         action="store_true",
         help="also put the exact text sent to the model (its system prompt and its "
@@ -558,12 +565,15 @@ def main(argv: list[str] | None = None) -> int:
         or args.assess_author
         or args.assess_save_prompt
         or args.assess_ai_writing
+        or args.assess_mark_ai_writing
     ):
         ap.error(
             "--assess-effort, --assess-instructions, --assess-file, --assess-prompt, "
             "--assess-writing-prompt, --assess-author, --assess-save-prompt and "
             "--assess-ai-writing go with --assess"
         )
+    if args.assess_mark_ai_writing and not args.assess_ai_writing:
+        ap.error("--assess-mark-ai-writing goes with --assess-ai-writing")
 
     fmt = args.format or format_of(args.output)
     if args.assess is not None and fmt != "html":

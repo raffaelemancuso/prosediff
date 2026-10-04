@@ -253,6 +253,55 @@ a heading, • for a list item, **bold**, *italic*, [^1] for a footnote \
 reference). Write [] when nothing is to be marked."""
 
 
+# Added to SYSTEM_WRITING when the passages that read as written by an AI
+# are to be marked in the text (AssessRequest.mark_writing): only text the
+# changes added, which the new version holds.
+ANNOTATE_WRITING = """
+
+Then, after the sections, mark in the text each passage the changes added or \
+rewrote that reads as written by an AI, a sentence or a few, not single \
+words, and only where the signs are clear, in one fenced code block of \
+language json holding a list; each item an object with these keys:
+- "start": the first 3 to 8 words of the passage, copied exactly from the \
+new version, punctuation included;
+- "end": its last 3 to 8 words, copied exactly (the same as "start" for a \
+short passage);
+- "problem": the signs of AI writing it shows, in a sentence.
+Never mark text only the old version has, nor text the changes left as it \
+was. A program uses these words to find the passage: it searches the text \
+for "start" and "end" character for character. So copy them exactly from \
+the text you are sent in the message, as it is written here (the same \
+spelling, capitals, spacing, punctuation, quotes, dashes, symbols and \
+equations), never retyped, corrected, translated or tidied. Never copy the \
+diff's markers ([- -], {+ +}, {>> <<}) nor the notation of a document's \
+formatting (# for a heading, • for a list item, **bold**, *italic*, [^1] \
+for a footnote reference). Write [] when nothing is to be marked."""
+
+# ANNOTATE_WRITING for a document read alone: any of its passages.
+ANNOTATE_WRITING_REVIEW = """
+
+Then, after the sections, mark in the text each passage of the document that \
+reads as written by an AI, a sentence or a few, not single words, and only \
+where the signs are clear, in one fenced code block of language json holding \
+a list; each item an object with these keys:
+- "start": the first 3 to 8 words of the passage, copied exactly from the \
+document, punctuation included;
+- "end": its last 3 to 8 words, copied exactly (the same as "start" for a \
+short passage);
+- "problem": the signs of AI writing it shows, in a sentence.
+A program uses these words to find the passage: it searches the text for \
+"start" and "end" character for character. So copy them exactly from the \
+document as it is written here (the same spelling, capitals, spacing, \
+punctuation, quotes, dashes, symbols and equations), never retyped, \
+corrected, translated or tidied. Never copy the comments' markers ({>> <<}) \
+nor the notation of a document's formatting (# for a heading, • for a list \
+item, **bold**, *italic*, [^1] for a footnote reference). Write [] when \
+nothing is to be marked."""
+
+# How a passage marked as AI-written reads among the problems (marked_writing).
+AI_WRITTEN = "Reads as written by an AI: "
+
+
 def _reworded(text: str, changes: dict[str, str]) -> str:
     """text with each of changes made; every one must be found."""
     for old, new in changes.items():
@@ -364,6 +413,21 @@ def split_annotations(answer: str) -> tuple[str, list[Annotation]]:
     # a heading left with nothing under it, for the list alone
     text = re.sub(r"\n#+[^\n]*\s*$", "", text.rstrip())
     return text.strip(), notes
+
+
+def marked_writing(
+    assessment: "Assessment | None", writing: "Assessment | None"
+) -> "Assessment | None":
+    """assessment with the passages writing marked as AI-written after its
+    own problems, each saying so (AI_WRITTEN): the report and the documents
+    show them as they show the problems. assessment as it is when either
+    failed or writing marked none."""
+    if assessment is None or assessment.error or writing is None or writing.error:
+        return assessment
+    if not writing.annotations:
+        return assessment
+    marked = [replace(n, problem=AI_WRITTEN + n.problem) for n in writing.annotations]
+    return replace(assessment, annotations=[*assessment.annotations, *marked])
 
 
 def duration(seconds: float) -> str:
@@ -527,6 +591,9 @@ class AssessRequest:
     edits: bool = True
     # other files sent as context (prosediff.references): their paths
     files: tuple[str, ...] = ()
+    # whether the assessment of kind "writing" also marks the passages that
+    # read as written by an AI (ANNOTATE_WRITING): comparing, only new text
+    mark_writing: bool = False
 
 
 def default_system(kind: str, single: bool = False) -> str:
@@ -1049,10 +1116,15 @@ def assess(
         kind=kind,
         author=request.author,
     )
-    annotate = request.annotate and kind in ("value", "review")
-    marks = (ANNOTATE_REVIEW if review else ANNOTATE) if annotate else ""
-    if marks and not request.edits:
-        marks = no_edits(marks)
+    writing = kind == "writing"
+    if writing:
+        annotate = request.mark_writing
+        marks = (ANNOTATE_WRITING_REVIEW if single else ANNOTATE_WRITING) if annotate else ""
+    else:
+        annotate = request.annotate and kind in ("value", "review")
+        marks = (ANNOTATE_REVIEW if review else ANNOTATE) if annotate else ""
+        if marks and not request.edits:
+            marks = no_edits(marks)
     try:
         backend, model = parse_backend(request.spec)
         instructions = instructions_from(request.instructions)
@@ -1084,7 +1156,11 @@ def assess(
         return made
     if annotate:
         text, made.annotations = split_annotations(text)
-        if not request.edits:  # a rewording given all the same is left out
+        if writing:  # passages of the new text, a sign each, no fix
+            made.annotations = [
+                Annotation("new", n.start, n.end, n.problem) for n in made.annotations
+            ]
+        elif not request.edits:  # a rewording given all the same is left out
             made.annotations = [replace(n, replacement="") for n in made.annotations]
     made.markdown, made.model = text.strip(), answered
     made.seconds = time.monotonic() - started

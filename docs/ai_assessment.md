@@ -153,7 +153,11 @@ does not apply, and `--comments` is `markers` (the AI is sent the file's
 comments) or `none` (it is not). `--assess-ai-writing` asks whether the
 file reads as AI-written; with no earlier version to weigh it against, the
 AI can only compare its parts with each other, so this verdict is weaker
-still than for changes.
+still than for changes. With `--assess-mark-ai-writing` (in the window,
+**Mark AI-written passages**) the same assessment also marks the passages
+that read so, any in the file (comparing two versions, only text the
+changes added): each is shown with the problems, its card saying "Reads as
+written by an AI", and is a comment in the documents to download.
 
 **The review's report is a diff of the file and its fixed version.** When
 the AI proposes fixes, prosediff applies each one whose passage it finds

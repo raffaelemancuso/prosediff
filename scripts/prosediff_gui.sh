@@ -13,7 +13,15 @@ set -o errexit -o nounset -o pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project="$(cd "$script_dir/.." && pwd)"
 
-if ! command -v uv >/dev/null 2>&1; then
+# the project's own prosediff-gui (in its .venv, made by uv sync), else uv
+for exe in "$project/.venv/Scripts/prosediff-gui.exe" "$project/.venv/bin/prosediff-gui"; do
+  if [[ -x "$exe" ]]; then
+    launch=("$exe")
+    break
+  fi
+done
+
+if [[ -z "${launch+x}" ]] && ! command -v uv >/dev/null 2>&1; then
   printf 'prosediff_gui: uv not found: install it from https://docs.astral.sh/uv/\n' >&2
   exit 1
 fi
@@ -31,5 +39,9 @@ for arg in "$@"; do
   args+=("$(native "$arg")")
 done
 
-nohup uv run --project "$(native "$project")" prosediff-gui "${args[@]}" >/dev/null 2>&1 &
+if [[ -z "${launch+x}" ]]; then
+  launch=(uv run --project "$(native "$project")" prosediff-gui)
+fi
+
+nohup "${launch[@]}" "${args[@]}" >/dev/null 2>&1 &
 disown

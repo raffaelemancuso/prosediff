@@ -126,10 +126,15 @@ footer { border-top: 1px solid var(--border); background: var(--panel); padding:
   border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
-#progress { margin-bottom: 8px; }
+#progress { margin-bottom: 8px; position: relative; }
 #progress h2 { margin-bottom: 4px; }
+/* The log's grip: the footer's top edge, dragged up for a taller log. */
+#log-grip { position: absolute; left: -16px; right: -16px; top: -12px; height: 9px;
+  cursor: ns-resize; touch-action: none; }
+#log-grip:hover, #log-grip.dragging, #log-grip:focus-visible { background: var(--accent);
+  opacity: .35; outline: none; }
 #log { margin: 0; height: 8.5em; min-height: 3em; max-height: 60vh; overflow: auto;
-  resize: vertical; font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap;
+  font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap;
   background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
 #preview { display: flex; gap: 12px; align-items: center; border: 1px solid var(--accent);
   border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; background: var(--bg); }
@@ -144,14 +149,19 @@ dialog .card { margin-bottom: 8px; }
 dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 #advanced .passages { display: grid; grid-template-columns: max-content auto max-content auto;
   gap: 6px 10px; align-items: center; }
+/* The files' dialog resized by its sides and corners (sized), the list
+   filling it. */
+#files[open] { display: flex; flex-direction: column; overflow: hidden;
+  width: min(92vw, 800px); height: min(80vh, 560px); min-width: 420px; min-height: 240px;
+  max-width: 98vw; max-height: 96vh; }
 #files table { border-collapse: collapse; width: 100%; }
-#files .list { max-height: 50vh; overflow: auto; border: 1px solid var(--border);
-  border-radius: 6px; min-height: 8em; }
+#files .list { overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
 #files th { text-align: left; position: sticky; top: 0; background: var(--panel); }
 #files th button { border: 0; background: none; font-weight: 600; padding: 4px 8px; width: 100%; }
-#files td { padding: 3px 8px; border-top: 1px solid var(--border); }
+#files td { padding: 3px 8px; border-top: 1px solid var(--border); white-space: nowrap; }
 #files tr.chosen td { background: var(--panel); }
-#files .layout { display: grid; grid-template-columns: 1fr auto; gap: 10px; min-width: 640px; }
+#files .layout { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr); gap: 10px; flex: 1; min-height: 0; }
 #files .layout .buttons { flex-direction: column; }
 #instructions .box { margin-bottom: 10px; }
 #instructions .head { display: flex; justify-content: space-between; align-items: baseline;
@@ -332,8 +342,9 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
         <label class="switch" title="Have the AI mark each problem in the text, from its first words to its last, with what is wrong and the change it proposes: a numbered badge before each in the HTML report, its passage highlighted when clicked, and a card in the margin beside it."><input type="checkbox" data-field="assess_annotate">Mark problems in the text</label>
         <label class="switch" title="Also ask the AI, apart, whether the text the changes added (one file: the file) reads as written by an AI: a second assessment, its verdict (likely, possibly or unlikely) in the report's top bar. An indication, not a proof: careful writers show the same signs, and writers in a second language are often taken for an AI wrongly. One file has no earlier version to weigh the text against: a weaker judgement still."><input type="checkbox" data-field="assess_ai_writing">Check for AI writing</label>
         <label class="switch" title="Let the AI edit the text: each fix it proposes is a rewording of the passage, a tracked change in the documents to download and, reviewing one file, the report a diff of the file and the file with the fixes. Off: it only marks the problems and says what to do; the text is left as it is. Needs &quot;Mark problems in the text&quot;."><input type="checkbox" data-field="assess_edits">Allow text edits</label>
-        <label class="switch" title="Also put the exact text the AI was sent (its system prompt and its message) in the HTML report, in a closed panel at its end: to see what it read."><input type="checkbox" data-field="assess_save_prompt">Save AI prompt</label>
+        <label class="switch" title="Also have the AI mark each passage that reads as written by an AI, in the same assessment as Check for AI writing: comparing, only text the changes added; reviewing one file, any passage of it. Each is marked in the text and in the margin, and a comment in the documents to download. An indication, not a proof. Needs &quot;Check for AI writing&quot;."><input type="checkbox" data-field="assess_mark_ai_writing">Mark AI-written passages</label>
         <label class="switch" title="Comparing a Word document with another (or an OpenDocument text with another), put in the HTML report the documents to download from the AI assessment: the new version with the AI's fixes as tracked changes, to accept or reject, its own (the co-authors') kept; and, when it has none, the tracked changes with the AI's comments. Review mode chooses which problems they hold. They make the report larger: about 2.7 times the document's size. Needs &quot;Mark problems in the text&quot;."><input type="checkbox" data-field="assess_documents">Documents to download</label>
+        <label class="switch" title="Also put the exact text the AI was sent (its system prompt and its message) in the HTML report, in a closed panel at its end: to see what it read."><input type="checkbox" data-field="assess_save_prompt">Save AI prompt</label>
       </div>
     </div>
   </section>
@@ -341,11 +352,13 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
 
 <footer>
   <section id="progress" hidden>
+    <div id="log-grip" role="separator" aria-orientation="horizontal" aria-controls="log" aria-label="Height of the progress log" tabindex="0" title="Drag the top edge to make the log taller or shorter (or the arrow keys)"></div>
     <h2>Progress</h2>
-    <pre id="log" tabindex="0" aria-live="polite" title="Drag the corner to make the log taller or shorter"></pre>
+    <pre id="log" tabindex="0" aria-live="polite"></pre>
   </section>
   <section id="preview" hidden aria-live="assertive">
     <p data-text="preview"></p>
+    <button type="button" data-act="show_preview" title="Open the report without the AI assessment again, its window closed or behind another">Show the report</button>
     <button type="button" class="primary" data-act="preview" data-arg="true">Send to the AI</button>
     <button type="button" data-act="preview" data-arg="false">Don't send</button>
   </section>
@@ -433,6 +446,7 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
     <div class="buttons">
       <button type="button" data-act="pick_files" title="Add files to send (several at once)">Add…</button>
       <button type="button" id="files-remove" title="Remove the files chosen in the list (Delete)">Remove</button>
+      <button type="button" id="files-clear" title="Remove every file from the list">Remove all</button>
     </div>
   </div>
   <div class="end"><button type="button" data-close>Close</button></div>
@@ -570,6 +584,8 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
       });
       menu.appendChild(li);
     });
+    // its scrollbar pressed, the field keeps the focus: its blur would close it
+    menu.addEventListener("mousedown", function (e) { e.preventDefault(); });
     input.parentNode.appendChild(menu);
     var at = $(".at", menu);
     if (at) at.scrollIntoView({ block: "nearest" });
@@ -581,6 +597,9 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
     drop.setAttribute("aria-label", "Show the choices");
     drop.textContent = "▾";
     combo.appendChild(drop);
+    // pressed, it leaves the focus in the field: the field's blur would
+    // close the menu the click has just opened
+    drop.addEventListener("mousedown", function (e) { e.preventDefault(); });
     drop.addEventListener("click", function () {
       if ($(".menu", combo)) closeMenus(); else { openMenu(input); input.focus(); }
     });
@@ -610,7 +629,13 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
         closeMenus();
       }
     });
-    input.addEventListener("blur", function () { setTimeout(closeMenus, 150); });
+    // the focus gone elsewhere, its own menu closes, not one opened since
+    input.addEventListener("blur", function () {
+      setTimeout(function () {
+        var menu = $(".menu", combo);
+        if (menu && document.activeElement !== input) menu.remove();
+      }, 150);
+    });
   });
 
   // The buttons: an action of App's (data-act, its argument data-arg), or
@@ -627,6 +652,54 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
       b.closest("dialog").close();
     }
   });
+  // A dialog resized by dragging its sides and corners, within its CSS min
+  // and max sizes and the window. Dragged once, it stays where it is rather
+  // than centred, for the side not dragged to stay put.
+  function sized(dialog) {
+    var EDGE = 8, drag = null;
+    function edges(e) {
+      var r = dialog.getBoundingClientRect();
+      if (e.target !== dialog && e.target.closest("button, input, select, textarea, tr")) return "";
+      return (e.clientY - r.top < EDGE ? "n" : r.bottom - e.clientY < EDGE ? "s" : "") +
+        (e.clientX - r.left < EDGE ? "w" : r.right - e.clientX < EDGE ? "e" : "");
+    }
+    function px(v, fallback) { var n = parseFloat(v); return isNaN(n) ? fallback : n; }
+    dialog.addEventListener("pointermove", function (e) {
+      if (!drag) { var at = edges(e); dialog.style.cursor = at ? at + "-resize" : ""; return; }
+      var s = drag.style, dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      var r = { left: drag.r.left, top: drag.r.top, width: drag.r.width, height: drag.r.height };
+      var W = Math.min(px(s.maxWidth, innerWidth), innerWidth), H = Math.min(px(s.maxHeight, innerHeight), innerHeight);
+      var minW = px(s.minWidth, 200), minH = px(s.minHeight, 120);
+      function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+      if (drag.at.indexOf("e") >= 0) r.width = clamp(r.width + dx, minW, Math.min(W, innerWidth - r.left));
+      if (drag.at.indexOf("s") >= 0) r.height = clamp(r.height + dy, minH, Math.min(H, innerHeight - r.top));
+      if (drag.at.indexOf("w") >= 0) {
+        var w = clamp(r.width - dx, minW, Math.min(W, r.left + r.width));
+        r.left += r.width - w; r.width = w;
+      }
+      if (drag.at.indexOf("n") >= 0) {
+        var h = clamp(r.height - dy, minH, Math.min(H, r.top + r.height));
+        r.top += r.height - h; r.height = h;
+      }
+      dialog.style.margin = "0";
+      dialog.style.left = r.left + "px";
+      dialog.style.top = r.top + "px";
+      dialog.style.width = r.width + "px";
+      dialog.style.height = r.height + "px";
+    });
+    dialog.addEventListener("pointerdown", function (e) {
+      var at = edges(e);
+      if (!at || e.button !== 0) return;
+      var r = dialog.getBoundingClientRect();
+      drag = { at: at, x: e.clientX, y: e.clientY, r: r, style: getComputedStyle(dialog) };
+      dialog.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    function stop() { drag = null; }
+    dialog.addEventListener("pointerup", stop);
+    dialog.addEventListener("pointercancel", stop);
+  }
+  sized($("#files"));
   function openDialog(name) {
     if (name === "instructions") return openInstructions();
     $("#" + name).showModal();
@@ -655,6 +728,7 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
       tr.setAttribute("aria-selected", chosenFiles[row[0]] ? "true" : "false");
       tr.appendChild(el("td", null, row[1]));
       tr.appendChild(el("td", "note", row[2]));
+      tr.title = row[0];
       body.appendChild(tr);
     });
     all("#files th button").forEach(function (b) {
@@ -662,6 +736,7 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
       b.textContent = (b.dataset.arg === "name" ? "File" : "Folder") +
         (on ? (files.sort[1] ? " ▼" : " ▲") : "");
     });
+    $("#files-clear").disabled = !files.rows.length;
   }
   $("#files-rows").addEventListener("click", function (e) {
     var tr = e.target.closest("tr");
@@ -670,12 +745,22 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
     chosenFiles[tr.dataset.path] = !chosenFiles[tr.dataset.path];
     renderFiles(view.files);
   });
+  // Those removed, the choice moves on to the row after the last of them,
+  // or the one before the first when they were the last rows.
   function removeFiles() {
-    var gone = Object.keys(chosenFiles).filter(function (k) { return chosenFiles[k]; });
+    var paths = view.files.rows.map(function (row) { return row[0]; });
+    var gone = paths.filter(function (p) { return chosenFiles[p]; });
     chosenFiles = {};
-    if (gone.length) act("remove_files", [gone]);
+    if (!gone.length) return;
+    var next = paths[paths.indexOf(gone[gone.length - 1]) + 1] || paths[paths.indexOf(gone[0]) - 1];
+    if (next) chosenFiles[next] = true;
+    act("remove_files", [gone]);
   }
   $("#files-remove").addEventListener("click", removeFiles);
+  $("#files-clear").addEventListener("click", function () {
+    chosenFiles = {};
+    act("remove_files", [view.files.rows.map(function (row) { return row[0]; })]);
+  });
   $("#files").addEventListener("keydown", function (e) { if (e.key === "Delete") removeFiles(); });
 
   // prosediff's prompts and the instructions, in large boxes (App.instructions):
@@ -726,6 +811,30 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
     if (end) box.scrollTop = box.scrollHeight;
   }
   function clearLog() { $("#log").textContent = ""; }
+  // The log taller from its top edge, dragged up (or Up and Down on the
+  // grip): the window's bottom stays where it is. Its CSS min and max
+  // height bound it.
+  (function () {
+    var grip = $("#log-grip"), box = $("#log"), from = null;
+    function height(px) { box.style.height = Math.max(0, px) + "px"; }
+    grip.addEventListener("pointerdown", function (e) {
+      from = { y: e.clientY, h: box.getBoundingClientRect().height };
+      grip.setPointerCapture(e.pointerId);
+      grip.classList.add("dragging");
+      e.preventDefault();
+    });
+    grip.addEventListener("pointermove", function (e) {
+      if (from) height(from.h + from.y - e.clientY);
+    });
+    function stop() { from = null; grip.classList.remove("dragging"); }
+    grip.addEventListener("pointerup", stop);
+    grip.addEventListener("pointercancel", stop);
+    grip.addEventListener("keydown", function (e) {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      e.preventDefault();
+      height(box.getBoundingClientRect().height + (e.key === "ArrowUp" ? 20 : -20));
+    });
+  })();
   var alerts = [];
   function showAlert(kind, text) {
     alerts.push([kind, text]);
