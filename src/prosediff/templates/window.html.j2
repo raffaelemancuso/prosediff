@@ -25,6 +25,25 @@ body { margin: 0; background: var(--bg); color: var(--fg);
   font: 14px/1.45 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   display: flex; flex-direction: column; }
 main { flex: 1; overflow: auto; padding: 14px 16px 8px; }
+/* The menu bar: File and Options, drawn as the page is (not the system's). */
+.menubar { display: flex; gap: 2px; padding: 3px 8px; background: var(--panel);
+  border-bottom: 1px solid var(--border); }
+.menubar .menu { position: relative; }
+.menubar .menu > button { border: 0; background: none; color: var(--fg); font: inherit;
+  padding: 3px 9px; border-radius: 5px; cursor: default; }
+.menubar .menu > button:hover, .menubar .menu > button[aria-expanded="true"] {
+  background: var(--border); }
+.menubar [role="menu"] { position: absolute; left: 0; top: calc(100% + 3px); z-index: 30;
+  display: flex; flex-direction: column; min-width: 15em; padding: 5px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+.menubar [role="menuitem"] { display: flex; align-items: center; gap: 24px; border: 0;
+  background: none; color: var(--fg); font: inherit; text-align: left; padding: 5px 10px;
+  border-radius: 5px; white-space: nowrap; cursor: default; }
+.menubar [role="menuitem"] .label { flex: 1; }
+.menubar [role="menuitem"]:hover, .menubar [role="menuitem"]:focus-visible {
+  background: var(--panel); outline: none; }
+.menubar [role="menuitem"] kbd { font: 12px inherit; color: var(--muted); }
+.menubar [role="separator"] { height: 1px; margin: 4px 6px; background: var(--border); }
 h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted);
   text-transform: uppercase; letter-spacing: .04em; }
 [hidden] { display: none !important; }
@@ -190,6 +209,26 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
   <symbol id="i-git" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 3-7 2-7 4"/></symbol>
   <symbol id="i-repeat" viewBox="0 0 16 16"><path d="M13 7A5 5 0 0 0 3.5 5M3 9a5 5 0 0 0 9.5 2M3.5 2v3h3M12.5 14v-3h-3"/></symbol>
 </svg>
+
+<nav class="menubar" role="menubar" aria-label="Menu">
+  <div class="menu">
+    <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-file">File</button>
+    <div id="menu-file" role="menu" aria-label="File" hidden>
+      <button type="button" role="menuitem" data-act="open_project"><span class="label">Open project…</span><kbd>Ctrl+O</kbd></button>
+      <button type="button" role="menuitem" data-act="save_project" data-arg="false"><span class="label">Save project</span><kbd>Ctrl+S</kbd></button>
+      <button type="button" role="menuitem" data-act="save_project" data-arg="true"><span class="label">Save project as…</span><kbd>Ctrl+Shift+S</kbd></button>
+      <div role="separator"></div>
+      <button type="button" role="menuitem" data-act="quit"><span class="label">Quit</span></button>
+    </div>
+  </div>
+  <div class="menu">
+    <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-options">Options</button>
+    <div id="menu-options" role="menu" aria-label="Options" hidden>
+      <button type="button" role="menuitem" data-act="save_options" title="The window opens with them next time"><span class="label">Save options</span></button>
+      <button type="button" role="menuitem" data-act="reset_options" title="What is compared and the output's place stay"><span class="label">Reset to defaults</span></button>
+    </div>
+  </div>
+</nav>
 
 <main>
   <div class="seg modes" role="radiogroup" aria-label="What to compare">
@@ -537,10 +576,11 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
     $("use", run).setAttribute("href", v.running ? "#i-stop" : "#i-play");
     $("#spinner").hidden = !v.running;
     $("#preview").hidden = !v.text.preview;
-    if (v.log) $("#progress").hidden = false;
+    if (v.log) showProgress();
     document.title = v.text.title;
     renderFiles(v.files);
     if (!document.body.classList.contains("ready")) {
+      fitWindow();
       void document.body.offsetHeight;  // the first values laid out, then the slides on
       document.body.classList.add("ready");
     }
@@ -700,6 +740,49 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
     dialog.addEventListener("pointercancel", stop);
   }
   sized($("#files"));
+  // The menu bar: a menu opened by a click, another by hovering while one is
+  // open; closed by a choice, a click outside or Escape. The arrows move
+  // through a menu's items, and Left and Right to the next menu.
+  var tops = all(".menubar .menu > button");
+  function openMenuOf(top, focusFirst) {
+    tops.forEach(function (b) {
+      var on = b === top;
+      b.setAttribute("aria-expanded", on ? "true" : "false");
+      $("#" + b.getAttribute("aria-controls")).hidden = !on;
+    });
+    if (top && focusFirst) $("#" + top.getAttribute("aria-controls") + " [role=menuitem]").focus();
+  }
+  function menuOpen() { return tops.filter(function (b) { return b.getAttribute("aria-expanded") === "true"; })[0]; }
+  tops.forEach(function (top, k) {
+    top.addEventListener("click", function (e) {
+      openMenuOf(menuOpen() === top ? null : top, e.detail === 0);
+    });
+    top.addEventListener("mouseenter", function () { if (menuOpen() && menuOpen() !== top) openMenuOf(top); });
+    top.parentNode.addEventListener("keydown", function (e) {
+      var items = all("[role=menu] [role=menuitem]", top.parentNode), at = items.indexOf(document.activeElement);
+      if (e.key === "Escape" && menuOpen()) {
+        e.preventDefault();
+        e.stopPropagation();
+        openMenuOf(null);
+        top.focus();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (!menuOpen()) openMenuOf(top);
+        var step = e.key === "ArrowDown" ? 1 : -1;
+        items[(at + step + items.length + (at < 0 && step < 0 ? 1 : 0)) % items.length].focus();
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        var next = tops[(k + (e.key === "ArrowRight" ? 1 : -1) + tops.length) % tops.length];
+        if (menuOpen()) openMenuOf(next, true); else next.focus();
+      }
+    });
+  });
+  all(".menubar [role=menu] [role=menuitem]").forEach(function (item) {
+    item.addEventListener("click", function () { openMenuOf(null); });
+  });
+  document.addEventListener("mousedown", function (e) {
+    if (menuOpen() && !e.target.closest(".menubar")) openMenuOf(null);
+  });
   function openDialog(name) {
     if (name === "instructions") return openInstructions();
     $("#" + name).showModal();
@@ -806,9 +889,23 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
   // notification that a run is done.
   function log(line) {
     var box = $("#log"), end = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
-    $("#progress").hidden = false;
+    showProgress();
     box.appendChild(document.createTextNode(line + "\n"));
     if (end) box.scrollTop = box.scrollHeight;
+  }
+  // The window grown to show the page whole, as far as the screen lets it:
+  // when it opens, and when the progress log first shows; not since, for
+  // a size the person chose to stay.
+  function fitWindow() {
+    var main = $("main"), more = main.scrollHeight - main.clientHeight;
+    if (more > 0 && window.pywebview && api().fit) {
+      api().fit(more, { top: screen.availTop || 0, height: screen.availHeight });
+    }
+  }
+  var progressFitted = false;
+  function showProgress() {
+    $("#progress").hidden = false;
+    if (!progressFitted) { progressFitted = true; fitWindow(); }
   }
   function clearLog() { $("#log").textContent = ""; }
   // The log taller from its top edge, dragged up (or Up and Down on the

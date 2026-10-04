@@ -2085,6 +2085,7 @@ class WindowApi:
             "save_project": app.save_project,
             "open_project": app.open_project,
             "set_instructions": app.set_instructions,
+            "quit": lambda: ui.window.destroy(),
         }
 
     def view(self) -> dict:
@@ -2106,6 +2107,23 @@ class WindowApi:
 
     def instructions(self) -> list[dict]:
         return self._app.instructions()
+
+    def fit(self, more: float, area: dict) -> None:
+        """The window taller by more, what its page lacks to show it all,
+        within the screen's work area (area: its top and height), moved up
+        as far as it must to stay on it. All in the page's pixels, which
+        are pywebview's (logical) ones."""
+        window = self._ui.window
+        if window is None or not more or more <= 0:
+            return
+        top, room = float(area["top"]), float(area["height"])
+        height = min(window.height + more, room)
+        if height <= window.height:
+            return
+        y = max(top, min(window.y, top + room - height))
+        window.resize(window.width, int(height))
+        if y != window.y:
+            window.move(window.x, int(y))
 
 
 class ReportApi:
@@ -2156,46 +2174,6 @@ class ReportApi:
             self._app.status = f"Saved: {chosen}"
         self._app.render()
         return chosen
-
-
-def menu(app: App, ui: WebUi) -> list:
-    """The Open screen's menus: File, to open and save projects (Ctrl+O,
-    Ctrl+S on the page); Options, to remember the options for next time or
-    put them back to their defaults."""
-    from webview.menu import Menu, MenuAction, MenuSeparator
-
-    def then(do: Callable) -> Callable:
-        def run() -> None:
-            do()
-            app.render()
-
-        return run
-
-    return [
-        Menu(
-            "File",
-            [
-                MenuAction("Open project…", then(app.open_project)),
-                MenuAction("Save project", then(app.save_project)),
-                MenuAction("Save project as…", then(lambda: app.save_project(ask=True))),
-                MenuSeparator(),
-                MenuAction("Quit", lambda: ui.window.destroy()),
-            ],
-        ),
-        Menu(
-            "Options",
-            [
-                # the labels say what the tooltips would: a menu has none
-                MenuAction(
-                    "Save options (the window opens with them next time)", then(app.save_options)
-                ),
-                MenuAction(
-                    "Reset to defaults (what is compared and the output's place stay)",
-                    then(app.reset_options),
-                ),
-            ],
-        ),
-    ]
 
 
 def received(args: list[str]) -> str:
@@ -2319,7 +2297,6 @@ def main(argv: list[str] | None = None) -> None:
         width=WINDOW_SIZE[0],
         height=WINDOW_SIZE[1],
         min_size=WINDOW_MIN,
-        menu=menu(app, ui),
     )
     ui.window = window
     ui.title = app.title()

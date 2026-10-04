@@ -1341,18 +1341,6 @@ def test_the_context_files_sorted_by_their_columns(screen, tmp_path):
     assert app.files_chosen() == list(map(str, files))
 
 
-def test_the_menus(screen):
-    """Save options and Reset to defaults are in the Options menu, not
-    among the buttons; File opens and saves projects."""
-    app = App(screen, Settings(mode="files"))
-    bar = gui.menu(app, SimpleNamespace(window=None))
-    assert [m.title for m in bar] == ["File", "Options"]
-    files = [getattr(i, "title", None) for i in bar[0].items]
-    assert files[:3] == ["Open project…", "Save project", "Save project as…"]
-    items = [i.title for i in bar[1].items]
-    assert items[0].startswith("Save options") and items[1].startswith("Reset to defaults")
-
-
 def test_the_open_screen_page_has_every_field(screen):
     """Each field App holds is on the page (data-field), and each id App
     greys out or leaves out (data-id, or a segmented button's value)."""
@@ -1373,3 +1361,26 @@ def test_the_open_screen_page_has_every_field(screen):
             or f'data-field="{key}"' in page
             or f'value="{value}" data-field="{name}"' in page
         ), key
+
+
+def test_the_window_grown_to_show_the_page_whole(screen):
+    """The page's lack added to the window's height, within the screen's work
+    area, the window moved up as it must; never made smaller."""
+
+    class Window:
+        x, y, width, height = 100, 300, 940, 600
+
+        def resize(self, width, height):
+            self.width, self.height = width, height
+
+        def move(self, x, y):
+            self.x, self.y = x, y
+
+    ui = SimpleNamespace(window=Window())
+    api = gui.WindowApi(App(screen, Settings()), ui)
+    api.fit(200, {"top": 0, "height": 1040})
+    assert (ui.window.height, ui.window.y) == (800, 240)
+    api.fit(500, {"top": 0, "height": 1040})  # as tall as the screen lets it
+    assert (ui.window.height, ui.window.y) == (1040, 0)
+    api.fit(-50, {"top": 0, "height": 1040})
+    assert ui.window.height == 1040

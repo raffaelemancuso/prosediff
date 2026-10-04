@@ -287,6 +287,35 @@ def test_what_app_says_is_shown(browser, tmp_path):
     assert page.is_visible("#toast")
 
 
+def test_the_menus(browser, tmp_path):
+    """File and Options, menus of the page's own: File opens and saves
+    projects and quits, Options saves the options or resets them; a menu
+    opened by a click, another by hovering, closed by a choice or Escape."""
+    app = gui.App(Ui(), gui.Settings(mode="files"))
+    done = []
+    app.reset_options = lambda: done.append("reset")
+    app.save_project = lambda ask=False: done.append(("save", ask))
+    page = open_screen(browser, tmp_path, app)
+    file_menu, options = page.locator("#menu-file"), page.locator("#menu-options")
+    assert page.locator(".menubar .menu > button").all_inner_texts() == ["File", "Options"]
+    assert not file_menu.is_visible()
+    page.click("text=File")
+    labels = file_menu.locator(".label").all_inner_texts()
+    assert labels == ["Open project…", "Save project", "Save project as…", "Quit"]
+    page.hover(".menubar button:text-is('Options')")
+    assert options.is_visible() and not file_menu.is_visible()
+    assert options.locator(".label").all_inner_texts() == ["Save options", "Reset to defaults"]
+    page.click("text=Reset to defaults")
+    until(page, app, lambda a: done == ["reset"])
+    assert not options.is_visible()
+    page.click("text=File")
+    page.click("text=Save project as…")
+    until(page, app, lambda a: done == ["reset", ("save", True)])
+    page.click("text=File")
+    page.keyboard.press("Escape")
+    assert not file_menu.is_visible()
+
+
 def test_the_log_made_taller_from_its_top(browser, tmp_path):
     """The progress log's top edge, dragged up, makes it taller, the
     window's bottom where it was; Down on it, shorter."""

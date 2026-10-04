@@ -29,7 +29,9 @@ uv tool install --editable C:\path\to\prosediff
 
 This puts `prosediff` and `prosediff-gui` on `PATH`; on Windows,
 `prosediff-gui.exe` opens no console. `scripts/prosediff_gui.bat` and
-`scripts/prosediff_gui.sh` also start the window.
+`scripts/prosediff_gui.sh` also start the window. It opens tall enough to
+show all of the Open screen when the screen has room, and grows again when
+the progress log first shows.
 
 ![The prosediff window: a git repository with base and target commits chosen from lists, the comparison options in one card, the output, and the AI assessment card with its AI, model and effort](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_window.png)
 
