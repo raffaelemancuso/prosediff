@@ -15,7 +15,7 @@ from pathlib import Path
 from jinja2 import Environment, PackageLoader, select_autoescape
 from markupsafe import Markup
 
-from prosediff.assess import REACH, TYPOGRAPHIC, Assessment, AssessRequest, assess
+from prosediff.assess import REACH, TYPOGRAPHIC, Assessment, AssessRequest, assess, with_checks
 from prosediff.diff import CONTEXT, Comparison, all_rows, comment_text, context_for
 from prosediff.flags import flag_css, flag_html
 from prosediff.hyphenate import hyphenate
@@ -155,6 +155,7 @@ def render(
     writing: Assessment | None = None,
     documents: bool = True,
     documents_of: tuple[Comparison, Assessment] | None = None,
+    citations: Assessment | None = None,
 ) -> str:
     """The HTML report; align ("left" or "justify") sets how wrapped lines are
     aligned. split says how the comparison compared prose, "paragraph" or
@@ -162,7 +163,10 @@ def render(
     the report holds both (comparison then paragraph by paragraph), and a
     switch of its toolbar shows one or the other. An AI's assessment of the
     changes, given, heads the report; writing, its assessment of whether
-    their new text reads as written by an AI, beside it. documents: when the
+    their new text reads as written by an AI, and citations, its check of
+    the citations they added, beside it: one chip in the top bar, a tab
+    each in its drawer, the marks of all of them in the text
+    (with_checks). documents: when the
     AI marked problems in a Word document or an OpenDocument text, compared
     paragraph by paragraph, the report holds the documents made of them to
     download (prosediff.aidocs); documents_of, the comparison and the
@@ -173,11 +177,15 @@ def render(
     template = _env.get_template("report.html.j2")
     # the documents keep the paragraphs as they are: made from them only
     by_paragraph = sentences is not None or split == "paragraph"
+    # one assessment holding every check's marks, for the text and the documents
+    marked = with_checks(assessment, writing, citations)
     ai_documents = []
-    if documents and by_paragraph and assessment is not None and assessment.annotations:
+    if documents and by_paragraph and marked is not None and marked.annotations:
         from prosediff.aidocs import downloads  # python-docx and odfdo: only then
 
-        ai_documents = downloads(*(documents_of or (comparison, assessment)))
+        if documents_of is not None:
+            documents_of = (documents_of[0], with_checks(documents_of[1], writing, citations))
+        ai_documents = downloads(*(documents_of or (comparison, marked)))
     if sentences is not None:
         set_apart(sentences, "s-")
     return template.render(
@@ -187,7 +195,8 @@ def render(
         paths=paths or [],
         align=align,
         assessment=assessment,
-        writing=writing,
+        marked=marked,
+        checks=checks_of(assessment, writing, citations, comparison.single),
         ai_documents=ai_documents,
         fflate=fflate() if ai_documents else "",
         generated=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -197,6 +206,41 @@ def render(
             page_flags(comparison) | (page_flags(sentences) if sentences is not None else set())
         ),
     )
+
+
+# Each check in the AI's drawer: its tab's name, and what to keep in mind
+# reading it.
+CHECK_TABS = {
+    "assessment": ("Assessment", "Written by an AI: check it against the text."),
+    "writing": (
+        "AI writing",
+        "Written by an AI, and an indication, not a proof: careful writers show these "
+        "signs too, and writers in a second language are often taken for an AI wrongly.",
+    ),
+    "citations": (
+        "Citations",
+        "Written by an AI from what it knows of the sources, not from their text: check "
+        "each citation against the source itself.",
+    ),
+}
+
+
+def checks_of(
+    assessment: Assessment | None,
+    writing: Assessment | None,
+    citations: Assessment | None,
+    single: bool = False,
+) -> list[dict]:
+    """The checks the AI made, for its drawer's tabs: each one's id, name,
+    note and assessment, the general assessment first."""
+    out = []
+    for check, a in (("assessment", assessment), ("writing", writing), ("citations", citations)):
+        if a is not None:
+            title, note = CHECK_TABS[check]
+            if check == "assessment" and single:
+                title = "Review"
+            out.append({"id": check, "title": title, "note": note, "a": a})
+    return out
 
 
 def write_output(
@@ -212,6 +256,7 @@ def write_output(
     writing: Assessment | None = None,
     documents: bool = True,
     documents_of: tuple[Comparison, Assessment] | None = None,
+    citations: Assessment | None = None,
 ) -> Path:
     """Write the HTML report (fmt "html"), the unified diff ("diff"), the word
     diff ("wdiff"), LF line ends on every system, or the Word document
@@ -242,6 +287,7 @@ def write_output(
             writing=writing,
             documents=documents,
             documents_of=documents_of,
+            citations=citations,
         )
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
@@ -267,9 +313,10 @@ def assess_comparison(
     (prosediff.assess): its word diff, the changed lines alone, comments
     included, and the whole new version (new_version) when the request's
     context says so, sent to the model; kind "writing" asks instead whether
-    their new text reads as written by an AI. A file reviewed alone
-    (Comparison.single) is sent whole, for a review (kind "review"), or,
-    with kind "writing", to ask the other question of it whole."""
+    their new text reads as written by an AI, kind "citations" checks the
+    citations they added. A file reviewed alone (Comparison.single) is sent
+    whole, for a review (kind "review"), or, with kind "writing" or
+    "citations", to ask the other question of it whole."""
     documents = any(f.old_data or f.new_data for f in comparison.files)
     if comparison.single:
         return assess(
@@ -278,7 +325,7 @@ def assess_comparison(
             request,
             document=new_version(comparison),
             documents=documents,
-            kind="writing" if kind == "writing" else "review",
+            kind=kind if kind in ("writing", "citations") else "review",
             single=True,
             report=report,
         )

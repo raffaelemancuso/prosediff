@@ -20,7 +20,7 @@ import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
-from functools import cache, lru_cache
+from functools import cache, cached_property, lru_cache
 from itertools import accumulate, groupby
 from pathlib import Path
 from typing import Literal
@@ -67,7 +67,7 @@ from prosediff.language import (
     normalize_language,
     resolve_language,
 )
-from prosediff.mdstyle import md_styles, styled
+from prosediff.mdstyle import HEADING, md_styles, styled
 from prosediff.sentences import split_sentences
 from prosediff.sources import (
     DOCUMENT_SUFFIXES,
@@ -356,6 +356,18 @@ class FileDiff:
     @property
     def path(self) -> str:
         return self.new_path or self.old_path or ""
+
+    @cached_property
+    def headings(self) -> dict[str, dict[int, tuple[str, int]]]:
+        """The headings of each side of prose ("left", "right"), numbered as
+        an outline (heading_numbers): by line number, each one's number and
+        level. None for a file that is not prose."""
+        if not self.markdown:
+            return {"left": {}, "right": {}}
+        return {
+            "left": heading_numbers(self.old_lines),
+            "right": heading_numbers(self.new_lines),
+        }
 
     @property
     def counts(self) -> Counts:
@@ -2674,6 +2686,25 @@ def line_markdown(line: str) -> str:
     text = "".join(out)
     level = document.heading_level(line)
     return f"{'#' * level} {text}" if line.kind == "heading" and level else text
+
+
+def heading_numbers(lines: list[str]) -> dict[int, tuple[str, int]]:
+    """The headings among lines of prose (Markdown's #s, a document's
+    headings written so), numbered as an outline: "1.", "1.1.", "2.", by
+    line number (from 1), with their level. The shallowest level in the
+    file counts as the first: a file whose headings start at ## numbers
+    them 1., 2.; a level skipped counts as 0 ("1.0.1.")."""
+    found = [(n, len(m[1])) for n, line in enumerate(lines, 1) if (m := HEADING.match(line))]
+    if not found:
+        return {}
+    top = min(level for _, level in found)
+    counters = [0] * 6
+    out = {}
+    for n, level in found:
+        counters[level - 1] += 1
+        counters[level:] = [0] * (6 - level)
+        out[n] = (".".join(str(c) for c in counters[top - 1 : level]) + ".", level)
+    return out
 
 
 def diff_line(line: str, notes: dict[str, str]) -> str:

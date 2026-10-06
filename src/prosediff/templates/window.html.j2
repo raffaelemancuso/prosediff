@@ -93,7 +93,12 @@ label.switch input:checked::after { left: 15px; }
 @media (prefers-reduced-motion: reduce) {
   body.ready label.switch input, body.ready label.switch input::after { transition: none; }
 }
-.switches { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; }
+/* The AI's checks and the switches below them, in the same columns: each
+   a subgrid of one grid. */
+.check-grid { display: grid; grid-template-columns: repeat(3, max-content); gap: 6px 24px; }
+.check-grid > div { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+.rows > .label.top { align-self: start; padding-top: 1px; }
+@media (max-width: 720px) { .check-grid { grid-template-columns: max-content; } }
 
 /* A drop-down list one can also type into (combo): the field, and a
    button that shows every choice. */
@@ -375,15 +380,21 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
       <label class="switch label" title="Also send the AI other files as context, to draw on, not to assess: a journal's guidelines, a reviewer's report, a cited paper (PDF, Word, OpenDocument, Markdown or text)."><input type="checkbox" data-field="assess_send_files">Other files</label>
       <span class="note" data-text="files_summary"></span>
       <button type="button" data-id="edit_files" data-dialog="files" title="The files to send, in a list of their own: add and remove them"><svg class="i"><use href="#i-files"/></svg>Files…</button>
-      <span></span>
-      <div class="switches wide">
-        <label class="switch" data-id="assess_preview" title="First write the report without the assessment and open it, then ask whether to send the changes to the AI: to check what it will read before it reads it. No: the report stays as it is, unassessed."><input type="checkbox" data-field="assess_preview">Preview before sending</label>
+      <span class="label top" title="What the AI is asked, each a call of its own, all at once: at least one.">Checks</span>
+      <div class="check-grid wide">
+      <div role="group" aria-label="Checks">
+        <label class="switch" title="The AI's assessment of the changes as a whole (one file: its review): a verdict, what changed, what improved, and the problems, marked in the text as asked below."><input type="checkbox" data-field="assess_general">General assessment</label>
+        <label class="switch" title="Also ask the AI, apart, whether the text the changes added (one file: the file) reads as written by an AI: a second assessment, its verdict (likely, possibly or unlikely) in the report's top bar. An indication, not a proof: careful writers show the same signs, and writers in a second language are often taken for an AI wrongly. One file has no earlier version to weigh the text against: a weaker judgement still."><input type="checkbox" data-field="assess_ai_writing">AI writing</label>
+        <label class="switch" title="Also have the AI check, apart, the citations the changes added (one file: all of its citations): whether the reference list holds each (in the document, or in the other files sent), whether it fits what it is cited for as far as the AI knows the source, whether it looks mistaken or invented; each marked in the text. From what the AI knows of the sources, not their text: check them against the sources."><input type="checkbox" data-field="assess_citations">New citations</label>
+      </div>
+      <div>
         <label class="switch" title="Have the AI mark each problem in the text, from its first words to its last, with what is wrong and the change it proposes: a numbered badge before each in the HTML report, its passage highlighted when clicked, and a card in the margin beside it."><input type="checkbox" data-field="assess_annotate">Mark problems in the text</label>
-        <label class="switch" title="Also ask the AI, apart, whether the text the changes added (one file: the file) reads as written by an AI: a second assessment, its verdict (likely, possibly or unlikely) in the report's top bar. An indication, not a proof: careful writers show the same signs, and writers in a second language are often taken for an AI wrongly. One file has no earlier version to weigh the text against: a weaker judgement still."><input type="checkbox" data-field="assess_ai_writing">Check for AI writing</label>
+        <label class="switch" title="Also have the AI mark each passage that reads as written by an AI, in the same check as AI writing: comparing, only text the changes added; reviewing one file, any passage of it. Each is marked in the text and in the margin, and a comment in the documents to download. An indication, not a proof. Needs &quot;AI writing&quot;."><input type="checkbox" data-field="assess_mark_ai_writing">Mark AI-written passages</label>
+        <label class="switch" data-id="assess_preview" title="First write the report without the assessment and open it, then ask whether to send the changes to the AI: to check what it will read before it reads it. No: the report stays as it is, unassessed."><input type="checkbox" data-field="assess_preview">Preview before sending</label>
         <label class="switch" title="Let the AI edit the text: each fix it proposes is a rewording of the passage, a tracked change in the documents to download and, reviewing one file, the report a diff of the file and the file with the fixes. Off: it only marks the problems and says what to do; the text is left as it is. Needs &quot;Mark problems in the text&quot;."><input type="checkbox" data-field="assess_edits">Allow text edits</label>
-        <label class="switch" title="Also have the AI mark each passage that reads as written by an AI, in the same assessment as Check for AI writing: comparing, only text the changes added; reviewing one file, any passage of it. Each is marked in the text and in the margin, and a comment in the documents to download. An indication, not a proof. Needs &quot;Check for AI writing&quot;."><input type="checkbox" data-field="assess_mark_ai_writing">Mark AI-written passages</label>
         <label class="switch" title="Comparing a Word document with another (or an OpenDocument text with another), put in the HTML report the documents to download from the AI assessment: the new version with the AI's fixes as tracked changes, to accept or reject, its own (the co-authors') kept; and, when it has none, the tracked changes with the AI's comments. Review mode chooses which problems they hold. They make the report larger: about 2.7 times the document's size. Needs &quot;Mark problems in the text&quot;."><input type="checkbox" data-field="assess_documents">Documents to download</label>
         <label class="switch" title="Also put the exact text the AI was sent (its system prompt and its message) in the HTML report, in a closed panel at its end: to see what it read."><input type="checkbox" data-field="assess_save_prompt">Save AI prompt</label>
+      </div>
       </div>
     </div>
   </section>

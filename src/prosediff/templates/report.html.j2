@@ -182,12 +182,26 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
 .verdict { font-weight: 600; padding: 0 8px; border-radius: 999px; }
 /* the changes', the review's, and whether the new text reads as written
    by an AI; and the chips of the margin's cards, in the same colours */
-.verdict-improves, .verdict-good, .verdict-unlikely, .card.comment-new .chip {
+.verdict-improves, .verdict-good, .verdict-unlikely, .verdict-sound, .card.comment-new .chip {
   color: var(--add); background: var(--ins-line); }
-.verdict-mixed, .verdict-fair, .verdict-possibly, .card.problem .chip {
+.verdict-mixed, .verdict-fair, .verdict-possibly, .verdict-doubtful, .card.problem .chip {
   color: var(--fmt); background: var(--fmt-bg); }
-.verdict-worsens, .verdict-poor, .verdict-likely, .card.comment-removed .chip {
-  color: var(--rem); background: var(--del-line); }
+.verdict-worsens, .verdict-poor, .verdict-likely, .verdict-problems, .verdict-failed,
+.card.comment-removed .chip { color: var(--rem); background: var(--del-line); }
+.verdict-none { color: var(--muted); background: var(--panel); }
+/* In the AI's chip, each check's verdict after the first named; in its
+   drawer, a tab each. */
+.verdict .vlabel { font-weight: 400; }
+.toolbar .verdict-button { gap: 4px; }
+.toolbar .verdict-button .role { margin-left: 4px; }
+.check-tabs { display: inline-flex; gap: 2px; flex-wrap: wrap; }
+.check-tabs [role="tab"] { font: inherit; font-size: 13px; color: var(--fg); background: none;
+  border: 1px solid transparent; border-radius: 6px; padding: 2px 8px; cursor: pointer;
+  display: inline-flex; gap: 6px; align-items: center; }
+.check-tabs [role="tab"]:hover { background: var(--panel); }
+.check-tabs [role="tab"][aria-selected="true"] { border-color: var(--link); background: var(--panel);
+  font-weight: 600; }
+.check-panel .check-by { margin: 0 0 8px; }
 .assess-body { max-width: 80em; }
 .assess-body h1, .assess-body h2, .assess-body h3 { font-size: 14px; margin: 14px 0 4px; }
 .assess-body p, .assess-body ul, .assess-body ol { margin: 4px 0; }
@@ -203,7 +217,7 @@ body:not(.margin) .col-resizer[data-resize="notes"] { display: none; }
   border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px;
   /* one width, so the Filter menu's two line up under each other */
   width: 9.5em; flex-shrink: 0; }
-.toolbar .resolve-applied[hidden] { display: none; }
+.toolbar .resolve-applied[hidden], .toolbar .fixes-all[hidden] { display: none; }
 .toolbar .filter-count { color: var(--current); font-weight: 600; }
 #review-list .with-check { display: flex; align-items: center; }
 #review-list .with-check input { flex-shrink: 0; margin: 0 0 0 16px; }
@@ -417,6 +431,13 @@ body.formatted .s-h1, body.formatted .s-h2, body.formatted .s-h3,
 body.formatted .s-h4, body.formatted .s-h5, body.formatted .s-h6 { font-weight: 700; }
 body.formatted .s-h1 { font-size: 1.4em; } body.formatted .s-h2 { font-size: 1.25em; }
 body.formatted .s-h3 { font-size: 1.1em; }
+/* "Heading numbers": each heading numbered as an outline (1., 1.1., 2.),
+   counted by prosediff over the whole side, folded lines included. */
+body.numbered td.code[data-hnum]::before { content: attr(data-hnum) "\00a0"; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+body.numbered.formatted td.code[data-hlevel="1"]::before { font-size: 1.4em; }
+body.numbered.formatted td.code[data-hlevel="2"]::before { font-size: 1.25em; }
+body.numbered.formatted td.code[data-hlevel="3"]::before { font-size: 1.1em; }
 footer { color: var(--muted); font-size: 12px; margin-bottom: 48px; }
 footer a { color: inherit; }
 /* The top bar: what is compared, the AI's verdict (opening its assessment),
@@ -433,15 +454,13 @@ footer a { color: inherit; }
 .toolbar .spacer { flex: 1; }
 .toolbar .group { display: inline-flex; align-items: center; gap: 2px; }
 .toolbar .group[hidden], .toolbar .comment-nav[hidden] { display: none; }
-/* The documents with the AI's comments and fixes to download, beside it:
-   the drawer offers them too, but at the end of the assessment. */
-.toolbar .verdict-button, .toolbar .doc-button { display: inline-flex; align-items: center;
+/* The AI's verdicts, each opening its drawer. */
+.toolbar .verdict-button { display: inline-flex; align-items: center;
   gap: 8px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--bg); color: var(--fg); }
-.toolbar .verdict-button:hover, .toolbar .verdict-button[aria-expanded="true"],
-.toolbar .doc-button:hover { border-color: var(--link); }
-.toolbar .verdict-button .role, .toolbar .doc-button .role { font-size: 12px; }
-.toolbar .doc-button { gap: 4px; }
+.toolbar .verdict-button:hover, .toolbar .verdict-button[aria-expanded="true"] {
+  border-color: var(--link); }
+.toolbar .verdict-button .role { font-size: 12px; }
 .toolbar .review-button[aria-pressed="true"] { background: var(--skip); color: var(--fg);
   border-color: var(--link); font-weight: 600; }
 .toolbar .comment-counter { color: var(--add); font-weight: 600; min-width: 4em;
@@ -473,6 +492,14 @@ footer a { color: inherit; }
 .menu-panel .label { flex: 1; white-space: nowrap; }
 /* On or off shows in the tinted box alone: the names stay one weight. */
 .toolbar .menu-panel button[aria-pressed="true"] { font-weight: inherit; }
+/* The menus' parts: a heading, a rule between groups (Problems' own rule
+   gone with both its actions), the switch between the splits named in full. */
+.menu-panel .menu-heading { padding: 2px 6px; font-size: 11px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; }
+.menu-panel hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--border); }
+#filter-menu:not(:has(.fixes-all:not([hidden]), .resolve-applied:not([hidden]))) hr.fix-actions {
+  display: none; }
+.menu-panel .split-switch .split-name { font-size: inherit; }
 .menu-panel kbd { font: 11px ui-monospace, monospace; color: var(--muted);
   border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .toolbar .counter { color: var(--muted); min-width: 4.5em; text-align: center;
@@ -637,13 +664,12 @@ thead.print, .print-note { display: none; }
 </style>
 </head>
 <body{% if c.single %} class="single"{% endif %}>
-{% set marks = assessment and assessment.annotations and not assessment.error %}
+{# every check's marks, in one assessment (render.with_checks) #}
+{% set marks = marked and marked.annotations and not marked.error %}
 <div class="toolbar" role="toolbar" aria-label="Changes and views">
   {% if c.single %}<span class="bar-title" title="{{ c.target.hexsha }}">{{ c.target.short }}</span>
   {% else %}<span class="bar-title" title="{{ c.base.short }} → {{ c.target.short }}">{{ c.base.short }} → {{ c.target.short }}</span>{% endif %}
-  {% if assessment %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="AI assessment: what the AI made of the {{ "document" if c.single else "changes" }} as a whole">{% if assessment.error %}<span class="verdict verdict-worsens">failed</span>{% elif assessment.verdict %}<span class="verdict verdict-{{ assessment.verdict }}">{{ assessment.verdict | capitalize }}</span>{% endif %}<span class="role">AI assessment</span></button>{% endif %}
-  {% for d in ai_documents %}<button type="button" class="doc-button ai-download" data-document="{{ loop.index0 }}" title="{{ d.label }}, to download: {{ d.name }}"><span aria-hidden="true">⤓</span><span class="role">{{ "With AI fixes" if "_with_AI_fixes." in d.name else "Tracked changes" }} .{{ d.fmt }}</span></button>{% endfor %}
-  {% if writing %}<button type="button" class="verdict-button" data-drawer="writing" aria-expanded="false" aria-controls="writing" title="AI writing: whether the {{ "document" if c.single else "new text" }} reads as written by an AI, an indication, not a proof">{% if writing.error %}<span class="verdict verdict-likely">failed</span>{% elif writing.verdict %}<span class="verdict verdict-{{ writing.verdict }}">{{ writing.verdict | capitalize }}</span>{% endif %}<span class="role">AI writing</span></button>{% endif %}
+  {% if checks %}<button type="button" class="verdict-button" data-drawer="assessment" aria-expanded="false" aria-controls="assessment" title="The AI's checks: {% for k in checks %}{{ k.title }}{% if k.a.error %} (failed){% elif k.a.verdict %}: {{ k.a.verdict | capitalize }}{% endif %}{{ "; " if not loop.last }}{% endfor %}. Click for what it found">{% for k in checks %}<span class="verdict verdict-{{ "failed" if k.a.error else k.a.verdict or "none" }}">{% if checks | length > 1 and k.id != "assessment" %}<span class="vlabel">{{ k.title }}</span> {% endif %}{{ "failed" if k.a.error else (k.a.verdict | capitalize) or "…" }}</span>{% endfor %}<span class="role">{{ "AI checks" if checks | length > 1 else "AI " ~ checks[0].title | lower if checks[0].id == "assessment" else "AI" }}</span></button>{% endif %}
   <span class="spacer"></span>
   <span class="group" role="group" aria-label="Changes"{% if c.single %} hidden{% endif %}>
   <button type="button" data-nav="-1" title="Previous change (p)" aria-label="Previous change">◀</button>
@@ -655,29 +681,36 @@ thead.print, .print-note { display: none; }
     <button type="button" data-comment-nav="1" title="Next comment (c)" aria-label="Next comment">▶</button></span>
   {% if marks %}<span class="ai-nav" role="group" aria-label="Problems">
     <button type="button" data-ai-nav="-1" title="Previous problem (Shift+A)" aria-label="Previous problem">◀</button>
-    <span class="ai-counter" aria-live="polite" title="Problems: those the AI marked in the text, ⚠ in the text and in the margin">⚠ {{ assessment.annotations | length | counted("problem") }}</span>
+    <span class="ai-counter" aria-live="polite" title="Problems: those the AI marked in the text, ⚠ in the text and in the margin">⚠ {{ marked.annotations | length | counted("problem") }}</span>
     <button type="button" data-ai-nav="1" title="Next problem (a)" aria-label="Next problem">▶</button></span>{% endif %}
   {% if marks %}<span class="menu">
-    <button type="button" class="menu-button filter-button" aria-haspopup="true" aria-expanded="false" aria-controls="filter-menu" title="Filter: show only the problems with a fix or without{% if ai_documents %}, in the download or left out of it, resolved or not{% endif %}, on their cards and in Review">Filter<span class="filter-count"></span><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
-    <div class="menu-panel" id="filter-menu" role="group" aria-label="Which problems are shown" hidden>
+    <button type="button" class="menu-button filter-button" aria-haspopup="true" aria-expanded="false" aria-controls="filter-menu" title="Problems: which are shown (with a fix or without{% if ai_documents %}, in the download or left out of it, resolved or not{% endif %}), on their cards and in Review; and all the fixes at once">Problems<span class="filter-count"></span><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <div class="menu-panel" id="filter-menu" role="group" aria-label="Problems" hidden>
+      <span class="menu-heading">Show</span>
+      {% set kinds = marked.annotations | map(attribute="check") | unique | list %}{% if kinds | length > 1 %}<label class="item"><span class="label">Check</span><select class="filter-check" aria-label="Show the marks of one check, or of all">
+        <option value="all">all</option>{% for k in kinds %}<option value="{{ k }}">{{ {"": "assessment", "writing": "AI writing", "citations": "citations"}[k] }}</option>{% endfor %}</select></label>{% endif %}
       <label class="item"><span class="label">Fix</span><select class="filter-fix" aria-label="Show the problems that come with a fix (the passage rewritten), those without, or both">
         <option value="">all</option><option value="yes">with a fix</option><option value="no">without</option></select></label>
       {% if ai_documents %}<label class="item"><span class="label">In the download</span><select class="filter-keep" aria-label="Show the problems in the download, left out, or both">
         <option value="">all</option><option value="in">in it</option><option value="out">left out</option></select></label>
       <label class="item"><span class="label">Resolved</span><select class="filter-resolved" aria-label="Show the problems resolved, not resolved, or both">
         <option value="">all</option><option value="yes">resolved</option><option value="no">not resolved</option></select></label>{% endif %}
+      <hr class="fix-actions">
+      <button type="button" class="item fixes-all" hidden title="All the AI's fixes undone at once, the original words back on the page and the fixes left out of the documents to download; or, none left made, all made again">↶ Undo all fixes</button>
+      {% if ai_documents %}<button type="button" class="item resolve-applied" hidden title="Mark resolved, in the documents to download, the comments of the problems whose fix is already applied (the version with the AI's fixes has it)">✓ Resolve fixes applied</button>{% endif %}
     </div></span>{% endif %}
-  {% if marks and ai_documents %}<button type="button" class="resolve-applied" hidden title="Mark resolved, in the documents to download, the comments of the problems whose fix is already applied (the version with the AI's fixes has it)">✓ Resolve fixes applied</button>{% endif %}
   {% if marks or c.comments or (alt and alt.comments) %}<button type="button" class="margin-button" data-toggle="margin" aria-pressed="true" title="Margin: the cards of the comments and the problems beside the text; off, the two versions take its width (g)">Margin</button>{% endif %}
   <button type="button" class="review-button" data-review aria-pressed="false" title="Review: the changes, the comments and the problems listed, to go through one by one (r)">Review</button>
-  {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="split-name" aria-hidden="true">Paragraphs</span></button>{% endif %}
-  {% if not c.single %}<button type="button" class="icon" data-toggle="movelinks" aria-pressed="false" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg></button>
-  {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="false" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg></button>{% endif %}
-  <button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg></button>{% endif %}
   <span class="menu">
     <button type="button" class="menu-button" aria-haspopup="true" aria-expanded="false" aria-controls="view-menu">View<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
-    <div class="menu-panel" id="view-menu" role="group" aria-label="More views" hidden>
+    <div class="menu-panel" id="view-menu" role="group" aria-label="Views" hidden>
+      {% if alt %}<button type="button" class="icon split-switch" data-split-switch aria-pressed="false" aria-label="Compared paragraph by paragraph" title="Paragraphs: shown compared paragraph by paragraph; switch to sentence by sentence (s)"><svg class="paragraphs" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h10M2 6.3h12M2 9.7h12M2 13h7"/></svg><svg class="sentences" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h10"/><circle cx="14" cy="8" r="1.4" class="fill"/></svg><span class="label">Compared by <span class="split-name">Paragraphs</span></span><kbd aria-hidden="true">s</kbd></button>{% endif %}
+      {% if not c.single %}<button type="button" class="icon" data-toggle="movelinks" aria-pressed="false" aria-label="Lines between moves" title="Lines between moves: a line from each moved paragraph, and each moved passage, to where it went (l)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3.5c6 0 6 9 12 9"/><circle cx="2" cy="3.5" r="1.5" class="fill"/><circle cx="14" cy="12.5" r="1.5" class="fill"/></svg><span class="label">Lines between moves</span><kbd aria-hidden="true">l</kbd></button>{% endif %}
+      {% if c.counts.moved_passages or (alt and alt.counts.moved_passages) %}<button type="button" class="icon" data-toggle="passages" aria-pressed="false" aria-label="Moved passages" title="Moved passages: words moved within a paragraph or sentence, or between two, shown as moved; off, as removed and added in place (v)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3h13M1.5 13h13"/><rect x="1.5" y="6" width="6" height="4" rx="1" class="fill soft"/><path d="M9 8h5.5M12.5 6l2 2-2 2"/></svg><span class="label">Moved passages</span><kbd aria-hidden="true">v</kbd></button>{% endif %}
+      {% if not c.single %}<button type="button" class="icon" data-toggle="unified" aria-pressed="false" aria-label="One column" title="One column: old line above new line (u)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="13" rx="1.5"/><path d="M5.5 5h5M5.5 8h5M5.5 11h5"/></svg><span class="label">One column</span><kbd aria-hidden="true">u</kbd></button>{% endif %}
+      <hr>
       <button type="button" class="icon" data-toggle="formatted" aria-pressed="false" aria-label="Formatted" title="Formatted: Markdown shown formatted instead of raw (f)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 13 5 3l3.5 10M2.7 9.6h4.6"/><path d="M10 13V7.5h2.6a1.6 1.6 0 0 1 0 3.2H10m0 0h3a1.2 1.2 0 0 1 0 2.3h-3"/></svg><span class="label">Formatted</span><kbd aria-hidden="true">f</kbd></button>
+      <button type="button" class="icon" data-toggle="numbered" aria-pressed="true" aria-label="Heading numbers" title="Heading numbers: each heading numbered as an outline, 1., 1.1., 2., counted over the whole file (#)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4h2v-2.5L2.3 2.3M1.6 9.2c0-.9 1.8-.9 1.8 0 0 .8-1.8 1.4-1.8 2.3h1.9M6.5 3h8M6.5 8h8M8.5 13h6"/></svg><span class="label">Heading numbers</span><kbd aria-hidden="true">#</kbd></button>
       <button type="button" class="icon" data-toggle="highlights" aria-pressed="true" aria-label="Change highlights" title="Change highlights: the background colour of changed words and lines; off, the text plain, the gutters still marking the changes (h)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="5" width="13" height="6" rx="1" class="fill soft"/><path d="M4 8h8"/></svg><span class="label">Change highlights</span><kbd aria-hidden="true">h</kbd></button>
       <button type="button" class="icon" data-toggle="formats" aria-pressed="false" aria-label="Formatting changes" title="Formatting changes: text of a document made bold, italic, underlined, ..., its words unchanged (m)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h4.2a2.6 2.6 0 0 1 0 5.2H4zM4 7.7h4.8a2.9 2.9 0 0 1 0 5.8H4z"/><path d="M11.5 11.5l1.5 1.5 2.5-3" /></svg><span class="label">Formatting changes</span><kbd aria-hidden="true">m</kbd></button>
       <span class="spacing item"><span class="spacing-icon" title="Space between paragraphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13M1.2 3.3 3 1.5l1.8 1.8M1.2 12.7 3 14.5l1.8-1.8M7 3h7.5M7 6.3h7.5M7 9.7h7.5M7 13h7.5"/></svg></span><span class="label">Paragraph spacing</span>
@@ -695,6 +728,14 @@ thead.print, .print-note { display: none; }
       <button type="button" class="zoom-value" data-zoom="0" aria-label="Zoom: 100%, click for 100%" title="Back to 100% (Ctrl+0)">100%</button>
       <button type="button" data-zoom="1" aria-label="Zoom in" title="Zoom in (Ctrl++, Ctrl+wheel)">+</button>
     </span></span>
+    </div>
+  </span>
+  <span class="menu">
+    <button type="button" class="menu-button save-button" aria-haspopup="true" aria-expanded="false" aria-controls="save-menu" title="Save: {% if ai_documents %}the documents with the AI's comments and fixes, and {% endif %}a copy of this report">Save<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <div class="menu-panel" id="save-menu" role="group" aria-label="Save" hidden>
+      {% for d in ai_documents %}<button type="button" class="item ai-download" data-document="{{ loop.index0 }}" title="{{ d.label }}, to download: {{ d.name }}"><span aria-hidden="true">⤓</span><span class="label">{{ "With AI fixes" if "_with_AI_fixes." in d.name else "Tracked changes" }} .{{ d.fmt }}</span></button>{% endfor %}
+      {% if ai_documents %}<hr>{% endif %}
+      <button type="button" class="item export-button" title="Export: save a copy of this report, an HTML file of its own, to keep or send; the choices made in it (in the download, resolved, fixes undone) kept in the copy"><span aria-hidden="true">⤓</span><span class="label">Report as HTML</span></button>
     </div>
   </span>
 </div>
@@ -748,7 +789,7 @@ thead.print, .print-note { display: none; }
 {% macro cells(f, r, side, spoken=none, sign="", plain=none) -%}
 {% set left = side == "left" %}{% set no, lang, label = r[side ~ "_no"], r[side ~ "_lang"], r[side ~ "_label"] %}{% set end = "moved-out" if left else "moved-in" %}{% set move = r.changes[0] if spoken is not none and r.kind == end and r.changes else "" %}
 <td class="no {{ "l" if left else "r" }}"{% if move %} data-move="{{ move | replace(", edited:", "") | capitalize }}"{% if ", edited:" in move %} data-move-edited{% endif %}{% endif %}>{{ gutter_flag(f, no, lang) }}{% if spoken is none %}{{ label or no }}{% else %}{{ (label or no) if no is not none else "" }}<span class="sign" aria-hidden="true">{{ sign }}</span>{% endif %}</td>
-{%- set hy = lang or f.language %}<td class="code {{ side }}"{% if lang and lang != f.language %} lang="{{ lang }}"{% endif %}>{% if spoken is not none and r.kind in spoken and no is not none %}<span class="sr">{{ spoken[r.kind] }}, {{ "old" if left else "new" }}: </span>{% endif %}{{ pv(r[side] | hyphenate(hy), plain[side] | hyphenate(hy) if plain else none) }}{% if move %}<span class="print-note" aria-hidden="true">{{ move | replace(", edited:", "") }}</span>{% endif %}</td>
+{%- set hy = lang or f.language %}{% set heading = f.headings[side].get(no) if no is not none else none %}<td class="code {{ side }}"{% if lang and lang != f.language %} lang="{{ lang }}"{% endif %}{% if heading %} data-hnum="{{ heading[0] }}" data-hlevel="{{ heading[1] }}"{% endif %}>{% if spoken is not none and r.kind in spoken and no is not none %}<span class="sr">{{ spoken[r.kind] }}, {{ "old" if left else "new" }}: </span>{% endif %}{{ pv(r[side] | hyphenate(hy), plain[side] | hyphenate(hy) if plain else none) }}{% if move %}<span class="print-note" aria-hidden="true">{{ move | replace(", edited:", "") }}</span>{% endif %}</td>
 {%- endmacro %}
 
 {# A count as the report shows it with moved passages (on) and without
@@ -788,7 +829,7 @@ thead.print, .print-note { display: none; }
    by render.set_apart). notes: a margin beside each file's rows,
    for the cards of its comments and of the problems the AI marked. #}
 {% macro report_body(c, split, other=none) %}
-{% set notes = (assessment and assessment.annotations and not assessment.error) or c.comments %}
+{% set notes = marks or c.comments %}
 {% set width = 5 if notes else 4 %}
 {% if not c.files %}
 <p class="summary">No differences between the two sides{% if paths %} in {{ paths | join(", ") }}{% endif %}.</p>
@@ -913,30 +954,33 @@ thead.print, .print-note { display: none; }
 
 {% endmacro %}
 
-{# An AI's assessment in its drawer: id, its title, and what to keep in
-   mind reading it. #}
-{% macro drawer(a, id, title, note) %}
-<aside class="drawer" id="{{ id }}" aria-labelledby="{{ id }}-title" hidden>
-  <div class="drawer-head"><h2 id="{{ id }}-title">{{ title }}</h2>
-    {% if a.verdict %}<span class="verdict verdict-{{ a.verdict }}">{{ a.verdict | capitalize }}</span>{% endif %}
-    <span class="role">by {{ a.title }}{% if a.how %}, {{ a.how }}{% endif %}{% if a.seconds %}, in {{ a.took }}{% endif %}{% if a.usage %}; {{ a.usage }}{% endif %}</span>
-    <button type="button" class="btn close" data-drawer="{{ id }}" aria-label="Close the {{ title }}">Close</button></div>
+{# The AI's checks in one drawer, a tab each (render.checks_of): what each
+   found, how it was asked, and what to keep in mind reading it; the marks
+   of all of them, for the script to find in the text. #}
+{% if checks %}
+<aside class="drawer" id="assessment" aria-labelledby="assessment-title" hidden>
+  <div class="drawer-head"><h2 id="assessment-title">{{ "AI " ~ checks[0].title | lower if checks | length == 1 else "AI checks" }}</h2>
+    {% if checks | length > 1 %}<span class="check-tabs" role="tablist" aria-label="Checks">{% for k in checks %}<button type="button" role="tab" id="tab-{{ k.id }}" data-check-tab="{{ k.id }}" aria-controls="check-{{ k.id }}" aria-selected="{{ "true" if loop.first else "false" }}">{{ k.title }}{% if k.a.error %} <span class="verdict verdict-failed">failed</span>{% elif k.a.verdict %} <span class="verdict verdict-{{ k.a.verdict }}">{{ k.a.verdict | capitalize }}</span>{% endif %}</button>{% endfor %}</span>{% endif %}
+    <button type="button" class="btn close" data-drawer="assessment" aria-label="Close the AI's checks">Close</button></div>
+  {% for k in checks %}{% set a = k.a %}
+  <section class="check-panel" id="check-{{ k.id }}" data-check="{{ k.id }}"{% if checks | length > 1 %} role="tabpanel" aria-labelledby="tab-{{ k.id }}"{% endif %}{% if not loop.first %} hidden{% endif %}>
+  <p class="role check-by">{% if checks | length == 1 and a.verdict %}<span class="verdict verdict-{{ a.verdict }}">{{ a.verdict | capitalize }}</span> {% endif %}by {{ a.title }}{% if a.how %}, {{ a.how }}{% endif %}{% if a.seconds %}, in {{ a.took }}{% endif %}{% if a.usage %}; {{ a.usage }}{% endif %}</p>
   {% if a.error %}
   <p class="assess-error">The assessment failed: {{ a.error }}</p>
   {% else %}
   <div class="assess-body">{{ a.html }}</div>
   {% if a.annotations %}
-  <p class="ai-pointer">It marked {{ a.annotations | length | counted("problem") }} in the text: ⚠ in the text, and in the margin beside it.</p>
-  <script type="application/json" id="ai-notes-data">{{ a.notes_json | tojson }}</script>
+  <p class="ai-pointer">It marked {{ a.annotations | length | counted("passage" if k.id != "assessment" else "problem") }} in the text: ⚠ in the text, and in the margin beside it.</p>
   {% endif %}
-  <p class="role assess-note">{{ note }}</p>
+  <p class="role assess-note">{{ k.note }}</p>
   {% endif %}
+  </section>{% endfor %}
+  {% if marks %}<script type="application/json" id="ai-notes-data">{{ marked.notes_json | tojson }}</script>{% endif %}
 </aside>
-{% endmacro %}
-{% if assessment %}{{ drawer(assessment, "assessment", "AI assessment", "Written by an AI: check it against the text.") }}{% endif %}
+{% endif %}
 {# the documents to download, saved by their buttons in the top bar #}
 {% for d in ai_documents %}<script type="application/octet-stream" class="ai-document" data-spec="{{ d.spec | tojson | forceescape }}">{{ d.base64 }}</script>
-{% endfor %}{% if writing %}{{ drawer(writing, "writing", "AI writing", "Written by an AI, and an indication, not a proof: careful writers show these signs too, and writers in a second language are often taken for an AI wrongly.") }}{% endif %}
+{% endfor %}
 <div id="review-head" aria-live="polite"><span class="which"></span><span class="where"></span><span class="spacer"></span>
   <button type="button" data-review-step="-1" title="Previous (k)">‹ Previous</button>
   <button type="button" class="next" data-review-step="1" title="Next (j)">Next ›</button></div>
@@ -952,13 +996,13 @@ thead.print, .print-note { display: none; }
 {{ report_body(c, split) }}
 {% endif %}
 
-{% if assessment and assessment.save_prompt and assessment.prompt %}
+{% set sent = checks | selectattr("a.save_prompt") | selectattr("a.prompt") | list %}
+{% if sent %}
 <details class="prompt-sent">
   <summary><h2>Text sent to the AI</h2>
     <span class="role">its system prompt and its message, exactly as sent</span></summary>
-  <pre class="prompt-text">{{ assessment.prompt_text() }}</pre>
-  {% if writing and writing.prompt %}<h3>For the AI writing</h3>
-  <pre class="prompt-text">{{ writing.prompt_text() }}</pre>{% endif %}
+  {% for k in sent %}{% if sent | length > 1 %}<h3>For {{ k.title }}</h3>{% endif %}
+  <pre class="prompt-text">{{ k.a.prompt_text() }}</pre>{% endfor %}
 </details>
 {% endif %}
 
@@ -966,8 +1010,13 @@ thead.print, .print-note { display: none; }
 </main>
 <div id="tip" role="tooltip" hidden></div>
 {% if ai_documents %}<script>{{ fflate }}</script>{% endif %}
+{# The choices made in the report, written in by Export HTML (null: none). #}
+<script type="application/json" id="report-choices">null</script>
 <script>
 (function () {
+  // The report as written, before this script changes it: what Export HTML
+  // saves from a browser (prosediff's window saves the file itself).
+  var SOURCE = "<!doctype html>\n" + document.documentElement.outerHTML;
   var changes = [];
   var counter = document.querySelector(".toolbar .counter");
   var current = -1;
@@ -1082,6 +1131,10 @@ thead.print, .print-note { display: none; }
       if (b !== button && !(panel && panel.id === b.getAttribute("aria-controls"))) setMenu(b, false);
     });
     if (button) setMenu(button, button.getAttribute("aria-expanded") !== "true");
+    // a file saved (Save's items): its menu closes, its work done
+    if (e.target.closest(".ai-download, .export-button")) {
+      openMenus().forEach(function (b) { setMenu(b, false); });
+    }
   });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
@@ -1094,7 +1147,8 @@ thead.print, .print-note { display: none; }
   // views off; a choice the
   // browser remembers wins.
   var VIEW_DEFAULT = { unified: false, formatted: true, formats: true,
-                       movelinks: false, passages: false, highlights: true, margin: true };
+                       movelinks: false, passages: false, highlights: true, margin: true,
+                       numbered: true };
   Object.keys(VIEW_DEFAULT).forEach(function (name) {
     var saved = stored(name);
     applyView(name, saved === null ? VIEW_DEFAULT[name] : saved === "1");
@@ -1211,6 +1265,7 @@ thead.print, .print-note { display: none; }
                  u: function () { toggle("unified"); }, f: function () { toggle("formatted"); },
                  m: function () { toggle("formats"); }, l: function () { toggle("movelinks"); },
                  v: function () { toggle("passages"); }, h: function () { toggle("highlights"); },
+                 "#": function () { toggle("numbered"); },
                  a: function () { goAiMark(1); }, A: function () { goAiMark(-1); },
                  c: function () { goComment(1); }, C: function () { goComment(-1); },
                  r: function () { setReview(!reviewing); },
@@ -1635,6 +1690,8 @@ thead.print, .print-note { display: none; }
   // The problems whose fix is undone (setFix), by index: the page shows the
   // original words in its place, and the documents leave it out.
   var unfixed = {};
+  // What a mark of each check is called on its card (assess.CHECK_LABELS).
+  var CHECK_NAMES = { writing: "AI writing", citations: "Citation check" };
   // Whether problem k has a fix to make or undo: applied on the page
   // (fixApplied), or a tracked change of its own in a document to download.
   var docFixes = null;
@@ -1671,6 +1728,7 @@ thead.print, .print-note { display: none; }
       // the file with the AI's fixes, the side says only whether the fix is
       // applied, which the card says itself
       button.appendChild(el("span", "when",
+        note.check ? CHECK_NAMES[note.check] || "AI" :
         note.side === "old" && !FIXES_SHOWN ? "AI, old version" : "AI"));
       // a problem that comes with a fix (the passage rewritten) says so
       if (note.replacement) button.appendChild(el("span", "fix-chip", "Fix"));
@@ -1922,6 +1980,17 @@ thead.print, .print-note { display: none; }
       b.setAttribute("aria-expanded", shown && !shown.hidden ? "true" : "false");
     });
   }
+  // The checks' tabs in the drawer: one shown at a time.
+  function showCheck(id) {
+    document.querySelectorAll(".check-panel").forEach(function (s) { s.hidden = s.dataset.check !== id; });
+    document.querySelectorAll("[data-check-tab]").forEach(function (b) {
+      b.setAttribute("aria-selected", b.dataset.checkTab === id ? "true" : "false");
+    });
+  }
+  document.addEventListener("click", function (e) {
+    var tab = e.target.closest && e.target.closest("[data-check-tab]");
+    if (tab) showCheck(tab.dataset.checkTab);
+  });
   document.addEventListener("click", function (e) {
     var b = e.target.closest("[data-drawer]");
     if (!b) return;
@@ -2096,7 +2165,10 @@ thead.print, .print-note { display: none; }
     var fixWanted = (document.querySelector(".filter-fix") || {}).value || "";
     var keepWanted = (document.querySelector(".filter-keep") || {}).value || "";
     var resolvedWanted = (document.querySelector(".filter-resolved") || {}).value || "";
-    return (!fixWanted || (fixWanted === "yes") === !!aiNotes[k].replacement) &&
+    var checkWanted = (document.querySelector(".filter-check") || {}).value;
+    return (checkWanted === undefined || checkWanted === "all" ||
+      checkWanted === (aiNotes[k].check || "")) &&
+      (!fixWanted || (fixWanted === "yes") === !!aiNotes[k].replacement) &&
       (!keepWanted || (keepWanted === "in") === !leftOut[k]) &&
       (!resolvedWanted || (resolvedWanted === "yes") === !!resolvedNotes[k]);
   }
@@ -2131,8 +2203,26 @@ thead.print, .print-note { display: none; }
       button.disabled = !open.length;
       button.textContent = "✓ Resolve fixes applied" + (open.length ? " (" + fmt(open.length) + ")" : "");
     }
+    var all = document.querySelector(".fixes-all");
+    if (all) {
+      var fixes = fixable(), made = fixes.filter(function (k) { return !unfixed[k]; });
+      all.hidden = !fixes.length;
+      all.textContent = made.length
+        ? "↶ Undo all fixes (" + fmt(made.length) + ")"
+        : "↷ Redo all fixes (" + fmt(fixes.length) + ")";
+    }
     document.dispatchEvent(new Event("prosediff-layout"));  // the cards placed again
   }
+  // The problems that come with a fix to make or undo, by index (as text).
+  function fixable() {
+    return aiNotes.map(function (note, k) { return String(k); }).filter(hasFix);
+  }
+  // Undo all fixes, while any is made; else Redo all of them.
+  document.addEventListener("click", function (e) {
+    if (!(e.target.closest && e.target.closest(".fixes-all"))) return;
+    var fixes = fixable(), made = fixes.filter(function (k) { return !unfixed[k]; });
+    (made.length ? made : fixes).forEach(function (k) { setFix(k, !made.length); });
+  });
   applyFilter();
   document.addEventListener("change", function (e) {
     if (e.target.closest && e.target.closest("#filter-menu select")) applyFilter();
@@ -2178,7 +2268,7 @@ thead.print, .print-note { display: none; }
   function countIncluded() {
     if (!aiNotes.length) return;
     var n = aiNotes.filter(function (note, k) { return !leftOut[k]; }).length;
-    document.querySelectorAll(".doc-button.ai-download").forEach(function (b) {
+    document.querySelectorAll(".ai-download").forEach(function (b) {
       if (!b.dataset.base) b.dataset.base = b.dataset.help || b.title;
       var text = b.dataset.base + " (" + fmt(n) + " of " + fmt(aiNotes.length) + " problems; " +
         "choose which, and which are resolved, on their cards or in Review)";
@@ -2421,6 +2511,28 @@ thead.print, .print-note { display: none; }
       else store("choices-" + reportId(), JSON.stringify(made));
     }, 200);
   }
+  // The choices an exported copy holds (Export HTML): those it opens with
+  // when neither the browser nor the window kept any of its own.
+  function writtenChoices() {
+    try { return JSON.parse(document.getElementById("report-choices").textContent); } catch (e) { return null; }
+  }
+  // Export HTML: a copy of the report, the choices made in it written in;
+  // in prosediff's window, saved where the window asks, else downloaded.
+  document.querySelector(".export-button").addEventListener("click", function () {
+    var made = aiNotes.length ? choicesNow() : null;
+    if (IN_APP) { app(function (api) { api.export_report(made); }); return; }
+    // "<" escaped: no closing script tag in the words can end the element
+    var json = JSON.stringify(made).replace(/</g, "\\u003c");
+    var html = SOURCE.replace(
+      /(<script type="application\/json" id="report-choices">)[\s\S]*?(<\/script>)/,
+      function (all, open, close) { return open + json + close; });
+    var a = el("a");
+    a.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    a.download = decodeURIComponent(location.pathname.split("/").pop()) || "report.html";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); remove(a); }, 1000);
+  });
   function restoreChoices(made) {
     if (!made || typeof made !== "object") return;
     var has = function (list, key) { return Array.isArray(list) && list.indexOf(key) >= 0; };
@@ -2538,13 +2650,13 @@ thead.print, .print-note { display: none; }
       reviewList.appendChild(b);
       return b;
     }
-    var buttons = document.querySelectorAll(".verdict-button");
-    if (buttons.length) {
-      reviewList.appendChild(el("h3", null, buttons.length > 1 ? "AI assessments" : "AI assessment"));
-      buttons.forEach(function (b) {
-        var verdict = b.querySelector(".verdict");
-        add({ kind: "assessment", id: b.dataset.drawer }, "",
-          b.querySelector(".role").textContent + (verdict ? ": " + verdict.textContent : ""));
+    var panels = document.querySelectorAll(".check-panel");
+    if (panels.length) {
+      reviewList.appendChild(el("h3", null, panels.length > 1 ? "AI checks" : "AI assessment"));
+      panels.forEach(function (s) {
+        var tab = document.querySelector('[data-check-tab="' + s.dataset.check + '"]');
+        var name = tab ? tab.textContent : document.getElementById("assessment-title").textContent;
+        add({ kind: "assessment", id: s.dataset.check, name: name }, "", name);
       });
     }
     var rows = Array.prototype.slice.call(root.querySelectorAll("tr.first-change"));
@@ -2595,8 +2707,9 @@ thead.print, .print-note { display: none; }
     clearReview();
     var which = reviewHead.querySelector(".which"), where = reviewHead.querySelector(".where");
     if (item.kind === "assessment") {
-      setDrawer(true, item.id);
-      which.textContent = item.id === "writing" ? "AI writing" : "AI assessment";
+      setDrawer(true, "assessment");
+      showCheck(item.id);
+      which.textContent = item.name;
       where.textContent = "";
       return;
     }
@@ -3065,12 +3178,14 @@ thead.print, .print-note { display: none; }
     var api = appApi();
     if (!api || IN_APP) return;
     IN_APP = true;
-    if (aiNotes.length) api.choices().then(restoreChoices);
+    if (aiNotes.length) api.choices().then(function (made) { restoreChoices(made || writtenChoices()); });
     var saved = ZOOMS.indexOf(Number(stored("zoom")));
     if (zoomApi()) setZoom(saved < 0 ? ZOOM_DEFAULT : saved);
   }
   if (aiNotes.length && !appApi()) {
-    try { restoreChoices(JSON.parse(stored("choices-" + reportId()))); } catch (e) {}
+    var kept = null;
+    try { kept = JSON.parse(stored("choices-" + reportId())); } catch (e) {}
+    restoreChoices(kept || writtenChoices());
   }
   inApp();
   window.addEventListener("pywebviewready", inApp);

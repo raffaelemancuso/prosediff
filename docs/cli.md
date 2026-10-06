@@ -60,12 +60,15 @@ or named by `GIT_PYTHON_GIT_EXECUTABLE`.
 | `--assess-file FILE` | another file sent to the AI as context, to draw on, not to assess (PDF, Word, OpenDocument, Markdown or text); repeat it for several |
 | `--assess-prompt TEXT` | a prompt in place of prosediff's own for the assessment (or the review of one file), or a text file holding it; keep its `## Verdict` section |
 | `--assess-writing-prompt TEXT` | the same for `--assess-ai-writing` |
+| `--assess-citations-prompt TEXT` | the same for `--assess-citations` |
 | `--assess-author NAME` | who the AI's comments and fixes in the Word and OpenDocument documents are by (default: the AI and its model) |
 | `--assess-edits`, `--no-assess-edits` | let the AI edit the text: each fix a rewording of the passage, a tracked change in the documents and, reviewing one file, shown as a diff (default: on); off, it only marks the problems and says what to do |
 | `--assess-annotate`, `--no-assess-annotate` | have the AI mark each problem in the text, with what is wrong and a proposed change (default: on) |
 | `--assess-documents`, `--no-assess-documents` | offer Word or OpenDocument files with the AI's comments and fixes for download (default: on; see [details](ai_assessment.md#the-ais-problems-in-word-and-libreoffice-documents)) |
 | `--assess-save-prompt`     | also include the exact prompt sent to the model in the report (off by default) |
 | `--assess-ai-writing`      | also ask whether the added text (with `--review`, the file) reads as AI-written (off by default); an indication, not proof |
+| `--assess-citations` | also check, apart, the citations the changes added (with `--review`, every citation of the file): whether the reference list holds each (in the document, or in a `--assess-file`), whether it fits what it is cited for as far as the AI knows the source, whether it looks mistaken or invented; each marked in the text (off by default). From what the AI knows of the sources, not their text |
+| `--assess-general`, `--no-assess-general` | the general assessment of the changes (with `--review`, of the file) (default: on); off, only the other checks asked for are made, and at least one must be |
 | `--assess-mark-ai-writing` | with `--assess-ai-writing`, that same assessment also marks each passage that reads as AI-written, shown with the problems and as comments in the documents: comparing, only text the changes added; with `--review`, any passage |
 | `--assess-timeout SECONDS` | give up on the assessment after this long (default 900); the report is still written |
 | `--list-models AI`         | list the models an AI offers (`claude`, `codex`, `ollama`, or any provider any-llm reaches), default first, with the efforts each supports |

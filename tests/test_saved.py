@@ -47,11 +47,11 @@ def test_the_answers_kept_and_the_report_made_again_without_the_ai(tmp_path, mon
         pytest.fail("the AI was asked again")
 
     monkeypatch.setattr(assess_module, "run_backend", no_ai)
-    again, assessment, writing = load(kept)
-    assert (again.mode, again.request.effort, writing) == ("files", "high", None)
+    again, assessment, writing, citations = load(kept)
+    assert (again.mode, again.request.effort, writing, citations) == ("files", "high", None, None)
     assert again.options == run.options
     done.path.unlink()
-    remade = execute(again, saved=(assessment, writing))
+    remade = execute(again, saved=(assessment, writing, citations))
     page = remade.path.read_text(encoding="utf-8")
     assert "verdict-improves" in page and remade.saved is None
 
@@ -138,7 +138,7 @@ def test_a_project_holds_the_settings_and_the_report_to_make_again(tmp_path, mon
     assert settings == {"mode": "files", "old": "a.md"}
     assert report["assessment"]["markdown"].startswith("## Verdict")
     monkeypatch.setattr(assess_module, "run_backend", lambda *a: pytest.fail("asked"))
-    run, assessment, _ = load(project)
+    run, assessment, *_ = load(project)
     assert run.new == str(new.resolve()) and assessment.verdict == "improves"
     out = tmp_path / "again.html"
     assert main(["--rebuild", str(project), "-o", str(out)]) == 0

@@ -40,7 +40,7 @@ from docx.oxml.ns import qn
 from docx.text.run import Run
 from lxml import etree
 
-from prosediff.assess import REACH, TYPOGRAPHIC, Annotation, Assessment
+from prosediff.assess import CHECK_LABELS, REACH, TYPOGRAPHIC, Annotation, Assessment
 from prosediff.comments import ANY_PLACEHOLDER
 from prosediff.diff import Comparison, FileDiff, word_ops
 from prosediff.document import STRONG, spaced
@@ -723,9 +723,11 @@ def comment_text(note: Annotation, fixed: bool) -> list[str]:
     fix is in the text as a tracked change, a heading saying it is applied
     before them and what to do with it after."""
     proposed = [f"Proposed: {note.solution}"] if note.solution else []
+    # a mark of a check other than the general assessment says which
+    problem = f"{CHECK_LABELS[note.check]}: {note.problem}" if note.check else note.problem
     if not fixed:
-        return [note.problem, *proposed]
-    return [FIX_APPLIED, note.problem, *proposed, FIX_APPLIED_HOW]
+        return [problem, *proposed]
+    return [FIX_APPLIED, problem, *proposed, FIX_APPLIED_HOW]
 
 
 def summary(assessment: Assessment, fixes: bool) -> list[str]:

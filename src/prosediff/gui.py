@@ -214,12 +214,15 @@ class Settings:
     assess_send_files: bool = False
     assess_files: str = ""
     # the prompts in place of prosediff's own (text, or a file; "":
-    # prosediff's): for two versions compared, for one file reviewed, and for
-    # whether the new text reads as written by an AI
+    # prosediff's): for two versions compared, for one file reviewed, for
+    # whether the new text reads as written by an AI, and for the check of
+    # the citations, each of two versions and of one file
     assess_prompt: str = ""
     assess_review_prompt: str = ""
     assess_writing_prompt: str = ""
     assess_review_writing_prompt: str = ""
+    assess_citations_prompt: str = ""
+    assess_review_citations_prompt: str = ""
     # who the AI's comments in the documents are by; "": the AI and its model
     assess_author: str = ""
     assess_save_prompt: bool = False
@@ -232,9 +235,12 @@ class Settings:
     # whether the report is first shown without the assessment, and the AI
     # asked only once that preview is approved
     assess_preview: bool = True
-    # whether the AI is also asked, apart, if the new text reads as written by
-    # an AI
+    # the AI's checks, each a call of its own (pipeline.Run.checks): its
+    # general assessment; whether the new text reads as written by an AI;
+    # the citations the changes added
+    assess_general: bool = True
     assess_ai_writing: bool = False
+    assess_citations: bool = False
     # whether that assessment also marks the passages that read so (comparing,
     # only new text): off while it is not asked
     assess_mark_ai_writing: bool = False
@@ -418,13 +424,21 @@ def run_of(s: Settings) -> Run:
     request = request_of(s)
     if request and s.mode == "review":
         request = replace(
-            request, system=s.assess_review_prompt, writing_system=s.assess_review_writing_prompt
+            request,
+            system=s.assess_review_prompt,
+            writing_system=s.assess_review_writing_prompt,
+            citations_system=s.assess_review_citations_prompt,
         )
+    if request and not (s.assess_general or s.assess_ai_writing or s.assess_citations):
+        raise ValueError("choose at least one of the AI's checks")
     common = {
         "options": options,
         "align": s.align,
         "request": request,
         "documents": s.assess_documents,
+        "ai_writing": s.assess_ai_writing,
+        "general": s.assess_general,
+        "citations": s.assess_citations,
     }
     if s.mode == "review":
         if not s.single:
@@ -432,7 +446,7 @@ def run_of(s: Settings) -> Run:
         if not s.assess:
             raise ValueError("choose an AI to review the file")
         out = Path(with_format(s.output, "html")) if s.output else page_of("review", s.single, "")
-        return Run("review", s.single, out, ai_writing=s.assess_ai_writing, **common)
+        return Run("review", s.single, out, **common)
     old, new = sides(s)
     fmt = s.output_format if s.output_format in FORMATS else "html"
     split = s.split if s.split in SPLITS else default_split(fmt)
@@ -458,7 +472,6 @@ def run_of(s: Settings) -> Run:
         paths=s.paths or None,
         fmt=fmt,
         split=split,
-        ai_writing=s.assess_ai_writing,
         **common,
     )
     if s.mode == "git":
@@ -484,8 +497,8 @@ class JobResult:
     assessment: Assessment | None = None
     # the name of the file reviewed alone, "" for a comparison
     reviewed: str = ""
-    # why the AI-writing assessment failed ("": it did not, or was not asked)
-    writing_error: str = ""
+    # the other checks that failed, each what it is and why
+    check_errors: tuple[tuple[str, str], ...] = ()
     # where the AI's answers were kept (NAME.ai.json), for a project; "": none
     saved: str = ""
 
@@ -525,10 +538,10 @@ def rebuild_run(s: Settings, messages):
     says, else over the report they were saved beside."""
     from prosediff.saved import load
 
-    run, assessment, writing = load(s.rebuild_file.strip())
+    run, *answers = load(s.rebuild_file.strip())
     if s.output.strip():
         run = replace(run, output=Path(with_format(s.output.strip(), "html")))
-    return run, (assessment, writing)
+    return run, tuple(answers)
 
 
 def run_job(s: Settings, messages, replies) -> None:
@@ -570,7 +583,14 @@ def run_job(s: Settings, messages, replies) -> None:
         counts.deletions,
         done.assessment,
         c.repo_name if c.single else "",
-        (done.writing.error or "") if done.writing is not None else "",
+        tuple(
+            (name, a.error)
+            for name, a in (
+                ("AI-writing assessment", done.writing),
+                ("check of the citations", done.citations),
+            )
+            if a is not None and a.error
+        ),
         str(done.saved) if done.saved else "",
     )
     messages.put(("done", result))
@@ -631,7 +651,9 @@ AI_SWITCHES = (
     "assess_send_files",
     "assess_preview",
     "assess_annotate",
+    "assess_general",
     "assess_ai_writing",
+    "assess_citations",
     "assess_mark_ai_writing",
     "assess_edits",
     "assess_save_prompt",
@@ -818,8 +840,14 @@ class App:
             disabled.update(("assess_model", "assess_effort"))
         for name in AI_SWITCHES:
             on = active
-            if name == "assess_documents":  # made of the problems marked in the text
-                on = on and v["assess_annotate"]
+            if name == "assess_documents":  # made of the passages marked in the text
+                on = on and (
+                    (v["assess_general"] and v["assess_annotate"])
+                    or (v["assess_ai_writing"] and v["assess_mark_ai_writing"])
+                    or v["assess_citations"]
+                )
+            if name in ("assess_annotate", "assess_edits"):  # the general assessment's
+                on = on and v["assess_general"]
             if name == "assess_mark_ai_writing":  # marked as that assessment is asked
                 on = on and v["assess_ai_writing"]
             if name in CHANGES_ONLY:
@@ -1290,6 +1318,11 @@ class App:
                     "assess_review_writing_prompt",
                     "writing",
                 ),
+                (
+                    "prosediff's prompt, for checking the file's citations",
+                    "assess_review_citations_prompt",
+                    "citations",
+                ),
             ]
         else:
             prompts = [
@@ -1298,6 +1331,11 @@ class App:
                     "prosediff's prompt, for whether the new text reads as AI-written",
                     "assess_writing_prompt",
                     "writing",
+                ),
+                (
+                    "prosediff's prompt, for checking the new citations",
+                    "assess_citations_prompt",
+                    "citations",
                 ),
             ]
         # the instructions last, with no default to restore
@@ -1794,8 +1832,8 @@ class App:
         self.status = f"{summary}: {path.name}"
         if assessment is not None and assessment.error:
             self.ui.alert("warning", f"The AI assessment failed: {assessment.error}")
-        if result.writing_error:
-            self.ui.alert("warning", f"The AI-writing assessment failed: {result.writing_error}")
+        for name, error in result.check_errors:
+            self.ui.alert("warning", f"The {name} failed: {error}")
         self.ui.toast(f"{summary}\n{path.name}")
         if s.open_page:
             if path.suffix.lower() == ".html":
@@ -2126,6 +2164,21 @@ class WindowApi:
             window.move(window.x, int(y))
 
 
+# Where a report holds the choices made in it, written in by Export HTML.
+CHOICES_ELEMENT = re.compile(
+    r'(<script type="application/json" id="report-choices">).*?(</script>)', re.S
+)
+
+
+def with_choices(html: str, made: dict | None) -> str:
+    """A report's HTML with the choices made in it written in, for its copy
+    to open with them; as it is when it has no place for them (a report of
+    an earlier prosediff). "<" escaped: the words of a problem cannot end
+    the element."""
+    text = json.dumps(made, ensure_ascii=False).replace("<", "\\u003c")
+    return CHOICES_ELEMENT.sub(lambda m: m[1] + text + m[2], html, count=1)
+
+
 class ReportApi:
     """A report's calls into Python, in its window: the choices made in it,
     kept for the project, the documents to download saved, and the window
@@ -2152,6 +2205,31 @@ class ReportApi:
         except (TypeError, ValueError):
             return False
         return self._ui.zoom_report(factor)
+
+    def export_report(self, made: dict | None) -> str:
+        """Export HTML: a copy of the report saved where asked, beside it at
+        first, the choices made in it written in (with_choices); where it
+        went ("": not saved)."""
+        name = self._path.name
+        chosen = self._ui.ask_save(
+            "Export the report",
+            ["HTML report (*.html)"],
+            str(self._path.parent),
+            name,
+            self._ui.report,
+        )
+        if not chosen:
+            return ""
+        try:
+            html = with_choices(self._path.read_text(encoding="utf-8"), made)
+            Path(chosen).write_text(html, encoding="utf-8", newline="")
+        except OSError as e:
+            self._ui.alert("error", f"{Path(chosen).name} was not saved: {e}")
+            return ""
+        with self._app.lock:
+            self._app.status = f"Exported: {chosen}"
+        self._app.render()
+        return chosen
 
     def save_document(self, name: str, data: str) -> str:
         """A document to download saved where asked, beside the report at

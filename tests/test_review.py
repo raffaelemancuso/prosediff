@@ -17,6 +17,7 @@ from helpers import (
     lines,
     odt_file,
     revisions,
+    task_of,
     word_file,
 )
 
@@ -26,6 +27,7 @@ from prosediff.assess import (
     ANNOTATE,
     ANNOTATE_REVIEW,
     DOCUMENTS,
+    SHARED,
     SYSTEM_REVIEW,
     SYSTEM_WRITING_REVIEW,
     Assessment,
@@ -87,7 +89,8 @@ def test_the_ai_is_sent_the_file_to_review(tmp_path, monkeypatch):
     c = review_file(document(tmp_path, "docx", comment=True), Options())
     a = assess_comparison(c, AssessRequest("claude", instructions="The journal is Nature."))
     ((_, system, prompt, *_),) = runner.asked
-    assert system == SYSTEM_REVIEW + DOCUMENTS + ANNOTATE_REVIEW
+    assert system == SHARED + DOCUMENTS
+    assert task_of(prompt) == (SYSTEM_REVIEW + ANNOTATE_REVIEW).strip()
     assert '"side"' not in ANNOTATE_REVIEW and '"side"' in ANNOTATE
     assert prompt.startswith("The document to review, paper.docx:\n\n<document>\n# Introduction")
     assert "{>>Anna Rossi" in prompt and "Say how large.<<}We find a large" in prompt
@@ -96,7 +99,8 @@ def test_the_ai_is_sent_the_file_to_review(tmp_path, monkeypatch):
     assert [n.replacement for n in a.annotations] == ["a small and significant effect."]
     # whether it reads as written by an AI: the file whole, nothing marked
     w = assess_comparison(c, AssessRequest("claude"), kind="writing")
-    assert runner.asked[-1][1] == SYSTEM_WRITING_REVIEW + DOCUMENTS
+    assert runner.asked[-1][1] == SHARED + DOCUMENTS
+    assert task_of(runner.asked[-1][2]) == SYSTEM_WRITING_REVIEW
     assert w.kind == "writing" and w.annotations == []
 
 
@@ -119,7 +123,7 @@ def test_the_report_shows_one_side(tmp_path):
     assert '<table class="single prose notes-on"' in html
     assert 'td class="code left"' not in html and html.count('td class="code right"') == len(NEW)
     assert '<span class="verdict verdict-fair">Fair</span>' in html
-    assert "what the AI made of the document as a whole" in html
+    assert "The AI's checks: Review: Fair." in html  # the chip's tooltip
     assert 'data-toggle="unified"' not in html and "Base (older)" not in html
     assert "Reviewed whole:</b> 8 paragraphs" in html
 
@@ -149,7 +153,7 @@ def test_the_file_comes_back_with_the_ais_fixes(tmp_path, fmt):
     html = render(c, assessment=a)
     assert html.count('class="ai-document"') == 1
     # its button in the top bar, which saves it at once (no drawer)
-    assert html.count('class="doc-button ai-download"') == 1 and f"With AI fixes .{fmt}" in html
+    assert html.count('class="item ai-download"') == 1 and f"With AI fixes .{fmt}" in html
     assert 'id="documents"' not in html
     data = re.search(r'class="ai-document"[^>]*>([^<]+)<', html)[1]
     assert base64.b64decode(data)[:2] == b"PK"  # a zip: made anew, its dates the time's
@@ -243,8 +247,8 @@ def test_no_text_edits(tmp_path, monkeypatch):
     runner = fake(REVIEW)
     monkeypatch.setattr(assess_module, "run_backend", runner)
     assert main(["--review", str(path), "--assess", "claude", "--no-assess-edits"]) == 0
-    system = runner.asked[0][1]
-    assert '"replacement"' not in system and "You may not edit the text" in system
+    task = task_of(runner.asked[0][2])
+    assert '"replacement"' not in task and "You may not edit the text" in task
     html = (tmp_path / "paper_review.html").read_text(encoding="utf-8")
     assert '<span class="role">Reviewed</span>' in html
     assert '"replacement": ""' in html and "a small and significant" not in html

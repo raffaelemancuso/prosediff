@@ -7,13 +7,14 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from helpers import ANSWER, fake, two_files
+from helpers import ANSWER, fake, task_of, two_files
 
 from prosediff import assess as assess_module
 from prosediff import compare_paths, render
 from prosediff.assess import (
     ANNOTATE,
     MAX_DIFF_CHARS,
+    SHARED,
     SYSTEM,
     SYSTEM_REVIEW,
     SYSTEM_WRITING,
@@ -60,8 +61,10 @@ def test_the_model_is_sent_what_the_request_says(tmp_path):
     request = AssessRequest("claude/opus", effort="high", context="changes", timeout=60)
     a = assess_comparison_with(c, request, runner)
     ((backend, system, prompt, model, effort, timeout),) = runner.asked
-    # the problems to be marked in the text, by default
-    assert system == SYSTEM + ANNOTATE
+    # one system prompt for every check, the material, then the check's
+    # task, last; the problems to be marked in the text, by default
+    assert system == SHARED and prompt.index("<diff>") < prompt.index("<task>")
+    assert task_of(prompt) == (SYSTEM + ANNOTATE).strip()
     assert (backend, model, effort, timeout) == ("claude", "opus", "high", 60)
     assert "One {+changed +}line." in prompt and "Kept." not in prompt
     assert "<document>" not in prompt and "<instructions>" not in prompt
@@ -123,7 +126,7 @@ def test_the_problems_marked_in_the_text(tmp_path):
     assert "```" not in a.markdown
     runner = fake(MARKED)
     plain = assess_comparison_with(c, AssessRequest("claude", annotate=False), runner)
-    assert runner.asked[0][1] == SYSTEM and plain.annotations == []
+    assert task_of(runner.asked[0][2]) == SYSTEM and plain.annotations == []
     assert "```json" in plain.markdown
 
 
@@ -152,9 +155,9 @@ def test_prompts_in_place_of_prosediffs(tmp_path):
     for kind in ("value", "review", "writing"):
         runner = fake()
         assess("[-a-]{+b+}", "x", request, document="b", runner=runner, kind=kind)
-        sent[kind] = runner.asked[0][1]
+        sent[kind] = task_of(runner.asked[0][2])
     assert sent["value"].startswith("Judge the changes harshly.")
-    assert sent["value"].endswith(ANNOTATE)
+    assert sent["value"].endswith(ANNOTATE.strip())
     assert sent["review"].startswith("Judge the changes harshly.")
     assert sent["writing"] == "Spot the AI."
     for kind, default in (
@@ -164,7 +167,7 @@ def test_prompts_in_place_of_prosediffs(tmp_path):
     ):
         runner = fake()
         assess("[-a-]{+b+}", "x", AssessRequest("claude"), document="b", runner=runner, kind=kind)
-        assert runner.asked[0][1].startswith(default)
+        assert task_of(runner.asked[0][2]).startswith(default)
 
 
 def test_ai_writing_of_one_file_alone(tmp_path, monkeypatch):
@@ -179,13 +182,13 @@ def test_ai_writing_of_one_file_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(assess_module, "run_backend", runner)
     made = assess_comparison(comparison, AssessRequest("claude"), kind="writing")
     (_, system, prompt, *_) = runner.asked[0]
-    assert system == SYSTEM_WRITING_REVIEW
+    assert system == SHARED and task_of(prompt) == SYSTEM_WRITING_REVIEW
     assert "<document>\nWe delve into the pivotal landscape.\n</document>" in prompt
     assert (made.kind, made.verdict, made.annotations) == ("writing", "possibly", [])
     runner = fake(answer)
     own = AssessRequest("claude", writing_system="Spot the AI.")
     assess("", "x", own, document="text", runner=runner, kind="writing", single=True)
-    assert runner.asked[0][1] == "Spot the AI."
+    assert task_of(runner.asked[0][2]) == "Spot the AI."
 
 
 def test_the_new_version_of_every_file(tmp_path):
@@ -313,7 +316,7 @@ def test_cli_assess_writes_the_report(tmp_path, monkeypatch, capsys):
         "r.ai.json",
         "r.html",
     ]
-    assert "assessment (improves), at the top of the HTML report" in capsys.readouterr().out
+    assert "assessment (improves), in the HTML report" in capsys.readouterr().out
     assert main([*args, "--assess-context", "changes"]) == 0
     assert "<document>" not in runner.asked[1][2]
     assert "Text sent to the AI" not in out.read_text(encoding="utf-8")
@@ -419,8 +422,8 @@ def test_word_files_come_with_the_notation_explained(tmp_path, monkeypatch):
     old, new = two_files(tmp_path, "One.\n", "Two.\n")
     assess_comparison(compare_paths(old, new), AssessRequest("claude", annotate=False))
     (word_system, text_system) = [asked[1] for asked in runner.asked]
-    assert word_system == SYSTEM + DOCUMENTS and "Heading 2 style" in DOCUMENTS
-    assert text_system == SYSTEM
+    assert word_system == SHARED + DOCUMENTS and "Heading 2 style" in DOCUMENTS
+    assert text_system == SHARED
 
 
 def test_the_ai_is_asked_apart_whether_the_new_text_reads_as_ai_written(tmp_path, monkeypatch):
@@ -438,13 +441,16 @@ def test_the_ai_is_asked_apart_whether_the_new_text_reads_as_ai_written(tmp_path
     request = AssessRequest("claude")
     writing = assess_comparison(c, request, kind="writing")
     ((_, system, prompt, *_),) = runner.asked
-    assert system.startswith(SYSTEM_WRITING) and "circumstantial" in SYSTEM_WRITING
+    assert system == SHARED
+    assert task_of(prompt) == SYSTEM_WRITING and "circumstantial" in SYSTEM_WRITING
     assert "One {+pivotal +}line." in prompt
     assert writing.kind == "writing" and writing.verdict == "possibly"
     assert writing.annotations == []
     html = render(c, assessment=Assessment("claude", ANSWER), writing=writing)
-    assert 'data-drawer="writing"' in html and '<aside class="drawer" id="writing"' in html
-    assert '<span class="verdict verdict-possibly">Possibly</span>' in html
+    # one chip for both, one drawer, a tab each
+    assert html.count('class="verdict-button"') == 1
+    assert 'data-check-tab="writing"' in html and 'id="check-writing"' in html
+    assert '<span class="vlabel">AI writing</span> Possibly</span>' in html
     assert "an indication, not a proof" in html
 
 
@@ -452,14 +458,9 @@ def test_the_ai_written_passages_marked_in_the_same_assessment(tmp_path, monkeyp
     """Asked to, the AI-writing assessment also marks the passages that read
     as written by an AI, in the same answer: comparing, those of the new
     text, any passage of a file reviewed alone; each on the new side, no
-    fix. Shown after the problems, saying what it is, in the report and the
-    documents alike (marked_writing); not without the question asked."""
-    from prosediff.assess import (
-        AI_WRITTEN,
-        ANNOTATE_WRITING,
-        ANNOTATE_WRITING_REVIEW,
-        marked_writing,
-    )
+    fix, its check named. Shown after the problems in the report and the
+    documents alike (with_checks); not without the question asked."""
+    from prosediff.assess import ANNOTATE_WRITING, ANNOTATE_WRITING_REVIEW, with_checks
     from prosediff.pipeline import request_of
 
     marks = (
@@ -471,29 +472,219 @@ def test_the_ai_written_passages_marked_in_the_same_assessment(tmp_path, monkeyp
     old, new = two_files(tmp_path, "One line.\n", "One pivotal line.\n")
     c = compare_paths(old, new)
     writing = assess_comparison(c, AssessRequest("claude", mark_writing=True), kind="writing")
-    assert runner.asked[0][1] == SYSTEM_WRITING + ANNOTATE_WRITING
+    assert task_of(runner.asked[0][2]) == (SYSTEM_WRITING + ANNOTATE_WRITING).strip()
     assert writing.annotations == [
-        Annotation("new", "One pivotal line.", "One pivotal line.", "Stock wording.")
+        Annotation(
+            "new", "One pivotal line.", "One pivotal line.", "Stock wording.", check="writing"
+        )
     ]
     assert "```" not in writing.markdown
     review = review_file(new)
     assess_comparison(review, AssessRequest("claude", mark_writing=True), kind="writing")
-    assert runner.asked[-1][1] == SYSTEM_WRITING_REVIEW + ANNOTATE_WRITING_REVIEW
+    assert task_of(runner.asked[-1][2]) == (SYSTEM_WRITING_REVIEW + ANNOTATE_WRITING_REVIEW).strip()
     # with the problems, after them
     a = Assessment("claude", ANSWER, annotations=[Annotation("new", "One", "line.", "Vague.")])
-    shown = marked_writing(a, writing)
-    assert [n.problem for n in shown.annotations] == ["Vague.", AI_WRITTEN + "Stock wording."]
-    assert marked_writing(a, replace(writing, error="timed out")) is a
-    assert marked_writing(None, writing) is None
-    html = render(c, assessment=shown, writing=writing)
-    assert "Reads as written by an AI: Stock wording." in html
+    shown = with_checks(a, writing)
+    assert [(n.problem, n.check) for n in shown.annotations] == [
+        ("Vague.", ""),
+        ("Stock wording.", "writing"),
+    ]
+    assert with_checks(a, replace(writing, error="timed out")) is a
+    # no general assessment: the marks of the check alone
+    assert [n.problem for n in with_checks(None, writing).annotations] == ["Stock wording."]
+    assert with_checks(None, replace(writing, error="timed out")) is None
+    html = render(c, assessment=a, writing=writing)
+    assert '"check": "writing"' in html and "Stock wording." in html
     # asked only with the question of AI writing
     args = SimpleNamespace(
         assess="claude", assess_effort="", assess_context="document", assess_instructions="",
         assess_timeout=60, assess_save_prompt=False, assess_annotate=True, assess_author="",
         assess_prompt="", assess_writing_prompt="", assess_edits=True, assess_files=(),
-        assess_ai_writing=False, assess_mark_ai_writing=True,
+        assess_ai_writing=False, assess_mark_ai_writing=True, assess_citations_prompt="",
     )  # fmt: skip
     assert not request_of(args).mark_writing
     args.assess_ai_writing = True
     assert request_of(args).mark_writing
+
+
+def test_the_new_citations_checked_apart(tmp_path, monkeypatch):
+    """The check of the citations: its own prompt, the new citations of the
+    changes (every citation of a file reviewed alone), each marked with what
+    was found and what to do, named as the citations' check; its verdict
+    none, sound, doubtful or problems."""
+    from prosediff.assess import (
+        ANNOTATE_CITATIONS,
+        ANNOTATE_CITATIONS_REVIEW,
+        SYSTEM_CITATIONS,
+        SYSTEM_CITATIONS_REVIEW,
+    )
+
+    answer = (
+        "## Verdict\n**Doubtful**: one is not in the list.\n\n## New citations\n- x\n\n"
+        '```json\n[{"start": "Growth rose (Rossi, 2021).", "end": "Growth rose (Rossi, 2021).", '
+        '"problem": "Rossi (2021): not in the reference list.", '
+        '"solution": "Add it to the list.", "replacement": "ignored"}]\n```'
+    )
+    runner = fake(answer)
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    old, new = two_files(tmp_path, "Growth rose.\n", "Growth rose (Rossi, 2021).\n")
+    c = compare_paths(old, new)
+    made = assess_comparison(c, AssessRequest("claude"), kind="citations")
+    assert task_of(runner.asked[0][2]) == (SYSTEM_CITATIONS + ANNOTATE_CITATIONS).strip()
+    assert "never claim to have read a source" in SYSTEM_CITATIONS
+    assert made.kind == "citations" and made.verdict == "doubtful"
+    assert made.annotations == [
+        Annotation(
+            "new",
+            "Growth rose (Rossi, 2021).",
+            "Growth rose (Rossi, 2021).",
+            "Rossi (2021): not in the reference list.",
+            "Add it to the list.",
+            check="citations",
+        )
+    ]
+    own = AssessRequest("claude", citations_system="Check the references.")
+    assess_comparison(c, own, kind="citations")
+    assert task_of(runner.asked[-1][2]) == ("Check the references." + ANNOTATE_CITATIONS).strip()
+    assess_comparison(review_file(new), AssessRequest("claude"), kind="citations")
+    assert (
+        task_of(runner.asked[-1][2])
+        == (SYSTEM_CITATIONS_REVIEW + ANNOTATE_CITATIONS_REVIEW).strip()
+    )
+    assert "## Citations with a problem" in SYSTEM_CITATIONS_REVIEW
+
+
+def test_the_checks_asked_together_and_shown_in_one_drawer(tmp_path, monkeypatch):
+    """The checks a run asks for, each a call of its own: without the
+    general assessment, the others alone; in the report, one chip, a tab
+    each in one drawer, the marks of all of them in the text, a Check
+    filter among the problems; kept with the answers, and made again."""
+    from prosediff.pipeline import Run, execute
+    from prosediff.saved import load
+
+    def answer(system, prompt):
+        if task_of(prompt).startswith("You are an experienced editor and fact-checker"):
+            return (
+                "## Verdict\n**Sound**: fine.\n\n"
+                '```json\n[{"start": "Growth rose", "end": "2021).", "problem": "Rossi (2021): '
+                'in the list.", "solution": ""}]\n```'
+            )
+        return "## Verdict\n**Unlikely**: plain."
+
+    runner = fake(answer)
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    old, new = two_files(tmp_path, "Growth rose.\n", "Growth rose (Rossi, 2021).\n")
+    run = Run(
+        "files",
+        str(old),
+        tmp_path / "r.html",
+        new=str(new),
+        request=AssessRequest("claude"),
+        general=False,
+        ai_writing=True,
+        citations=True,
+    )
+    assert run.checks == ["writing", "citations"]
+    done = execute(run)
+    assert len(runner.asked) == 2 and done.assessment is None
+    assert done.writing.verdict == "unlikely" and done.citations.verdict == "sound"
+    html = done.path.read_text(encoding="utf-8")
+    assert html.count('class="verdict-button"') == 1
+    assert 'data-check-tab="writing"' in html and 'data-check-tab="citations"' in html
+    assert 'data-check-tab="assessment"' not in html
+    assert '"check": "citations"' in html and "⚠ 1 problem" in html
+    # kept, and made again without the AI
+    _, assessment, writing, citations = load(done.saved)
+    assert writing.verdict == "unlikely"
+    assert assessment is None and citations.annotations[0].check == "citations"
+    two = render(
+        compare_paths(old, new),
+        assessment=Assessment(
+            "claude", ANSWER, annotations=[Annotation("new", "Growth", "rose", "Vague.")]
+        ),
+        citations=citations,
+    )
+    assert '<select class="filter-check"' in two and '<option value="citations">' in two
+
+
+def test_cli_checks(tmp_path, capsys, monkeypatch):
+    """--assess-citations asks for the check of the citations, beside the
+    assessment; --no-assess-general leaves it out, and is refused alone."""
+    old, new = two_files(tmp_path, "a\n", "b\n")
+    runner = fake("## Verdict\n**None**: no citation.")
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    out = tmp_path / "r.html"
+    args = ["--files", str(old), str(new), "-o", str(out), "--assess", "claude"]
+    assert main([*args, "--assess-citations", "--no-assess-general"]) == 0
+    said = capsys.readouterr().out
+    assert len(runner.asked) == 1 and "check of the citations (none), in the HTML report" in said
+    assert "prosediff: assessment" not in said
+    with pytest.raises(SystemExit):
+        main([*args, "--no-assess-general"])
+    assert "--no-assess-general leaves no check" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main(["--files", str(old), str(new), "--assess-citations"])
+    assert "go with --assess" in capsys.readouterr().err
+
+
+def test_every_check_begins_alike_for_the_cache(tmp_path, monkeypatch):
+    """Every check of a run is sent the same system prompt and the same
+    material, its own task last: a cache of what requests begin with reads
+    the material once. Claude Code is sent the material marked for its
+    cache, the task apart; Claude Code and Codex work in one folder."""
+    from prosediff.assess import TASK_OPEN, cached_message, shared_folder
+
+    runner = fake()
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    old, new = two_files(tmp_path, "Growth rose.\n", "Growth rose fast.\n")
+    c = compare_paths(old, new)
+    request = AssessRequest("claude", instructions="Be brief.")
+    for kind in ("value", "writing", "citations"):
+        assess_comparison(c, request, kind=kind)
+    systems = {a[1] for a in runner.asked}
+    material = {a[2][: a[2].rindex(TASK_OPEN)] for a in runner.asked}
+    assert systems == {SHARED} and len(material) == 1
+    assert "Be brief." in material.pop()  # the instructions with the material
+    blocks = cached_message(runner.asked[0][2])
+    assert blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert blocks[1]["text"].startswith(TASK_OPEN) and "cache_control" not in blocks[1]
+    assert cached_message("no task") == "no task"
+    assert shared_folder() == shared_folder()
+
+
+def test_the_other_checks_start_once_the_first_is_read(tmp_path, monkeypatch):
+    """The checks after the first start once the AI has read the first's
+    request (its cache then holds what they share), not before, and still
+    run while the first does."""
+    import threading
+    import time
+
+    from prosediff import pipeline
+    from prosediff.pipeline import Run, execute
+
+    events, lock = [], threading.Lock()
+
+    def note(what):
+        with lock:
+            events.append(what)
+
+    def runner(backend, system, prompt, model, effort, timeout):
+        kind = "citations" if "fact-checker" in task_of(prompt) else "value"
+        note(f"{kind} sent")
+        if kind == "value":
+            time.sleep(0.3)
+            assess_module.live().update(force=True, input_tokens=1_000)  # read
+            note("value read")
+            time.sleep(0.5)
+        note(f"{kind} done")
+        return "## Verdict\n**Sound**.", "fake"
+
+    monkeypatch.setattr(assess_module, "run_backend", runner)
+    old, new = two_files(tmp_path, "Growth rose.\n", "Growth rose fast.\n")
+    run = Run("files", str(old), tmp_path / "r.html", new=str(new),
+              request=AssessRequest("claude"), citations=True)  # fmt: skip
+    execute(run)
+    assert events.index("citations sent") > events.index("value read")
+    assert events.index("citations sent") < events.index("value done")  # together
+    # an AI that never says it has read: the others wait STAGGER_S at most
+    assert pipeline.STAGGER_S == 30

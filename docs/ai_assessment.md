@@ -16,6 +16,40 @@ and judge them as a whole:
 The verdict is a badge in the HTML report's top bar; clicking it opens the
 assessment in a drawer. The assessment comes with the HTML report only.
 
+## The checks
+
+The general assessment is one of three checks, each a call of its own, all
+made at once (in the window, **Checks**):
+
+- **General assessment** (on by default; `--no-assess-general` leaves it
+  out): the assessment above.
+- **AI writing** (`--assess-ai-writing`): whether the new text reads as
+  written by an AI, *Likely*, *Possibly* or *Unlikely*; with
+  `--assess-mark-ai-writing`, the passages that read so marked.
+- **New citations** (`--assess-citations`): each citation the changes
+  added, marked where it is cited, with whether the reference list holds it
+  (in the document, or in a file sent with `--assess-file`, such as a
+  separate bibliography), whether it fits what it is cited for as far as the
+  AI knows the source, and whether it looks mistaken or invented: *None*,
+  *Sound*, *Doubtful* or *Problems*. Reviewing one file, every citation is
+  checked, those with a problem marked. The AI judges from what it knows of
+  the sources, not from their text: check each against the source itself.
+
+The report has one chip for them all, each check's verdict on it, opening one
+drawer with a tab per check. Every check's marks are in the text and the
+documents to download, each card and comment naming its check, and
+**Problems > Show > Check** shows one check's marks only.
+
+Each check is sent the same system prompt and the same material (the
+document or the changes, the other files, your instructions), its own task
+last. The first check is sent alone; the others follow once the AI has read
+it, so that an AI that caches what requests begin with reads the material
+once for all of them. With Claude Code, the material is marked for its
+cache: the next checks read it from there, at a tenth of the price of
+reading it, and pay only for their own task. Codex caches such a beginning
+by itself. An AI that does not say when it has read a request (Codex) makes
+the other checks wait 30 seconds, or until the first is done.
+
 ![The AI assessment of a prosediff report, opened in its drawer from the verdict in the top bar: a verdict badge, what changed, the improvements and the problems to fix](https://raw.githubusercontent.com/raffaelemancuso/prosediff/master/docs/screenshot_assessment.png)
 
 With `--assess-annotate` (on by default; in the window, "Mark problems in
@@ -30,8 +64,8 @@ it until clicked again; the top bar's ◀ ⚠ ▶
 ## The AI's problems in Word and LibreOffice documents
 
 When two Word documents (or two OpenDocument texts) are compared and the
-AI marked problems, the top bar has a button for each of two documents
-to download, made from the new version, which saves it at once:
+AI marked problems, the top bar's **Save** menu offers two documents to
+download, made from the new version, each saved at once:
 
 - **The changes, tracked, with the AI's comments**: the
   [tracked-changes document](how_it_works.md#tracked-changes), each
@@ -156,8 +190,9 @@ AI can only compare its parts with each other, so this verdict is weaker
 still than for changes. With `--assess-mark-ai-writing` (in the window,
 **Mark AI-written passages**) the same assessment also marks the passages
 that read so, any in the file (comparing two versions, only text the
-changes added): each is shown with the problems, its card saying "Reads as
-written by an AI", and is a comment in the documents to download.
+changes added): each is shown with the problems, its card saying "AI
+writing", and is a comment in the documents to download.
+`--assess-citations` checks every citation of the file.
 
 **The review's report is a diff of the file and its fixed version.** When
 the AI proposes fixes, prosediff applies each one whose passage it finds

@@ -36,6 +36,7 @@ def save_document(page, label="fixes"):
     with the AI's fixes, or ("comments") the changes tracked with its
     comments."""
     text = "With AI fixes" if label == "fixes" else "Tracked changes"
+    page.click(".toolbar .save-button")  # in the Save menu
     with page.expect_download() as d:
         page.click(f".toolbar .ai-download:has-text('{text}')")
     return d.value
@@ -93,9 +94,13 @@ def page_file(tmp_path_factory):
 def page(browser, page_file):
     context = browser.new_context()
     p = context.new_page()
+    # an error in the report's script fails the test: it stops all the rest
+    errors = []
+    p.on("pageerror", lambda e: errors.append(e))
     p.goto(page_file.as_uri())
     yield p
     context.close()
+    assert not errors, errors
 
 
 def test_the_margin_holds_a_card_for_each_comment(page):
@@ -201,12 +206,20 @@ def test_view_menu_opens_and_closes(page):
     switch leaves it open, Escape or a click outside closes it. In a
     browser it has no Zoom, the browser's own zooming the page."""
     panel = page.locator("#view-menu")
-    button = page.locator(".menu-button")
+    button = page.locator(".menu-button[aria-controls=view-menu]")
     assert not panel.is_visible()
     button.click()
     assert panel.is_visible() and button.get_attribute("aria-expanded") == "true"
     names = panel.locator(".label:visible").all_inner_texts()
-    assert names == ["Formatted", "Change highlights", "Formatting changes", "Paragraph spacing"]
+    assert names == [
+        "Lines between moves",
+        "One column",
+        "Formatted",
+        "Heading numbers",
+        "Change highlights",
+        "Formatting changes",
+        "Paragraph spacing",
+    ]
     page.keyboard.press("Control+Equal")
     assert page.inner_text(".zoom-value") == "100%"
     page.click('[data-toggle="formats"]')
@@ -238,7 +251,7 @@ def test_change_highlights_switched_off(browser, tmp_path):
     clear = "rgba(0, 0, 0, 0)"
     assert background("ins") != clear and background("del") != clear
     assert page.get_attribute('[data-toggle="highlights"]', "aria-pressed") == "true"
-    page.click(".menu-button")
+    page.click(".menu-button[aria-controls=view-menu]")
     page.click('[data-toggle="highlights"]')
     assert background("ins") == clear and background("del") == clear
     assert tint("tr.replace td.code.right") == "transparent"
@@ -280,6 +293,7 @@ def test_views_are_remembered(page):
     page.reload()
     assert "unified" in page.evaluate("document.body.className")
     assert page.locator(".s-syn").first.is_visible()
+    page.click(".menu-button[aria-controls=view-menu]")  # in the View menu
     page.click('[data-toggle="unified"]')
     assert "unified" not in page.evaluate("document.body.className")
 
@@ -295,7 +309,7 @@ def test_toolbar_help_tooltips(page):
     box = page.locator("tr.replace td.code.right").first.bounding_box()
     page.mouse.move(box["x"] + box["width"] - 3, box["y"] + box["height"] - 3)
     assert not tip.is_visible()
-    page.click(".menu-button")
+    page.click(".menu-button[aria-controls=view-menu]")
     page.hover('[data-toggle="formatted"]')
     assert tip.is_visible()
     assert tip.locator("b").inner_text() == "Formatted"
@@ -316,7 +330,7 @@ def test_space_between_paragraphs(page):
     default = cell.evaluate(gap)
     assert default > 0
     assert page.inner_text(".gap-value") == "0.75"
-    page.click(".menu-button")  # in the View menu
+    page.click(".menu-button[aria-controls=view-menu]")  # in the View menu
     page.click('[data-gap="1"]')
     assert cell.evaluate(gap) > default
     assert page.inner_text(".gap-value") == "1.00"
@@ -327,7 +341,7 @@ def test_space_between_paragraphs(page):
     assert page.locator("tr.replace td.right").first.evaluate(gap) == 0
     assert page.is_disabled('[data-gap="-1"]')
     # an ARIA spinbutton: focused, the arrow keys, Page Up and End step it
-    page.click(".menu-button")
+    page.click(".menu-button[aria-controls=view-menu]")
     spin = page.get_by_role("spinbutton", name="Space between paragraphs")
     spin.focus()
     page.keyboard.press("ArrowUp")
@@ -651,6 +665,7 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     assert "1 moved" in sentences.locator(".units").inner_text()
     switch = page.locator("[data-split-switch]")
     assert switch.get_attribute("aria-label") == "Compared sentence by sentence"
+    page.click(".menu-button[aria-controls=view-menu]")  # the switch in the View menu
     assert switch.locator("svg.sentences").is_visible()
     assert not switch.locator("svg.paragraphs").is_visible()
     sync_api.expect(sentences.locator("svg.move-links")).to_have_count(0)
@@ -663,11 +678,11 @@ def test_both_splits_switch_counts_and_move_lines(browser, tmp_path):
     assert paragraphs.is_visible()
     # each view says which it is, as does the toolbar, and switches to the other
     assert paragraphs.locator(".view-label b").inner_text() == "Paragraph view"
-    assert switch.locator(".split-name").inner_text() == "Paragraphs"
+    assert switch.locator(".split-name").text_content() == "Paragraphs"
     paragraphs.locator("[data-split-to]").click()
     assert sentences.is_visible() and not paragraphs.is_visible()
     assert sentences.locator(".view-label b").inner_text() == "Sentence view"
-    assert switch.locator(".split-name").inner_text() == "Sentences"
+    assert switch.locator(".split-name").text_content() == "Sentences"
     page.context.close()
 
 
@@ -690,7 +705,9 @@ def test_moved_passages_switch(browser, tmp_path):
     assert page.locator("td.left del").filter(has_text="This sentence moves").is_visible()
     assert page.locator("td.right ins").filter(has_text="This sentence moves").is_visible()
     assert "moved passage" not in summary.inner_text()
+    page.click(".menu-button[aria-controls=view-menu]")  # the switch in the View menu
     switch.click()
+    page.keyboard.press("Escape")
     assert switch.get_attribute("aria-pressed") == "true"
     assert page.locator("td.left .moved").is_visible()
     assert "1 moved passage" in summary.inner_text()
@@ -1089,11 +1106,13 @@ def test_the_problems_filtered_and_the_fixes_applied_resolved(browser, tmp_path)
         return [fixed.is_visible(), advice.is_visible()]
 
     button = page.locator(".toolbar .resolve-applied")
+    page.click(".toolbar .filter-button")  # in the Problems menu
     assert button.inner_text() == "✓ Resolve fixes applied (1)"
     button.click()
     assert fixed.locator(".resolve-box").is_checked()
     assert not advice.locator(".resolve-box").is_checked()
     assert button.is_disabled() and button.inner_text() == "✓ Resolve fixes applied"
+    page.keyboard.press("Escape")
     # not resolved only: the fixed problem's card and badge go
     page.click(".toolbar .filter-button")
     page.locator(".filter-resolved").select_option("no")

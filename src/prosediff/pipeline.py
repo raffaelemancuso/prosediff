@@ -6,12 +6,14 @@ output. Each front end turns its own input into a Run, and reports the
 Result, and the errors, its own way."""
 
 import contextlib
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 
-from prosediff.assess import Assessment, AssessRequest, marked_writing
+from prosediff.assess import Assessment, AssessRequest
 from prosediff.diff import (
     AUTO_ENCODING,
     CONTEXT,
@@ -45,9 +47,12 @@ class Run:
     or "review" (old: the file request's AI reviews alone). paths limit what
     is compared. The output goes to output, as fmt (one of render.FORMATS),
     the prose compared as split says. request: the AI that assesses (None:
-    none); ai_writing: asked apart, too, whether the new text reads as
-    written by an AI; documents: the AI's Word or OpenDocument documents put
-    in the HTML report.
+    none), and its checks, each a call of its own, asked together: general,
+    its assessment of the changes (or review of the file); ai_writing,
+    whether the new text reads as written by an AI; citations, a check of
+    the citations the changes added (every citation, of a file reviewed);
+    documents: the AI's Word or OpenDocument documents put in the HTML
+    report.
     """
 
     mode: str
@@ -67,6 +72,14 @@ class Run:
     request: AssessRequest | None = None
     ai_writing: bool = False
     documents: bool = True
+    general: bool = True
+    citations: bool = False
+
+    @property
+    def checks(self) -> list[str]:
+        """The checks the AI is asked for (assess.CHECKS)."""
+        on = {"assessment": self.general, "writing": self.ai_writing, "citations": self.citations}
+        return [c for c, asked in on.items() if asked]
 
 
 def request_of(src: object) -> AssessRequest | None:
@@ -86,6 +99,7 @@ def request_of(src: object) -> AssessRequest | None:
         author=src.assess_author or "",
         system=src.assess_prompt or "",
         writing_system=src.assess_writing_prompt or "",
+        citations_system=src.assess_citations_prompt or "",
         edits=src.assess_edits,
         files=files_of(src),
         # only with the question of AI writing asked
@@ -132,14 +146,15 @@ def options_of(src: object, comparing: bool = True, **more) -> Options:
 @dataclass
 class Result:
     """What a run made: the output's path (another when it was locked),
-    the comparison, and the AI's assessment and AI-writing assessment (None
-    when not asked, or the preview not approved; a failed one holds its
-    error)."""
+    the comparison, and the AI's checks: its assessment, its AI-writing
+    assessment and its check of the citations (None when not asked, or the
+    preview not approved; a failed one holds its error)."""
 
     path: Path
     comparison: Comparison
     assessment: Assessment | None = None
     writing: Assessment | None = None
+    citations: Assessment | None = None
     # where the AI's answers were kept (prosediff.saved); None when not
     saved: Path | None = None
 
@@ -200,12 +215,18 @@ def fixes_shown(run: Run, assessment: Assessment) -> tuple[Comparison, Assessmen
     return comparison, replace(assessment, annotations=marked)
 
 
+# How long the other checks wait for the AI to read the first one's
+# request, to find what they share in its cache; an AI that does not say
+# when it has (Codex) makes them wait this long, or until the first is done.
+STAGGER_S = 30
+
+
 def execute(
     run: Run,
     progress: Callable[[str], None] = lambda stage: None,
     approve: Callable[[Path], bool] | None = None,
     live: Callable[[str, list[str]], None] | None = None,
-    saved: tuple[Assessment, Assessment | None] | None = None,
+    saved: tuple[Assessment | None, Assessment | None, Assessment | None] | None = None,
 ) -> Result:
     """Do run, telling progress each stage as it starts ("Comparing…"):
     asking the AI, with how long it usually takes (prosediff.history), and
@@ -282,26 +303,64 @@ def execute(
         write()
         if not approve(run.output):
             return Result(run.output, comparison)
-    assessment, writing = saved or (None, None)
-    if ask:
+    assessment, writing, citations = saved or (None, None, None)
+    if ask and run.checks:
         ai = run.request.spec
         report = (
             (lambda tracked: live(tracked.describe(), tracked.news())) if live is not None else None
         )
+        kinds = {"assessment": "value", "writing": "writing", "citations": "citations"}
+        whats = {
+            "assessment": "to review the file" if reviewing else "to assess the changes",
+            "writing": "to say whether the "
+            + ("file" if reviewing else "new text")
+            + " reads as written by an AI",
+            "citations": "to check the " + ("file's citations" if reviewing else "new citations"),
+        }
+        spans = [
+            estimate(
+                ai, run.request.effort, "review" if reviewing and c == "assessment" else kinds[c]
+            )
+            for c in run.checks
+        ]
+        known = [s for s in spans if s is not None]
+        # the checks run together: as long as the longest
+        span = usually((max(s[0] for s in known), max(s[1] for s in known))) if known else ""
+        asking = [whats[c] for c in run.checks]
+        asking = ", ".join(asking[:-1]) + (" and " if len(asking) > 1 else "") + asking[-1]
+        progress(f"Asking {ai} {asking}{f' ({span})' if span else ''}…")
 
-        def asked(what: str, kind: str) -> Assessment:
-            # what kind of assessment it makes, as history.record notes it
-            noted = "review" if reviewing and kind == "value" else kind
-            span = usually(estimate(ai, run.request.effort, noted))
-            progress(f"Asking {ai} {what}{f' ({span})' if span else ''}…")
-            made = assess_comparison(comparison, run.request, kind=kind, report=report)
+        # the first check's request read by the AI (it starts answering)
+        read = threading.Event()
+
+        def heard(tracked) -> None:
+            if tracked.input_tokens or tracked.phase in ("thinking", "writing the answer"):
+                read.set()
+            if report is not None:
+                report(tracked)
+
+        def asked(check: str, first: bool = False) -> Assessment:
+            try:
+                made = assess_comparison(
+                    comparison, run.request, kind=kinds[check], report=heard if first else report
+                )
+            finally:
+                read.set()
             record(made, len(made.system) + len(made.prompt))
             return made
 
-        assessment = asked("to review the file" if reviewing else "to assess the changes", "value")
-        if run.ai_writing:
-            what = "the file" if reviewing else "the new text"
-            writing = asked(f"whether {what} reads as written by an AI", "writing")
+        # the others once the AI has read the first: the material they
+        # share, read once, is in its cache for them (assess.SHARED)
+        with ThreadPoolExecutor(max_workers=len(run.checks)) as pool:
+            first, *others = run.checks
+            futures = {first: pool.submit(asked, first, True)}
+            if others:
+                read.wait(STAGGER_S)
+            futures |= {c: pool.submit(asked, c) for c in others}
+            made = {c: f.result() for c, f in futures.items()}
+        assessment, writing, citations = (
+            made.get(c) for c in ("assessment", "writing", "citations")
+        )
     assessment_shown = assessment
     if (
         reviewing
@@ -310,12 +369,8 @@ def execute(
         and (shown := fixes_shown(run, assessment))
     ):
         # the documents to download made of the file and the assessment as they are
-        write = partial(
-            writer, shown[0], documents_of=(comparison, marked_writing(assessment, writing))
-        )
+        write = partial(writer, shown[0], documents_of=(comparison, assessment))
         assessment_shown = shown[1]
-    # the passages marked as AI-written shown with the problems
-    assessment_shown = marked_writing(assessment_shown, writing)
     progress(
         "Writing the report…"
         if run.fmt == "html"
@@ -324,13 +379,13 @@ def execute(
         else "Writing the diff…"
     )
     try:
-        path = write(assessment=assessment_shown, writing=writing)
+        path = write(assessment=assessment_shown, writing=writing, citations=citations)
     except ValueError as e:  # a .docx or .odt of anything but two such documents
         raise OutputError(str(e)) from e
     kept = None
-    if assessment is not None and run.fmt == "html" and saved is None:
+    if any((assessment, writing, citations)) and run.fmt == "html" and saved is None:
         from prosediff.saved import save  # it reads Run from here
 
         with contextlib.suppress(OSError):  # the report stands without it
-            kept = save(run, path, assessment, writing, inputs)
-    return Result(path, comparison, assessment, writing, kept)
+            kept = save(run, path, assessment, writing, inputs, citations)
+    return Result(path, comparison, assessment, writing, citations, kept)

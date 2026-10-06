@@ -7,9 +7,12 @@
 - **Header**: the title and repository path, a line for each side (hash or
   file name, subject, author, date, or the path outside git) and, for
   commits, the 50 newest commits in between.
-- **AI assessment** (with `--assess`): the verdict as a badge in the top
-  bar, opening a drawer with what changed, the improvements and the problems
-  to fix. See [AI assessment](ai_assessment.md).
+- **AI checks** (with `--assess`): one chip in the top bar with each check's
+  verdict, opening a drawer with a tab per check: the assessment (what
+  changed, the improvements, the problems to fix), AI writing, the new
+  citations. Each check's marks are in the text, their cards naming the
+  check; **Problems > Show > Check** shows one check's only. See
+  [AI assessment](ai_assessment.md).
 - **Summary line**: the view and the counts of changes.
 - **File list** (several files): each file's counts, linked to its table.
 - **File tables**: old beside new, collapsible, the header sticking under
@@ -55,7 +58,17 @@ in the other. See [Moved text](moves.md).
 ## Top bar and keys
 
 The top bar stays in view; hovering an item shows its key. The browser
-remembers the views, the spacing and the column widths.
+remembers the views, the spacing and the column widths. On it: the title,
+the AI's verdicts, the ◀ ▶ of the changes, the comments and the problems,
+then **Problems** (which are shown, and the fixes all at once), **Margin**,
+**Review**, **View** (how the comparison is shown) and **Save** (the
+documents to download and the report itself).
+
+**Save > Report as HTML** saves a copy of the report, an HTML file of its
+own to keep or send: downloaded from a browser, saved where a dialog says
+in prosediff's window. The choices made in the report
+(in the download, resolved, fixes undone) are written into the copy, which
+opens with them wherever no choices of its own were kept.
 
 | Key | Action | Default |
 |---|---|---|
@@ -64,13 +77,14 @@ remembers the views, the spacing and the column widths.
 | `a`, Shift+`a` | Next, previous AI problem | |
 | `r` | Review mode | off |
 | `j`, `k` | Next, previous item in review mode | |
-| `s` | Paragraph or sentence view (`--split both`) | |
-| `l` | Lines joining each move's two places | off |
-| `v` | Moved passages | off |
-| `u` | One column, old above new | off |
+| `s` | Paragraph or sentence view (`--split both`; View menu) | |
+| `l` | Lines joining each move's two places (View menu) | off |
+| `v` | Moved passages (View menu) | off |
+| `u` | One column, old above new (View menu) | off |
 | `g` | Margin | shown |
 | `h` | Change highlights (View menu) | on |
 | `f` | Formatted text (View menu) | on |
+| `#` | Heading numbers, 1., 1.1., 2., counted over the whole file (View menu) | on |
 | `m` | Formatting changes (View menu) | on |
 | `[`, `]` | Less, more space between paragraphs | |
 | Ctrl+`+`, Ctrl+`−`, Ctrl+`0`, Ctrl+wheel | Zoom in, out, back to 100% (View menu, in prosediff's window; a browser zooms with its own keys) | 100% |
@@ -81,8 +95,8 @@ remembers the views, the spacing and the column widths.
   and **Next**. **Problems ↓** at the top of the list jumps to the
   problems; dragging the list's right edge widens or narrows it
   (remembered; a double-click puts it back).
-- **The documents to download:** a button in the top bar for each
-  (**⤓ Tracked changes**, **⤓ With AI fixes**) saves it at once; its
+- **The documents to download:** each an item of the **Save** menu
+  (**⤓ Tracked changes**, **⤓ With AI fixes**), saved at once; its
   tooltip says how many of the problems it holds.
 - **Which problems go into them:** each problem's card has two boxes:
   **In the download**, unticked, leaves the problem's comment out of the
@@ -90,9 +104,11 @@ remembers the views, the spacing and the column widths.
   comment resolved in the file (Word's Resolve, LibreOffice's Resolved),
   greyed out while the problem is left out. **In the download** is also
   on the problem's line in Review mode's list.
-  **✓ Resolve fixes applied** in the top bar marks resolved the comments
+  **✓ Resolve fixes applied**, in the **Problems** menu, marks resolved the comments
   of the problems whose fix the version with the AI's fixes holds.
-- **Filter** in the top bar shows only the problems that come with a fix
+  **↶ Undo all fixes**, there too, undoes every fix at once, as each card's **Undo
+  fix** does; with none left made, it becomes **↷ Redo all fixes**.
+- **Problems > Show** shows only the problems that come with a fix
   (the passage rewritten) or without, and, when there are documents to
   download, those in the download or left out of it, resolved or not: the
   others lose their card and their

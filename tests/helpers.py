@@ -434,13 +434,21 @@ ANSWER = """## Verdict
 """
 
 
-def fake(answer: str = ANSWER, model: str = "fake-1"):
-    """A backend answering answer, recording what it was asked."""
+def task_of(prompt: str) -> str:
+    """The task a message ends with (assess.with_task): a check's own
+    prompt, the material before it the same for every check."""
+    start = prompt.rindex("<task>\n") + len("<task>\n")
+    return prompt[start : prompt.rindex("\n</task>")]
+
+
+def fake(answer=ANSWER, model: str = "fake-1"):
+    """A backend answering answer (or, a function, what it makes of the
+    system prompt and the message), recording what it was asked."""
     asked = []
 
     def runner(backend, system, prompt, model_asked, effort, timeout):
         asked.append((backend, system, prompt, model_asked, effort, timeout))
-        return answer, model
+        return (answer(system, prompt) if callable(answer) else answer), model
 
     runner.asked = asked
     return runner

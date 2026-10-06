@@ -415,6 +415,12 @@ def build_parser() -> argparse.ArgumentParser:
         "file holding it",
     )
     ai_group.add_argument(
+        "--assess-citations-prompt",
+        metavar="TEXT",
+        help="the same for --assess-citations: a prompt in place of prosediff's own for the "
+        "check of the citations, or a file holding it",
+    )
+    ai_group.add_argument(
         "--assess-author",
         metavar="NAME",
         help="who the AI's comments and fixes in the Word and OpenDocument documents are "
@@ -455,6 +461,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="also ask the AI, apart, whether the text the changes added reads as written "
         "by an AI: a second assessment, its verdict (likely, possibly or unlikely) in the "
         "HTML report's top bar; an indication, not a proof",
+    )
+    ai_group.add_argument(
+        "--assess-citations",
+        action="store_true",
+        help="also have the AI check, apart, the citations the changes added (with --review, "
+        "every citation of the file): whether the reference list holds each, whether it fits "
+        "what it is cited for as far as the AI knows the source, whether it looks mistaken or "
+        "invented; each marked in the text. From what the AI knows of the sources, not their "
+        "text: check them against the sources",
+    )
+    ai_group.add_argument(
+        "--assess-general",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="the AI's general assessment of the changes (with --review, of the file) "
+        "(default: on); --no-assess-general leaves only the other checks asked for "
+        "(--assess-ai-writing, --assess-citations)",
     )
     ai_group.add_argument(
         "--assess-mark-ai-writing",
@@ -566,11 +589,15 @@ def main(argv: list[str] | None = None) -> int:
         or args.assess_save_prompt
         or args.assess_ai_writing
         or args.assess_mark_ai_writing
+        or args.assess_citations
+        or args.assess_citations_prompt
+        or not args.assess_general
     ):
         ap.error(
             "--assess-effort, --assess-instructions, --assess-file, --assess-prompt, "
-            "--assess-writing-prompt, --assess-author, --assess-save-prompt and "
-            "--assess-ai-writing go with --assess"
+            "--assess-writing-prompt, --assess-citations-prompt, --assess-author, "
+            "--assess-save-prompt, --assess-ai-writing, --assess-citations and "
+            "--no-assess-general go with --assess"
         )
     if args.assess_mark_ai_writing and not args.assess_ai_writing:
         ap.error("--assess-mark-ai-writing goes with --assess-ai-writing")
@@ -624,6 +651,8 @@ def main(argv: list[str] | None = None) -> int:
         request=request_of(args),
         ai_writing=args.assess_ai_writing,
         documents=args.assess_documents,
+        general=args.assess_general,
+        citations=args.assess_citations,
     )
     try:
         done = execute(run, _say, live=_said_live)
@@ -639,21 +668,37 @@ def main(argv: list[str] | None = None) -> int:
         return _fail(f"no such folder: {args.repo}")
     except (git.BadName, ValueError) as e:
         return _fail(f"not a commit: {e}")
-    assessment, writing, c = done.assessment, done.writing, done.comparison
-    for what, a in (("the assessment", assessment), ("the AI-writing assessment", writing)):
-        if a is not None and a.error:
-            print(f"{PROG}: {what} failed: {a.error}", file=sys.stderr)
+    c = done.comparison
     print(
         f"{PROG}: {c.base.short}..{c.target.short}: {counted(len(c.files), 'file')}, "
         f"+{c.counts.additions:,} -{c.counts.deletions:,} -> {done.path}"
     )
-    if assessment is not None:
-        print(f"{PROG}: assessment{_verdict(assessment)}, at the top of the HTML report")
-    if writing is not None and not writing.error:
-        print(f"{PROG}: AI-writing assessment{_verdict(writing)}, beside it")
+    _say_checks(done)
     if args.open:
         open_output(done.path)
     return 0
+
+
+# Each check as the command line names it, in what it prints.
+CHECK_NAMES = (
+    ("assessment", "assessment"),
+    ("writing", "AI-writing assessment"),
+    ("citations", "check of the citations"),
+)
+
+
+def _say_checks(done) -> None:
+    """Each check the AI made: its verdict and how many passages it marked,
+    or, on stderr, why it failed."""
+    for attr, name in CHECK_NAMES:
+        a = getattr(done, attr)
+        if a is None:
+            continue
+        if a.error:
+            print(f"{PROG}: the {name} failed: {a.error}", file=sys.stderr)
+            continue
+        marked = f", {counted(len(a.annotations), 'passage')} marked" if a.annotations else ""
+        print(f"{PROG}: {name}{_verdict(a)}{marked}, in the HTML report")
 
 
 def _fail(message: str) -> int:
@@ -713,13 +758,13 @@ def _from_saved(args: argparse.Namespace) -> int:
     from prosediff.saved import SavedError, load
 
     try:
-        run, assessment, writing = load(args.repo)
+        run, *answers = load(args.repo)
     except SavedError as e:  # not saved answers, or the files changed since
         return _fail(str(e))
     if args.output:
         run = replace(run, output=Path(args.output))
     try:
-        done = execute(run, _say, saved=(assessment, writing))
+        done = execute(run, _say, saved=tuple(answers))
     except (OutputError, FilterError, SourceError) as e:
         return _fail(str(e))
     print(f"{PROG}: report made again from {Path(args.repo).name} -> {done.path}")
@@ -764,16 +809,24 @@ def _review(ap: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         request=request_of(args),
         documents=args.assess_documents,
         ai_writing=args.assess_ai_writing,
+        general=args.assess_general,
+        citations=args.assess_citations,
     )
     try:
         done = execute(run, _say, live=_said_live)
     except (FilterError, SourceError) as e:
         return _fail(str(e))
     assessment = done.assessment
-    if assessment.error:
+    if assessment is None:
+        print(f"{PROG}: {path.name} checked -> {done.path}")
+        _say_checks(done)
+    elif assessment.error:
         print(f"{PROG}: the review failed: {assessment.error}", file=sys.stderr)
-    marked = counted(len(assessment.annotations), "problem")
-    print(f"{PROG}: {path.name} reviewed{_verdict(assessment)}, {marked} marked -> {done.path}")
+        _say_checks(replace(done, assessment=None))
+    else:
+        marked = counted(len(assessment.annotations), "problem")
+        print(f"{PROG}: {path.name} reviewed{_verdict(assessment)}, {marked} marked -> {done.path}")
+        _say_checks(replace(done, assessment=None))
     if args.open:
         open_output(done.path)
     return 0
@@ -807,7 +860,12 @@ def _login_codex() -> int:
 
 
 def _check_assess(ap: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """Refuse an AI --assess cannot name, or a timeout of none (ap.error)."""
+    """Refuse an AI --assess cannot name, a timeout of none, or no check
+    asked for (ap.error)."""
+    if not (args.assess_general or args.assess_ai_writing or args.assess_citations):
+        ap.error(
+            "--no-assess-general leaves no check: add --assess-ai-writing or --assess-citations"
+        )
     try:
         parse_backend(args.assess)
     except AssessError as e:

@@ -23,8 +23,10 @@ models get no tools and no files: only the text.
 """
 
 import asyncio
+import atexit
 import json
 import re
+import shutil
 import tempfile
 import time
 from collections.abc import Callable
@@ -59,6 +61,15 @@ REVIEW_VERDICTS = ("good", "fair", "poor")
 # The verdicts of the second assessment, whether the new text reads as written
 # by an AI (an assessment of kind "writing"): likely, possibly or unlikely.
 WRITING_VERDICTS = ("likely", "possibly", "unlikely")
+# The verdicts of the check of the new citations (an assessment of kind
+# "citations"): none added, all sound, some doubtful, some with problems.
+CITATION_VERDICTS = ("none", "sound", "doubtful", "problems")
+# The checks an AI can make (pipeline.Run.checks), each a call of its own,
+# the kind of its assessment, and what its marks are called beside the
+# general assessment's problems ("": the general assessment's own).
+CHECKS = ("assessment", "writing", "citations")
+CHECK_KINDS = {"assessment": "value", "writing": "writing", "citations": "citations"}
+CHECK_LABELS = {"": "Problem", "writing": "AI writing", "citations": "Citation"}
 # What the model reads: the whole new version and the changes, or the
 # changes alone.
 CONTEXTS = ("document", "changes")
@@ -93,6 +104,21 @@ A short list, each quoting the words concerned and naming the sign. Write \
 ## Signs against
 A short list of what reads as the authors' own. Write "None found." if there \
 are none."""
+
+# What every check is sent first, the same for all of them: the system prompt
+# (SHARED, then DOCUMENTS for Word and OpenDocument files), then the material
+# (the document or the changes, the other files, the instructions of the
+# person asking); its own task (SYSTEM, SYSTEM_REVIEW, ...) comes last, in
+# <task> tags. A provider that caches what a request begins with then reads
+# the material once for all the checks of a run (cached_message).
+SHARED = """\
+You are an experienced editor, peer reviewer and fact-checker of academic \
+and professional writing. The message gives you the material to work on: a \
+document, or the changes between two versions of one, and any other files \
+sent with it. At its end, between <task> and </task>, it gives your task: \
+what to look for in that material and exactly how to answer. Do that task, \
+answering as it says."""
+TASK_OPEN = "<task>\n"
 
 SYSTEM = f"""\
 You are an experienced editor and peer reviewer of academic and professional \
@@ -202,6 +228,65 @@ sentences on why, and how sure you can be.
 
 {CLOSING}"""
 
+# The check of the citations the changes added (kind "citations"), asked
+# apart: each new one marked, whether the reference list has it, whether it
+# fits what it is cited for, as far as the model knows the source, and
+# whether it looks mistaken or invented. The model is told never to claim a
+# source it was not given.
+CITATIONS_TASK = """Check each citation for these: whether the document's \
+reference list holds it (the whole document, or the other files sent with \
+it, may hold the list; when you were given no reference list, say so instead \
+of guessing); whether what the text says fits the source as far as you know \
+it (say plainly when you do not know the source, and never claim to have \
+read a source you were not given: what you know of it is not its text); and \
+whether it looks mistaken or invented (an author or a year that does not \
+match a work you know, a title that does not exist)."""
+CITATIONS_SECTIONS = """## New citations
+A list, each the citation as written, then what you found: in the reference \
+list or not, whether it fits what it is cited for, and how sure you can be. \
+Write "None found." if there are none.
+
+## Not in the reference list
+A list of the citations the reference list lacks. Write "None found." if \
+there are none, or "No reference list given." when you had none."""
+
+SYSTEM_CITATIONS = f"""You are an experienced editor and fact-checker of \
+academic writing. You are given {DIFF_GIVEN} When the whole new version is \
+given too, it holds the rest of the document, its reference list among it.
+
+Find every citation the changes added: a reference to a source (an author \
+and year, a number in brackets, a footnote, a pandoc [@key]) in the text {{+ \
++}} added or rewrote that the old version did not cite. A citation the old \
+version already had, moved or reworded around, is not new. {CITATIONS_TASK}
+
+Answer in Markdown with exactly these sections:
+
+## Verdict
+The first word, in bold, is one of **None** (the changes added no citation), \
+**Sound**, **Doubtful** or **Problems**; then two or three sentences on why.
+
+{CITATIONS_SECTIONS}
+
+{CLOSING}"""
+
+# The same of one document alone: every citation in it, none being new.
+SYSTEM_CITATIONS_REVIEW = f"""You are an experienced editor and fact-checker \
+of academic writing. You are given a document, whole; {{>>Author (date): \
+text<<}} is a comment its authors or reviewers left in it.
+
+Find the citations in the document: references to a source (an author and \
+year, a number in brackets, a footnote, a pandoc [@key]). {CITATIONS_TASK}
+
+Answer in Markdown with exactly these sections:
+
+## Verdict
+The first word, in bold, is one of **None** (the document cites nothing), \
+**Sound**, **Doubtful** or **Problems**; then two or three sentences on why.
+
+{CITATIONS_SECTIONS.replace("## New citations", "## Citations with a problem")}
+
+{CLOSING}"""
+
 # Added to SYSTEM when the files are Word documents or OpenDocument texts:
 # their styles reach the model in prosediff's notation (diff.line_markdown),
 # which it must not take for the text, nor report as changed.
@@ -298,8 +383,48 @@ nor the notation of a document's formatting (# for a heading, • for a list \
 item, **bold**, *italic*, [^1] for a footnote reference). Write [] when \
 nothing is to be marked."""
 
-# How a passage marked as AI-written reads among the problems (marked_writing).
-AI_WRITTEN = "Reads as written by an AI: "
+# Added to SYSTEM_CITATIONS: each new citation marked where it is cited.
+ANNOTATE_CITATIONS = """
+
+Then, after the sections, mark in the text each new citation, in one fenced \
+code block of language json holding a list; each item an object with these \
+keys:
+- "start": the first 3 to 8 words of the sentence that cites it, copied \
+exactly from the new version, punctuation included;
+- "end": its last 3 to 8 words, the citation included, copied exactly;
+- "problem": the citation as written and what you found of it, in a sentence \
+("Rossi et al. (2021): not in the reference list.");
+- "solution": what to check or do, in a sentence; "" when nothing.
+A program uses these words to find the passage: it searches the text for \
+"start" and "end" character for character. So copy them exactly from the \
+text you are sent in the message, as it is written here (the same spelling, \
+capitals, spacing, punctuation, quotes, dashes, symbols and equations), \
+never retyped, corrected, translated or tidied. Never copy the diff's \
+markers ([- -], {+ +}, {>> <<}) nor the notation of a document's formatting \
+(# for a heading, • for a list item, **bold**, *italic*, [^1] for a footnote \
+reference). Write [] when nothing is to be marked."""
+
+# ANNOTATE_CITATIONS for a document read alone: the citations with a
+# problem only, a document citing a great many.
+ANNOTATE_CITATIONS_REVIEW = """
+
+Then, after the sections, mark in the text each citation with a problem, in \
+one fenced code block of language json holding a list; each item an object \
+with these keys:
+- "start": the first 3 to 8 words of the sentence that cites it, copied \
+exactly from the document, punctuation included;
+- "end": its last 3 to 8 words, the citation included, copied exactly;
+- "problem": the citation as written and what is wrong with it, in a \
+sentence ("Rossi et al. (2021): not in the reference list.");
+- "solution": what to check or do, in a sentence; "" when nothing.
+A program uses these words to find the passage: it searches the text for \
+"start" and "end" character for character. So copy them exactly from the \
+document as it is written here (the same spelling, capitals, spacing, \
+punctuation, quotes, dashes, symbols and equations), never retyped, \
+corrected, translated or tidied. Never copy the comments' markers ({>> <<}) \
+nor the notation of a document's formatting (# for a heading, • for a list \
+item, **bold**, *italic*, [^1] for a footnote reference). Write [] when \
+nothing is to be marked."""
 
 
 def _reworded(text: str, changes: dict[str, str]) -> str:
@@ -352,7 +477,9 @@ def no_edits(marks: str) -> str:
 class Annotation:
     """A problem the model marked in the text: on which side, from which
     words to which, what is wrong and what to do; replacement, the passage
-    as it should read, when the fix is an edit of its words ("" else)."""
+    as it should read, when the fix is an edit of its words ("" else);
+    check, the check that marked it ("": the general assessment;
+    "writing", "citations": CHECK_LABELS)."""
 
     side: str  # "new" or "old"
     start: str
@@ -360,6 +487,7 @@ class Annotation:
     problem: str
     solution: str = ""
     replacement: str = ""
+    check: str = ""
 
 
 # How an annotation's passage is found in the text, by prosediff.aidocs and
@@ -415,19 +543,21 @@ def split_annotations(answer: str) -> tuple[str, list[Annotation]]:
     return text.strip(), notes
 
 
-def marked_writing(
-    assessment: "Assessment | None", writing: "Assessment | None"
-) -> "Assessment | None":
-    """assessment with the passages writing marked as AI-written after its
-    own problems, each saying so (AI_WRITTEN): the report and the documents
-    show them as they show the problems. assessment as it is when either
-    failed or writing marked none."""
-    if assessment is None or assessment.error or writing is None or writing.error:
+def with_checks(assessment: "Assessment | None", *others: "Assessment | None"):
+    """One assessment holding the marks of every check, for the report and
+    the documents to show them alike: assessment (the general one) with
+    the marks of the others after its own problems; when there is no
+    general assessment, or it failed, one of the first other check that
+    answered, holding only its marks. None when no check answered."""
+    answered = [a for a in others if a is not None and not a.error]
+    marks = [n for a in answered for n in a.annotations]
+    if assessment is not None and not assessment.error:
+        if not marks:
+            return assessment
+        return replace(assessment, annotations=[*assessment.annotations, *marks])
+    if not answered:
         return assessment
-    if not writing.annotations:
-        return assessment
-    marked = [replace(n, problem=AI_WRITTEN + n.problem) for n in writing.annotations]
-    return replace(assessment, annotations=[*assessment.annotations, *marked])
+    return replace(answered[0], annotations=marks)
 
 
 def duration(seconds: float) -> str:
@@ -594,21 +724,28 @@ class AssessRequest:
     # whether the assessment of kind "writing" also marks the passages that
     # read as written by an AI (ANNOTATE_WRITING): comparing, only new text
     mark_writing: bool = False
+    # the prompt in place of prosediff's for the check of the citations
+    citations_system: str = ""
 
 
 def default_system(kind: str, single: bool = False) -> str:
     """prosediff's own prompt for an assessment of kind ("value",
-    "review" or "writing"; single: "writing" of one file reviewed alone),
-    the one AssessRequest.system (writing_system, for "writing") replaces."""
+    "review", "writing" or "citations"; single: "writing" or "citations"
+    of one file reviewed alone), the one AssessRequest.system
+    (writing_system, citations_system for those) replaces."""
     if kind == "writing":
         return SYSTEM_WRITING_REVIEW if single else SYSTEM_WRITING
+    if kind == "citations":
+        return SYSTEM_CITATIONS_REVIEW if single else SYSTEM_CITATIONS
     return SYSTEM_REVIEW if kind == "review" else SYSTEM
 
 
 def system_of(request: AssessRequest, kind: str, single: bool = False) -> str:
     """The prompt an assessment of kind is sent first: the request's own,
     or prosediff's."""
-    own = request.writing_system if kind == "writing" else request.system
+    own = {"writing": request.writing_system, "citations": request.citations_system}.get(
+        kind, request.system
+    )
     return instructions_from(own) or default_system(kind, single)
 
 
@@ -659,7 +796,11 @@ class Assessment:
         or "poor"), from the Verdict section; "" when the model gave none of
         them."""
         words = re.findall(r"[A-Za-z]+", self.verdict_section or self.markdown[:200])
-        verdicts = {"writing": WRITING_VERDICTS, "review": REVIEW_VERDICTS}.get(self.kind, VERDICTS)
+        verdicts = {
+            "writing": WRITING_VERDICTS,
+            "review": REVIEW_VERDICTS,
+            "citations": CITATION_VERDICTS,
+        }.get(self.kind, VERDICTS)
         return next((w.lower() for w in words if w.lower() in verdicts), "")
 
     @property
@@ -808,7 +949,6 @@ def prompt_for(
     )
     parts += references
     parts += instructions_part(instructions, "assessment")
-    parts.append("Assess the changes as the instructions say.")
     return "\n\n".join(parts)
 
 
@@ -824,7 +964,6 @@ def review_prompt_for(
     ]
     parts += references
     parts += instructions_part(instructions, "review")
-    parts.append("Review the document as the instructions say.")
     return "\n\n".join(parts)
 
 
@@ -860,7 +999,29 @@ def instructions_part(instructions: str, what: str) -> list[str]:
         return []
     return [
         f"The instructions of the person asking for this {what}, to follow within the "
-        f"format above:\n\n<instructions>\n{instructions.strip()}\n</instructions>"
+        f"format the task below asks for:\n\n<instructions>\n{instructions.strip()}\n"
+        "</instructions>"
+    ]
+
+
+def with_task(material: str, task: str) -> str:
+    """The message: the material, then the task, in <task> tags, last (a
+    cache reads what a request begins with: SHARED)."""
+    return f"{material}\n\n{TASK_OPEN}{task.strip()}\n</task>"
+
+
+def cached_message(prompt: str) -> str | list[dict]:
+    """A message as Claude Code is sent it: the material and the task in
+    blocks of their own, the material marked for the cache, for the next
+    checks of the run to read it from there. Marked for an hour, as Claude
+    Code marks its own: a mark may not last less than one after it. The
+    message as it is when it has no task."""
+    at = prompt.rfind(TASK_OPEN)
+    if at <= 0:
+        return prompt
+    return [
+        {"type": "text", "text": prompt[:at], "cache_control": {"type": "ephemeral", "ttl": "1h"}},
+        {"type": "text", "text": prompt[at:]},
     ]
 
 
@@ -869,6 +1030,17 @@ def _missing(extra: str, what: str) -> AssessError:
         f"{what} is not installed: install prosediff with its {extra!r} extra "
         f"(uv tool install 'prosediff[{extra}]', or pip install 'prosediff[{extra}]')"
     )
+
+
+@cache
+def shared_folder() -> str:
+    """The empty folder Claude Code and Codex work in, the same for every
+    call of the process: they tell the model where they work, and a folder
+    of each call's own would make each request begin differently, which no
+    cache could then read (cached_message). Taken away at exit."""
+    folder = tempfile.mkdtemp(prefix="prosediff-ai-")
+    atexit.register(shutil.rmtree, folder, ignore_errors=True)
+    return folder
 
 
 def _claude(system: str, prompt: str, model: str, effort: str, timeout: float) -> tuple[str, str]:
@@ -886,7 +1058,7 @@ def _claude(system: str, prompt: str, model: str, effort: str, timeout: float) -
     async def messages():
         # the prompt as a message on the CLI's input, not an argument: a long
         # diff would pass the command line's limit
-        yield {"type": "user", "message": {"role": "user", "content": prompt}}
+        yield {"type": "user", "message": {"role": "user", "content": cached_message(prompt)}}
 
     async def run(cwd: str) -> tuple[str, str]:
         options = ClaudeAgentOptions(
@@ -924,8 +1096,7 @@ def _claude(system: str, prompt: str, model: str, effort: str, timeout: float) -
                 )
         return text, answered
 
-    with tempfile.TemporaryDirectory() as cwd:
-        return _within(run(cwd), timeout)
+    return _within(run(shared_folder()), timeout)
 
 
 # The input tokens of Anthropic's usage: read anew, and from the cache.
@@ -994,8 +1165,7 @@ def _codex(system: str, prompt: str, model: str, effort: str, timeout: float) ->
 
     # the SDK's errors: no login, no binary, a refusal
     login = " (log in to ChatGPT with prosediff --login-codex)"
-    with tempfile.TemporaryDirectory() as cwd:
-        return _within_as("Codex", run(cwd), timeout, login)
+    return _within_as("Codex", run(shared_folder()), timeout, login)
 
 
 def _any_llm(
@@ -1091,8 +1261,10 @@ def assess(
     version, sent when request.context is "document"; documents: the files
     are Word documents or OpenDocument texts, their formatting written in
     prosediff's notation (DOCUMENTS); runner answers in place of the models
-    (run_backend), for the tests. kind "writing" asks instead whether the
-    new text reads as written by an AI (SYSTEM_WRITING), no problem marked
+    (run_backend), for the tests. kind "citations" checks the citations the
+    changes added (SYSTEM_CITATIONS), each marked. kind "writing" asks
+    instead whether the new text reads as written by an AI
+    (SYSTEM_WRITING), no problem marked
     in the text. kind "review" reviews document alone, diff unused
     (SYSTEM_REVIEW): what a file reviewed alone is worth, its problems
     marked when asked; kind "writing" with single asks of document alone
@@ -1120,6 +1292,9 @@ def assess(
     if writing:
         annotate = request.mark_writing
         marks = (ANNOTATE_WRITING_REVIEW if single else ANNOTATE_WRITING) if annotate else ""
+    elif kind == "citations":  # marking is what it is for
+        annotate = True
+        marks = ANNOTATE_CITATIONS_REVIEW if single else ANNOTATE_CITATIONS
     else:
         annotate = request.annotate and kind in ("value", "review")
         marks = (ANNOTATE_REVIEW if review else ANNOTATE) if annotate else ""
@@ -1138,7 +1313,9 @@ def assess(
             prompt = review_prompt_for(document, subject, instructions, references)
         else:
             prompt = prompt_for(diff, subject, document, instructions, references)
-        system = system_of(request, kind, single) + (DOCUMENTS if documents else "") + marks
+        # the same system prompt and material for every check, its task last
+        system = SHARED + (DOCUMENTS if documents else "")
+        prompt = with_task(prompt, system_of(request, kind, single) + marks)
         made.system, made.prompt = system, prompt  # kept even if the model then fails
         tracked = Live(report=report)
         token = _LIVE.set(tracked)
@@ -1156,9 +1333,13 @@ def assess(
         return made
     if annotate:
         text, made.annotations = split_annotations(text)
-        if writing:  # passages of the new text, a sign each, no fix
+        if kind in ("writing", "citations"):  # passages of the new text, no fix
+            solution = kind != "writing"  # a sign of AI writing comes with no advice
             made.annotations = [
-                Annotation("new", n.start, n.end, n.problem) for n in made.annotations
+                Annotation(
+                    "new", n.start, n.end, n.problem, n.solution if solution else "", check=kind
+                )
+                for n in made.annotations
             ]
         elif not request.edits:  # a rewording given all the same is left out
             made.annotations = [replace(n, replacement="") for n in made.annotations]

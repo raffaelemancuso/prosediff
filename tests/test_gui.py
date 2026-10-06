@@ -18,6 +18,8 @@ from helpers import FIXED, NEW, assessment, pair, two_files, word_file
 from prosediff import gui, pipeline
 from prosediff.assess import (
     SYSTEM,
+    SYSTEM_CITATIONS,
+    SYSTEM_CITATIONS_REVIEW,
     SYSTEM_REVIEW,
     SYSTEM_WRITING,
     SYSTEM_WRITING_REVIEW,
@@ -876,15 +878,15 @@ def test_ai_written_passages_marked(tmp_path, monkeypatch, screen):
         asked.append((kind, request.mark_writing))
         if kind == "value":
             return assessment([FIXED])
-        mark = Annotation("new", FIXED.start, FIXED.start, "Stock wording.")
+        mark = Annotation("new", FIXED.start, FIXED.start, "Stock wording.", check="writing")
         return Assessment("claude", "## Verdict\n**Likely**", kind="writing", annotations=[mark])
 
     monkeypatch.setattr(pipeline, "assess_comparison", assess)
     s = Settings(mode="files", old=str(old), new=str(new), assess="claude", assess_preview=False,
                  assess_ai_writing=True, assess_mark_ai_writing=True)  # fmt: skip
     html = execute(run_of(s)).path.read_text(encoding="utf-8")
-    assert asked == [("value", True), ("writing", True)]
-    assert "Reads as written by an AI: Stock wording." in html
+    assert sorted(asked) == [("value", True), ("writing", True)]  # asked together
+    assert '"check": "writing"' in html and '"problem": "Stock wording."' in html
     app = App(screen, Settings(mode="files"))
     app.settle()
     app.set("assess_ai", "claude")
@@ -1007,7 +1009,7 @@ def test_a_failed_ai_writing_assessment_is_shown(screen, tmp_path, monkeypatch):
     while (message := messages.get_nowait())[0] == "stage":
         pass
     kind, result = message
-    assert kind == "done" and result.writing_error == "no login"
+    assert kind == "done" and result.check_errors == (("AI-writing assessment", "no login"),)
     app = App(screen, s)
     app.job, app.job_settings = object(), s
     app.handle(kind, result)
@@ -1064,12 +1066,14 @@ def test_the_instructions_written_in_a_box_of_their_own(screen):
 
 
 def test_prosediffs_prompts_edited_in_their_boxes(screen):
-    """The boxes show prosediff's prompts for the tab: two for two versions
-    (the assessment, and AI writing), two for a file reviewed (its review,
-    and AI writing). An edited prompt is kept; one left as prosediff's, or
-    restored, is kept as "", to follow prosediff's."""
+    """The boxes show prosediff's prompts for the tab: three for two
+    versions (the assessment, AI writing, the citations), three for a file
+    reviewed (its review, AI writing, its citations). An edited prompt is
+    kept; one left as prosediff's, or restored, is kept as "", to follow
+    prosediff's."""
     app = App(screen, Settings(mode="files", assess_writing_prompt="Spot the AI."))
-    value, writing, mine = app.instructions()
+    value, writing, citations, mine = app.instructions()
+    assert citations["default"] == SYSTEM_CITATIONS
     assert value["text"] == SYSTEM and value["default"] == SYSTEM
     assert writing["text"] == "Spot the AI." and writing["default"] == SYSTEM_WRITING
     app.set_instructions(
@@ -1085,7 +1089,8 @@ def test_prosediffs_prompts_edited_in_their_boxes(screen):
     assert (s.assess_prompt, s.assess_writing_prompt) == ("Be harsh. " + SYSTEM, "")
 
     app.set("mode", "review")
-    review, writing, mine = app.instructions()
+    review, writing, citations, mine = app.instructions()
+    assert citations["default"] == SYSTEM_CITATIONS_REVIEW
     assert review["text"] == SYSTEM_REVIEW and writing["text"] == SYSTEM_WRITING_REVIEW
     app.set_instructions(
         {review["field"]: "Review it.", writing["field"]: writing["text"], mine["field"]: ""}
@@ -1349,6 +1354,7 @@ def test_the_open_screen_page_has_every_field(screen):
     # the context files and prosediff's prompts: in their dialogs, not fields
     in_dialogs = {"assess_files", "assess_prompt", "assess_writing_prompt"}
     in_dialogs |= {"assess_review_prompt", "assess_review_writing_prompt"}
+    in_dialogs |= {"assess_citations_prompt", "assess_review_citations_prompt"}
     for name in set(app.values) - in_dialogs:
         assert f'data-field="{name}"' in page, name
     view = app.view()
@@ -1384,3 +1390,23 @@ def test_the_window_grown_to_show_the_page_whole(screen):
     assert (ui.window.height, ui.window.y) == (1040, 0)
     api.fit(-50, {"top": 0, "height": 1040})
     assert ui.window.height == 1040
+
+
+def test_the_checks_chosen(screen):
+    """The checks: the general assessment on by default, the others off;
+    without it, its own switches greyed out; none at all, refused."""
+    app = App(screen, Settings(mode="files"))
+    app.settle()
+    app.set("assess_ai", "claude")
+    app.settle()
+    s = app.collect()
+    assert (s.assess_general, s.assess_ai_writing, s.assess_citations) == (True, False, False)
+    assert not off(app, "assess_annotate") and not off(app, "assess_edits")
+    app.set("assess_general", False)
+    assert off(app, "assess_annotate") and off(app, "assess_edits") and off(app, "assess_documents")
+    app.set("assess_citations", True)
+    assert not off(app, "assess_documents")
+    run = run_of(replace(app.collect(), old="a.md", new="b.md"))
+    assert run.checks == ["citations"]
+    with pytest.raises(ValueError, match="at least one of the AI's checks"):
+        run_of(replace(app.collect(), old="a.md", new="b.md", assess_citations=False))

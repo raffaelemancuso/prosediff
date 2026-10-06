@@ -11,7 +11,7 @@ Skipped when Playwright's Chromium is not installed
 import json
 
 import pytest
-from helpers import ADVICE, FIXED, assessment, pair
+from helpers import ADVICE, FIXED, assessment, pair, two_files
 
 from prosediff import Options, gui, render
 from prosediff.assess import ModelInfo
@@ -203,8 +203,8 @@ def test_the_instructions_written_in_a_dialog(browser, tmp_path):
     page = open_screen(browser, tmp_path, app)
     page.click("[data-id=write_instructions]")
     boxes = page.locator("#instruction-boxes textarea")
-    assert boxes.count() == 3
-    boxes.nth(2).fill("Check the abstract.")
+    assert boxes.count() == 4  # the assessment's, AI writing's, the citations', and yours
+    boxes.nth(3).fill("Check the abstract.")
     page.click("#instructions-ok")
     until(page, app, lambda a: a.values["assess_instructions"] == "Check the abstract.")
     assert app.values["assess_prompt"] == ""  # prosediff's, left as it was
@@ -441,6 +441,71 @@ def test_the_choices_made_in_a_report_opened_as_a_file_kept_by_the_browser(brows
     page.context.close()
 
 
+def test_a_report_exported_with_its_choices(browser, tmp_path):
+    """Export HTML: from a browser, the report downloaded as written, the
+    choices made in it written in; the copy, opened where no choice was
+    kept, opens with them."""
+    report = fixed_report(tmp_path)
+    page = browser.new_context().new_page()
+    page.goto(report.as_uri())
+    page.locator(".card.problem", has_text="Nothing supports").locator(".fix-toggle").click()
+    page.locator(".card.problem", has_text="Which checks?").locator(".resolve-box").check()
+    with page.expect_download() as got:
+        page.click(".save-button")
+        page.click(".export-button")
+    assert got.value.suggested_filename == "report.html"
+    copy = tmp_path / "copy" / "report.html"
+    got.value.save_as(copy)
+    page.context.close()
+    html = copy.read_text(encoding="utf-8")
+    assert html.count('class="ai-document"') == report.read_text(encoding="utf-8").count(
+        'class="ai-document"'
+    )
+    page = browser.new_context().new_page()  # nothing kept by this browser
+    page.goto(copy.as_uri())
+    page.wait_for_function("document.querySelector('.fix-toggle').textContent.includes('Redo')")
+    assert (
+        page.locator(".card.problem", has_text="Which checks?").locator(".resolve-box").is_checked()
+    )
+    page.context.close()
+
+
+def test_a_report_exported_from_the_window(browser, tmp_path):
+    """Export HTML in prosediff's window: the report's own file saved where
+    the dialog says, the choices made in it written in."""
+    report = fixed_report(tmp_path)
+    app = gui.App(Ui(), gui.Settings(mode="review"))
+    app.report_serial = 1
+    out = tmp_path / "sent" / "paper_report.html"
+    out.parent.mkdir()
+    app.ui.answers["ask_save"] = str(out)
+    page = opened(
+        browser,
+        report,
+        gui.ReportApi(app, 1, report, app.ui),
+        ["choices", "save_choices", "save_document", "export_report"],
+    )
+    page.locator(".card.problem", has_text="Which checks?").locator(".keep-box").uncheck()
+    page.click(".save-button")
+    page.click(".export-button")
+    until(page, app, lambda a: out.exists())
+    assert '"left_out": ["' + key(ADVICE) in out.read_text(encoding="utf-8")
+    assert app.status == f"Exported: {out}"
+    page.context.close()
+
+
+def test_choices_written_into_a_report():
+    """Written in where the report keeps them, "<" escaped; a report with no
+    place for them left as it is."""
+    html = '<p>x</p><script type="application/json" id="report-choices">null</script><p>y</p>'
+    made = {"resolved": ["a</script>b"]}
+    out = gui.with_choices(html, made)
+    assert "</script>b" not in out and out.endswith("</script><p>y</p>")
+    inner = out.split('id="report-choices">')[1].split("</script>")[0]
+    assert json.loads(inner) == made
+    assert gui.with_choices("<p>old</p>", made) == "<p>old</p>"
+
+
 class ZoomingUi(Ui):
     """A screen whose report's window zooms (or, with zooms False, cannot),
     recording each zoom asked for."""
@@ -535,9 +600,94 @@ def test_a_document_to_download_saved_through_the_window(browser, tmp_path):
     ui.answers["ask_save"] = str(target)
     app = gui.App(ui, gui.Settings(mode="review"))
     page = open_in_app(browser, report, app, None)
+    page.click(".toolbar .save-button")
     page.click(".toolbar .ai-download:has-text('With AI fixes')")
     until(page, app, lambda a: target.exists())
     asked = ui.kinds("ask_save")[0]
     assert asked[3] == str(report.parent)  # beside the report
     assert target.read_bytes()[:2] == b"PK"  # a zip: a Word document
+    page.context.close()
+
+
+def test_all_fixes_undone_and_made_again(browser, tmp_path):
+    """Undo all fixes: every fix undone at once, the button then making them
+    all again; it says how many."""
+    report = fixed_report(tmp_path)
+    page = browser.new_context().new_page()
+    page.goto(report.as_uri())
+    button = page.locator(".fixes-all")
+    page.click(".filter-button")  # in the Problems menu
+    assert button.inner_text() == "↶ Undo all fixes (1)"
+    button.click()
+    assert button.inner_text() == "↷ Redo all fixes (1)"
+    assert "Redo" in page.locator(".card.problem .fix-toggle").first.inner_text()
+    assert page.locator("td.code.right .fix-orig").first.is_visible()
+    button.click()
+    assert button.inner_text() == "↶ Undo all fixes (1)"
+    assert not page.locator("td.code.right .fix-orig").first.is_visible()
+    page.context.close()
+
+
+def test_headings_numbered_as_an_outline(browser, tmp_path):
+    """Heading numbers, on by default: each side's headings numbered over
+    the whole file, folded lines included, before the heading; # turns them
+    off."""
+    from prosediff import compare_paths
+
+    body = "\n\n".join(f"Paragraph {i}." for i in range(30))
+    old_text = f"# Intro\n\n{body}\n\n## Aims\n\nOld aims.\n\n# Methods\n"
+    new_text = f"# Intro\n\n{body}\n\n## Aims\n\nNew aims.\n\n## Scope\n\n# Methods\n"
+    old, new = two_files(tmp_path, old_text, new_text)
+    out = tmp_path / "report.html"
+    out.write_text(render(compare_paths(old, new)), encoding="utf-8")
+    html = out.read_text(encoding="utf-8")
+    assert 'data-hnum="1.1." data-hlevel="2"' in html and 'data-hnum="1.2."' in html
+    page = browser.new_context().new_page()
+    page.goto(out.as_uri())
+    before = "e => getComputedStyle(e, '::before').content"
+    methods = page.locator('td.code.right[data-hnum="2."]')
+    assert methods.evaluate(before) == '"2. "'
+    page.keyboard.press("#")
+    assert methods.evaluate(before) == "none"
+    page.context.close()
+
+
+def test_the_checks_in_one_drawer(browser, tmp_path):
+    """One chip for the AI's checks, one drawer with a tab each; each mark's
+    card names its check, and Problems > Show filters by check; Review lists
+    each check."""
+    from prosediff import compare_paths
+    from prosediff.assess import Annotation, Assessment
+
+    old, new = two_files(tmp_path, "Growth rose.\n", "Growth rose fast (Rossi, 2021).\n")
+    general = Assessment("claude", "## Verdict\n**Mixed**: x", annotations=[
+        Annotation("new", "Growth rose fast", "Growth rose fast", "Vague.")])  # fmt: skip
+    citations = Assessment("claude", "## Verdict\n**Doubtful**: y", kind="citations", annotations=[
+        Annotation("new", "(Rossi, 2021)", "(Rossi, 2021)", "Not in the list.", check="citations")
+    ])  # fmt: skip
+    out = tmp_path / "report.html"
+    out.write_text(
+        render(compare_paths(old, new), assessment=general, citations=citations), encoding="utf-8"
+    )
+    page = browser.new_context().new_page()
+    page.goto(out.as_uri())
+    chip = page.locator(".verdict-button")
+    assert chip.count() == 1 and "Mixed" in chip.inner_text() and "Doubtful" in chip.inner_text()
+    chip.click()
+    assert page.locator("#check-assessment").is_visible()
+    page.click("[data-check-tab=citations]")
+    assert page.locator("#check-citations").is_visible()
+    assert not page.locator("#check-assessment").is_visible()
+    page.keyboard.press("Escape")
+    cards = page.locator(".card.problem")
+    assert cards.count() == 2
+    assert "Citation check" in cards.filter(has_text="Not in the list.").inner_text()
+    page.click(".filter-button")
+    page.locator(".filter-check").select_option("citations")
+    assert not cards.filter(has_text="Vague.").is_visible()
+    assert cards.filter(has_text="Not in the list.").is_visible()
+    page.keyboard.press("Escape")
+    page.keyboard.press("r")
+    items = page.locator("#review-list button").all_inner_texts()
+    assert any("Assessment" in i for i in items) and any("Citations" in i for i in items)
     page.context.close()

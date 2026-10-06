@@ -102,9 +102,15 @@ folder or repository compared, is refused); who its comments in the Word and Ope
 edit the text (**Allow text edits**, on by default: its fixes as
 rewordings, tracked changes in the documents); and
 whether it also marks the passages that read as AI-written (**Mark
-AI-written passages**, asked with **Check for AI writing** and greyed out
+AI-written passages**, asked with the **AI writing** check and greyed out
 without it: comparing, only text the changes added; one file, any passage);
-whether the prompt is saved in the report. The switches are greyed out
+whether the prompt is saved in the report.
+
+**Checks** are what the AI is asked, each a call of its own, all made at
+once: **General assessment** (on by default; its own switches, Mark problems
+in the text and Allow text edits, greyed out without it), **AI writing**
+and **New citations** (see [AI assessment](ai_assessment.md#the-checks)). At
+least one is needed. Each check's prompt is in the instructions dialog. The switches are greyed out
 while no AI is chosen, and the whole card unless the output is the HTML
 report.
 

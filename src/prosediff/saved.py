@@ -71,9 +71,10 @@ def fingerprints(run: Run) -> dict[str, str]:
 def save(
     run: Run,
     report: Path,
-    assessment: Assessment,
+    assessment: Assessment | None,
     writing: Assessment | None,
     inputs: dict[str, str] | None = None,
+    citations: Assessment | None = None,
 ) -> Path:
     """Keep the answers beside report (saved_path); its path. inputs: the
     fingerprints of the files the run read, taken as it read them (else
@@ -85,8 +86,9 @@ def save(
         "saved": datetime.now().isoformat(timespec="seconds"),
         "run": {**asdict(run), **absolute, "output": str(report.resolve())},
         "inputs": fingerprints(run) if inputs is None else inputs,
-        "assessment": asdict(assessment),
+        "assessment": asdict(assessment) if assessment is not None else None,
         "writing": asdict(writing) if writing is not None else None,
+        "citations": asdict(citations) if citations is not None else None,
     }
     path = saved_path(report)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8", newline="\n")
@@ -129,9 +131,12 @@ def _run(values: dict) -> Run:
     )
 
 
-def load(path: str | Path) -> tuple[Run, Assessment, Assessment | None]:
+def load(
+    path: str | Path,
+) -> tuple[Run, Assessment | None, Assessment | None, Assessment | None]:
     """The run and the answers kept in path (NAME.ai.json, or a project
-    holding them). SavedError for a file that is not one of these, and for
+    holding them): its assessment, AI-writing assessment and check of the
+    citations, each None when not asked. SavedError for a file that is not one of these, and for
     one whose files are gone or changed since the AI read them (their
     SHA-256 another), the context files sent to it too: the AI's marks are
     of the text it read, and put on another they may fit it wrongly."""
@@ -147,10 +152,10 @@ def load(path: str | Path) -> tuple[Run, Assessment, Assessment | None]:
     current(data, path)
     try:
         run = _run(data["run"])
-        assessment = _assessment(data["assessment"])
+        answers = [_assessment(data.get(k)) for k in ("assessment", "writing", "citations")]
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise SavedError(f"{path.name}: not answers prosediff saved ({e})") from e
-    if assessment is None:
+    if not any(answers):
         raise SavedError(f"{path.name}: it holds no assessment")
     for file, digest in (data.get("inputs") or {}).items():
         try:
@@ -162,7 +167,7 @@ def load(path: str | Path) -> tuple[Run, Assessment, Assessment | None]:
                 f"{file} changed since the AI read it (its checksum is another): the "
                 "report is not made again, its marks would not fit the text; ask the AI again"
             )
-    return run, assessment, _assessment(data.get("writing"))
+    return run, *answers
 
 
 # A project (NAME.prosediff, JSON): the window's settings, every one (what
