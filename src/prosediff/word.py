@@ -19,7 +19,10 @@ where it sits in the text:
   (w:ins, w:moveTo) and drops the deleted ones (w:del, w:moveFrom),
   rejecting does the reverse, and "show" keeps both, marked as insertions
   and deletions with their author and date. The spaces at the edges of a
-  change stay with it, and a comment anchored in dropped text is kept.
+  change stay with it, and a comment anchored in dropped text is kept. A
+  paragraph mark that goes (deleted and accepted, inserted and rejected)
+  joins its paragraph to the next, as Word does: one paragraph, of the
+  next one's kind.
 
 No Markdown is involved in the comparison: it is only written, from the
 Document, for git's own commands (docx_to_markdown). Headers, footers, text
@@ -128,6 +131,8 @@ class Reader(DocumentReader):
     # The styles of the paragraph being read that its runs do not restate:
     # a heading's own (its text is bold as a heading, not as bold text).
     plain: frozenset = frozenset()
+    # the paragraphs whose mark goes, waiting to join the next (mark_goes)
+    joining: list = field(default_factory=list)
 
     # Paragraph content ----------------------------------------------------------
 
@@ -232,30 +237,61 @@ class Reader(DocumentReader):
         """A paragraph's inlines, its edges stripped; part is the one it
         belongs to (a footnote's links are looked up among the footnotes'
         relationships)."""
+        return strip(self.unstripped(el, part))
+
+    def unstripped(self, el, part=None) -> list:
+        """A paragraph's inlines, its edges as they are."""
         doc = self.document.part
         p = Paragraph(el, _Story(doc if part is None else _NotesPart(part, doc)))
         style = _style_name(p)
         self.plain = (
             styles_of(resolve_effective_formatting(p)) if style in HEADING_STYLES else frozenset()
         )
-        return strip(self.children(el, p))
+        return self.children(el, p)
 
     def source(self, el, part=None) -> Source:
         """Where a paragraph is: its part's name and its XPath there."""
         part = self.document.part if part is None else part
         return (str(part.partname), el.getroottree().getpath(el))
 
+    def mark_goes(self, el) -> bool:
+        """Whether a paragraph's mark goes as the tracked changes are settled:
+        deleted, the deletion accepted, or inserted, the insertion rejected
+        (w:pPr/w:rPr holding the change). Shown, it stays."""
+        rpr = el.find(f"{qn('w:pPr')}/{qn('w:rPr')}")
+        if rpr is None or self.changes == "show":
+            return False
+        tags = {c.tag for c in rpr}
+        return bool(
+            (tags & DELETED and not self.keeps("deletion"))
+            or (tags & INSERTED and not self.keeps("insertion"))
+        )
+
     def paragraph(self, el) -> Block | None:
-        style = _style_name(Paragraph(el, _Story(self.document.part)))
-        numbered = el.find(f"{qn('w:pPr')}/{qn('w:numPr')}") is not None
+        """A paragraph's block; None while its mark goes, the paragraph
+        waiting to join the next (joined)."""
+        self.joining.append(el)
+        return None if self.mark_goes(el) else self.joined()
+
+    def joined(self) -> Block | None:
+        """The paragraphs waiting to join, as one block, of the last one's
+        kind (Word keeps the properties of the mark that stays), their text
+        run together as Word runs it; None when none waits."""
+        paragraphs, self.joining = self.joining, []
+        if not paragraphs:
+            return None
+        last = paragraphs[-1]
+        style = _style_name(Paragraph(last, _Story(self.document.part)))
+        numbered = last.find(f"{qn('w:pPr')}/{qn('w:numPr')}") is not None
         if style in HEADING_STYLES:
             kind = ("heading", HEADING_STYLES[style])
         elif numbered or style.startswith(LIST_STYLES):
             kind = ("item",)
         else:
             kind = ("p",)
-        inlines = self.paragraph_inlines(el)
-        return self.block(inlines, kind, self.language_of([el]), (self.source(el),))
+        inlines = strip([i for p in paragraphs for i in self.unstripped(p)])
+        sources = tuple(self.source(p) for p in paragraphs)
+        return self.block(inlines, kind, self.language_of(paragraphs), sources)
 
     def kept_row(self, tr) -> bool:
         """Whether a table row stays: not one deleted (inserted) as a tracked
@@ -283,7 +319,10 @@ class Reader(DocumentReader):
     def body(self) -> list[Block]:
         """The paragraphs and tables of the document; comments carried past
         the last paragraph join it."""
-        return self.finish(self.blocks(self.document.element.body))
+        blocks = self.blocks(self.document.element.body)
+        if block := self.joined():  # a mark gone with no paragraph after it
+            blocks.append(block)
+        return self.finish(blocks)
 
     def blocks(self, container) -> list[Block]:
         out: list[Block] = []
@@ -292,6 +331,9 @@ class Reader(DocumentReader):
                 if block := self.paragraph(child):
                     out.append(block)
             elif child.tag == qn("w:tbl"):
+                # a paragraph does not join a table: it stays before it
+                if block := self.joined():
+                    out.append(block)
                 out.append(self.table(child))
             elif child.tag == qn("w:sdt"):
                 content = child.find(qn("w:sdtContent"))

@@ -75,6 +75,44 @@ def test_tracked_changes_three_ways(tmp_path):
         markdown_of(d, "a.docx", "maybe")
 
 
+def test_a_paragraph_mark_gone_joins_the_paragraph_to_the_next(tmp_path):
+    """A paragraph mark deleted (inserted) is gone once the deletion is
+    accepted (the insertion rejected): the paragraph runs on into the next,
+    as in Word, and takes its kind; shown, the paragraphs stay apart. A
+    paragraph does not join a table."""
+
+    def p(text, mark="", style=""):
+        props = f'<w:pStyle w:val="{style}"/>' if style else ""
+        if mark:
+            props += f'<w:rPr><w:{mark} w:id="1" w:author="A" w:date="D"/></w:rPr>'
+        return f'<w:p><w:pPr>{props}</w:pPr><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>'
+
+    d = docx_xml(
+        tmp_path / "j.docx",
+        p("Furthermore, ", "del", "Heading1")
+        + p("this focus.", "ins")
+        + p("Next.")
+        + p("Before a table.", "del")
+        + "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>",
+        styles='<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>'
+        "</w:style>",
+    ).read_bytes()
+    table = "| cell |\n|---|"
+    assert markdown_of(d, "a.docx", "accept-all").strip().split("\n\n") == [
+        "Furthermore, this focus.",
+        "Next.",
+        "Before a table.",
+        table,
+    ]
+    assert markdown_of(d, "a.docx", "reject-all").strip().split("\n\n") == [
+        "# Furthermore,",
+        "this focus.Next.",
+        "Before a table.",
+        table,
+    ]
+    assert len(markdown_of(d, "a.docx", "show").strip().split("\n\n")) == 5
+
+
 def test_footnotes_numbered_in_order_and_dropped_with_their_text(tmp_path):
     d = docx_xml(
         tmp_path / "f.docx",

@@ -52,7 +52,8 @@ Markdown**: Word with python-docx, OpenDocument with odfdo. Headings,
 lists, tables, footnotes, links, character formatting, each paragraph's
 language, equations and comments land where they sit in the text. Tracked
 changes are settled while reading: accepted, rejected, or all kept as
-marked spans. Headers, footers and page layout are not compared. Neither
+marked spans; a paragraph mark deleted and accepted (or inserted and
+rejected) joins its paragraph to the next, as in Word. Headers, footers and page layout are not compared. Neither
 Word nor pandoc is needed. Each paragraph is compared as plain text with
 each character's formatting beside it, so a change of formatting alone is
 told apart from a change of words. Rows are numbered by paragraph (3.1,
