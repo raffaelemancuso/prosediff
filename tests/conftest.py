@@ -14,6 +14,10 @@ class RepoBuilder:
             cw.set_value("user", "name", "Tester")
             cw.set_value("user", "email", "tester@example.org")
             cw.set_value("core", "autocrlf", "false")
+            # its own hooks (none), not those of a global core.hooksPath:
+            # GitPython has Git Bash run a hook outside the repository by a
+            # relative path, which misses it from under %TEMP% (Git Bash's /tmp)
+            cw.set_value("core", "hooksPath", ".git/hooks")
 
     def write(self, rel, content):
         self.write_all({rel: content})
