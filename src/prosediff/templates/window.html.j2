@@ -571,8 +571,9 @@ dialog .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12
       if (f.type === "checkbox") f.checked = !!value;
       else if (f.type === "radio") f.checked = f.value === String(value);
       else if (f.value !== String(value)) f.value = String(value);
-      var key = f.type === "radio" ? name + ":" + f.value : name;
-      f.disabled = v.disabled.indexOf(key) >= 0;
+      // a segmented button greyed out by its value, or whole by its field
+      f.disabled = v.disabled.indexOf(name) >= 0
+        || (f.type === "radio" && v.disabled.indexOf(name + ":" + f.value) >= 0);
       var drop = f.parentNode.classList.contains("combo") && f.parentNode.querySelector(":scope > button");
       if (drop) drop.disabled = f.disabled;
     });

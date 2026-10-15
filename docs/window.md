@@ -110,7 +110,7 @@ whether the prompt is saved in the report.
 once: **General assessment** (on by default; its own switches, Mark problems
 in the text and Allow text edits, greyed out without it), **AI writing**
 and **New citations** (see [AI assessment](ai_assessment.md#the-checks)). At
-least one is needed. Each check's prompt is in the instructions dialog. The switches are greyed out
+least one is needed. Each check's prompt is in the instructions dialog. The switches and Reads are greyed out
 while no AI is chosen, and the whole card unless the output is the HTML
 report.
 

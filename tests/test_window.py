@@ -169,18 +169,21 @@ def test_a_field_typed_reaches_the_settings(browser, tmp_path):
 
 def test_the_ai_chosen_from_its_list_lists_its_models(browser, tmp_path):
     """The AI's list (its button shows every choice) offers those found; one
-    chosen, its models are listed, its default chosen; the model and the
-    effort greyed out until then, and while no AI assesses."""
+    chosen, its models are listed, its default chosen; the model, the effort
+    and what the model reads greyed out until then, and while no AI assesses."""
     app = gui.App(Ui(), gui.Settings(mode="files"))
     app.settle()
     page = open_screen(browser, tmp_path, app)
+    reads = [f"input[name=assess_context][value={v}]" for v in ("document", "changes")]
     assert page.input_value("#f-ai") == "none" and page.is_disabled("#f-model")
+    assert all(page.is_disabled(r) for r in reads)
     page.click("#f-ai + button")
     page.click(".combo .menu li:text-is('ollama')")
     until(page, app, lambda a: a.values["assess_ai"] == "ollama")
     refresh(page, app)
     assert page.input_value("#f-model") == "gemma3:270m"
     assert not page.is_disabled("#f-model")
+    assert not any(page.is_disabled(r) for r in reads)
     page.click("#f-model + button")
     # it stays open, though the focus left the AI's field for the model's
     page.wait_for_timeout(300)
